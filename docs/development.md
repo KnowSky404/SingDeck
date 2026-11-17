@@ -19,7 +19,7 @@ Install browser runtime once with `bunx playwright install chromium`; on a new L
 
 ## Mock workflow
 
-Start the app and select **Explore demo** (or choose Demo workspace in the instance selector). The header always says Mock mode. All five pages receive generated message types. Settings → Development sandbox can interrupt streams; disabling the interruption exercises reconnect. Fail next mutation rejects the next select, test or close RPC. No real endpoint is contacted. Reload starts disconnected and requires explicitly choosing demo again.
+Start the app and select **Explore demo**. The header always says Mock mode. All five pages receive generated message types. Outage and mutation-failure controls remain internal test fixtures, without a product sandbox screen. Session unit tests exercise reconnection and rejected RPCs. No real endpoint is contacted. Reload starts disconnected and requires explicitly choosing demo again.
 
 ## Real service integration
 
@@ -37,7 +37,7 @@ SING_BOX_BINARY=/tmp/singdeck-fixture/sing-box-1.14.0-linux-amd64/sing-box bun r
 
 Create `/tmp/singdeck-fixture` first. Integration tests generate disposable credentials in a mode-0600 temporary config, bind API/proxy listeners on loopback (19090/19080 for SDK tests; 19190/19180 for browser tests), use only local test proxy traffic and clean up. Do not run them against production. The sample config has no Clash API; mode RPC tests prove native NotFound behavior rather than claiming absent capabilities work. No live latency probe over the public internet is required for tests.
 
-For manual use, copy `examples/sing-box-1.14.0.json` outside the repo, replace the explicitly named secret placeholder, and run `sing-box check -c /path/to/config.json`, then `sing-box run -c /path/to/config.json` from the repo root so `./dist` resolves correctly. Set the matching listener endpoint and token in Settings. Use the documented allowed loopback origins for development. Empty or failed data stays explicit.
+For manual use, copy `examples/sing-box-1.14.0.json` outside the repo, replace the explicitly named secret placeholder, and run `sing-box check -c /path/to/config.json`, then `sing-box run -c /path/to/config.json` from the repo root so `./dist` resolves correctly. Set the matching listener endpoint and token in the entry form. Use the documented allowed loopback origins for development. Empty or failed data stays explicit.
 
 ## Dependency notices
 

@@ -1,5 +1,7 @@
 # SingDeck
 
+[简体中文](README.zh-CN.md)
+
 A modern, responsive web dashboard for sing-box, powered by the native Service API.
 
 SingDeck is an independent React application for trusted local or remote sing-box instances. It uses the **native gRPC-Web Service API**, with no Clash REST dependency or extra backend. Baseline: stable **sing-box 1.14.0+ with API version 4**. Other API revisions require verification before use.
@@ -9,13 +11,13 @@ Try the [GitHub Pages preview](https://knowsky404.github.io/SingDeck/) and choos
 ## What works
 
 - **Overview:** service/core/API status, uptime, measured upload/download rates, totals, active connections, memory and a live traffic chart.
-- **Proxies:** visible groups, protocol/search filters, collapsible groups, list/compact card layouts, latency-test requests and selector changes confirmed by server subscription. Automatic groups stay read only.
-- **Connections:** live native event reduction, search/network/outbound filters, traffic/newest sort, details, paginated desktop table/mobile cards, individual closure and confirmed close-all.
-- **Logs:** ANSI-colored real-time logs with plain-text level/search filters, pause/resume, autoscroll, local clear, copy/export, bounded memory and stream-interruption states.
-- **Settings:** endpoint, memory-only Bearer token, real connection test, light/dark/system themes, retry and chart preferences.
-- **Explicit mock mode:** streaming traffic/logs/connections plus controllable outages and mutation failures. Native failures never silently become mock data.
+- **Proxies:** visible groups, protocol/search filters, collapsible groups, independent group and node list/card layouts, latency-test requests and selector changes confirmed by server subscription. Automatic groups stay read only.
+- **Connections:** live native event reduction, search/network/outbound/status filters, Active/Closed records, traffic/newest sort, details, paginated desktop table/mobile cards, individual closure and confirmed close-all.
+- **Logs:** ANSI-colored real-time logs with INFO-and-above default, threshold/search filters, pause/resume, autoscroll, local clear, copy/export, bounded memory and stream-interruption states.
+- **Workspace:** one connection configured at entry; top-right icons for current connection/disconnect, light/dark/system themes and English/简体中文. Settings shows instance/build information and local deployment links. Navigation hover/focus hints replace page slogans.
+- **Explicit mock mode:** streaming traffic/logs/connections, chosen only at entry. Native failures never silently become mock data.
 
-A single real instance is active at a time. The storage model supports a profile array; full profile management, localization, PWA, network-quality/STUN and native Clash Mode UI are planned in [the roadmap](docs/roadmap.md).
+A single real instance is active at a time. The storage model supports a profile array; full profile management, PWA, network-quality/STUN and native Clash Mode UI are planned in [the roadmap](docs/roadmap.md).
 
 ## Screenshots
 
@@ -36,7 +38,7 @@ bun install
 bun run dev
 ```
 
-Open the Vite URL. Use the entry form to connect a trusted API, or click **Explore demo**. After entering the workspace, edit connection preferences in Settings. Demo mode is always labeled. Tokens are never persisted: enter them again after reload. Geist font files are bundled; no external font or analytics requests are made.
+Open the Vite URL. Use the entry form to connect a trusted API, or click **Explore demo**. Use the top-right connection icon to inspect the current endpoint or disconnect before configuring a different service. Demo mode is always labeled. Tokens are never persisted: enter them again after reload. Geist font files are bundled; no external font or analytics requests are made.
 
 ```sh
 bun run lint
@@ -53,15 +55,28 @@ Optional real-service tests require an official binary and a built `dist/`; see 
 
 ## Deploy
 
-**Built-in:** copy `dist/` contents into the sing-box API service's `dashboard.path`, then open `/dashboard/`. The API endpoint is the listener origin, without `/dashboard/`.
+**Recommended: let sing-box download the release ZIP and host it locally.** Merge this `dashboard` object into your existing `services` → `type: api` configuration:
 
-**Independent:** upload `dist/` to a static HTTPS host and set your trusted HTTPS API endpoint in Settings. Configure exact server CORS origins and validate browser network policy. Remote HTTP is refused; loopback HTTP through an SSH tunnel is supported. Never expose an unauthenticated management endpoint.
+```json
+"dashboard": {
+  "enabled": true,
+  "path": "./singdeck-dashboard",
+  "download_url": "https://github.com/KnowSky404/SingDeck/releases/latest/download/singdeck.zip",
+  "update_interval": "24h"
+}
+```
+
+Use an initially empty/new directory and restart sing-box, then open `http://127.0.0.1:<api-port>/dashboard/`. The browser connects to your API directly. The ZIP is downloaded and served on your own machine; GitHub Pages is optional. [Complete example](examples/sing-box-dashboard-download.json). See [deployment](docs/deployment.md) for version pinning, download routing and existing-directory behavior.
+
+**Manual/offline:** download `singdeck-v<version>.zip` from [Releases](https://github.com/KnowSky404/SingDeck/releases), verify `SHA256SUMS`, and extract it so `index.html` and `assets/` are directly under `dashboard.path`. A source-code ZIP is not a built dashboard. You can also build and copy `dist/` yourself. The API endpoint is the listener origin, without `/dashboard/`.
+
+**Independent:** upload `dist/` to a static HTTPS host and set your trusted HTTPS API endpoint in the entry form. Configure exact server CORS origins and validate browser network policy. Remote HTTP is refused; loopback HTTP through an SSH tunnel is supported. Never expose an unauthenticated management endpoint.
 
 The [validated example configuration](examples/sing-box-1.14.0.json) binds only to loopback and contains a secret placeholder that **must** be replaced outside the repository. It uses direct outbounds for testing. Follow [deployment instructions](docs/deployment.md) for both paths, security and troubleshooting.
 
 ## Architecture and API compatibility
 
-Pinned official Protobuf → generated descriptors → native/mock `SingBoxClient` → cancelable `InstanceSession` → workspace hook/provider → lazy feature pages. Separate stream status keeps partial failures visible. Client-side limits: 300 chart points, 2,000 logs, 16K characters/message, 10,000 active connections and 50 rendered connection rows per page.
+Pinned official Protobuf → generated descriptors → native/mock `SingBoxClient` → cancelable `InstanceSession` → workspace hook/provider → lazy feature pages. Separate stream status keeps partial failures visible. Client-side limits: 300 chart points, 2,000 logs, 16K characters/message, 10,000 connection records (closed history is evicted before active rows) and 50 rendered connection rows per page.
 
 Read [architecture](docs/architecture.md), [verified API semantics](docs/api-compatibility.md), [test evidence and limits](docs/verification.md), [contributing](CONTRIBUTING.md) and [agent instructions](AGENTS.md).
 
