@@ -50,3 +50,9 @@ Read upstream implementation and license changes first. Replace the raw schema o
 ## Restricted workspace environment
 
 The normal commands need no environment overrides on a developer machine. This managed workspace only permits writes in the checkout and `/tmp`. The implementation checks used `BUN_TMPDIR=/tmp`, `BUN_INSTALL_CACHE_DIR=/tmp/singdeck-bun-cache`, `BUF_CACHE_DIR=/tmp/singdeck-buf-cache` and `PLAYWRIGHT_BROWSERS_PATH=/tmp/singdeck-browsers` where the corresponding tool's home cache was read-only. These are filesystem adaptations, not application settings.
+
+## Worktrees, review, PRs and releases
+
+All changes use a separate worktree and feature branch. Before every push and before opening a PR, run local Codex `/review` (`codex review --base origin/main`), fix findings, and rerun the relevant checks/review. Let the configured Codex bot review automatically; do not manually invoke it. After green CI and any automatically triggered review is clear (or none triggered), rebase-merge the PR and remove its branch/worktree. The detailed mandatory process is in [AGENTS.md](../AGENTS.md) and [CONTRIBUTING.md](../CONTRIBUTING.md).
+
+For a requested release, bump `package.json` through that PR flow. Create the matching `v<version>` release from the merged commit. The release workflow verifies tag/version and main ancestry, executes the full reusable CI (including browsers and official-binary integration), uploads that tested build, then deploys Pages and attaches a static ZIP. Failed CI does not publish Pages or an archive. A manual Pages dispatch uses the same CI gate. This workflow never invokes a Codex bot.
