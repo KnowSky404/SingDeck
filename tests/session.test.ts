@@ -5,11 +5,14 @@ import { InstanceSession } from "@/api/session";
 import { createMockClient, MockControl } from "@/mocks/client";
 import { mockProfile } from "@/features/instances/profiles";
 import {
+  ConnectionSchema,
+  ConnectionEventsSchema,
   GroupsSchema,
   VersionSchema,
   StatusSchema,
   LogSchema,
 } from "@/proto/daemon/started_service_pb";
+import { CONNECTION_LIMIT } from "@/api/state";
 import { delay } from "@/api/errors";
 
 const sessions: InstanceSession[] = [];
@@ -127,6 +130,45 @@ describe("session lifecycle", () => {
     expect(s.getSnapshot()).toMatchObject({ phase: "disconnected", logs: [] });
     expect(s.getSnapshot().connections.size).toBe(0);
     expect(s.getSnapshot().groups).toBeUndefined();
+  });
+  it("bounds connection history and evicts closed records before active connections", async () => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    const s = session(new MockControl(), {
+      ...client,
+      async *subscribeConnections() {
+        yield create(ConnectionEventsSchema, {
+          reset: true,
+          events: [
+            ...Array.from({ length: CONNECTION_LIMIT }, (_, i) => ({
+              id: `active-${i}`,
+              connection: create(ConnectionSchema, { id: `active-${i}` }),
+            })),
+            {
+              id: "closed-1",
+              connection: create(ConnectionSchema, {
+                id: "closed-1",
+                closedAt: 1n,
+              }),
+            },
+            {
+              id: "closed-2",
+              connection: create(ConnectionSchema, {
+                id: "closed-2",
+                closedAt: 2n,
+              }),
+            },
+          ],
+        });
+      },
+    });
+    s.connect();
+    await vi.advanceTimersByTimeAsync(500);
+    const snapshot = s.getSnapshot();
+    expect(snapshot.connections.size).toBe(CONNECTION_LIMIT);
+    expect(snapshot.connections.has("active-0")).toBe(true);
+    expect(snapshot.connections.has("closed-1")).toBe(false);
+    expect(snapshot.connectionOverflow).toBe(true);
   });
   it("rechecks API compatibility after an outage and stops incompatible streams", async () => {
     vi.useFakeTimers();

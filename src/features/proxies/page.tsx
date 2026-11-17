@@ -45,7 +45,7 @@ function ProxyGroup({
   type: string;
   view: string;
 }) {
-  const { snapshot, session } = useWorkspace();
+  const { snapshot, session, t } = useWorkspace();
   const selection = useAction(),
     testing = useAction();
   const [target, setTarget] = useState("");
@@ -67,14 +67,16 @@ function ProxyGroup({
             <Button
               variant="ghost"
               className="group-title-trigger"
-              aria-label={`${expanded ? "Collapse" : "Expand"} ${group.tag}`}
+              aria-label={t(expanded ? "Collapse {name}" : "Expand {name}", {
+                name: group.tag,
+              })}
             >
               <ChevronDown data-icon="inline-start" />
               <span>{group.tag}</span>
             </Button>
           </CollapsibleTrigger>
         }
-        description={`${group.type} · ${group.items.length} outbounds · Selected: ${group.selected}${group.selectable ? "" : " · Read only"}`}
+        description={`${group.type} · ${t("{count} outbounds", { count: group.items.length })} · ${t("Selected: {name}", { name: group.selected })}${group.selectable ? "" : ` · ${t("Read only")}`}`}
         action={
           <Button
             variant="outline"
@@ -87,14 +89,16 @@ function ProxyGroup({
             ) : (
               <Zap data-icon="inline-start" />
             )}
-            Test group
+            {t("Test group")}
           </Button>
         }
       >
         {selection.error && (
-          <Notice title="Selection failed">{selection.error}</Notice>
+          <Notice title={t("Selection failed")}>{t(selection.error)}</Notice>
         )}
-        {testing.error && <Notice title="Test failed">{testing.error}</Notice>}
+        {testing.error && (
+          <Notice title={t("Test failed")}>{t(testing.error)}</Notice>
+        )}
         <CollapsibleContent>
           <div
             className={
@@ -133,12 +137,15 @@ function ProxyGroup({
                         : "secondary"
                     }
                   >
-                    {latency(item)}
+                    {t(latency(item))}
                   </Badge>
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    aria-label={`Test ${item.tag} in ${group.tag}`}
+                    aria-label={t("Test {name} in {group}", {
+                      name: item.tag,
+                      group: group.tag,
+                    })}
                     disabled={!enabled || testing.pending}
                     onClick={() =>
                       void testing.run(() => session.urlTest(item.tag))
@@ -164,11 +171,13 @@ function ProxyGroup({
                         );
                       }}
                     >
-                      {selection.pending && target === item.tag
-                        ? "Confirming…"
-                        : item.tag === group.selected
-                          ? "Selected"
-                          : "Select"}
+                      {t(
+                        selection.pending && target === item.tag
+                          ? "Confirming…"
+                          : item.tag === group.selected
+                            ? "Selected"
+                            : "Select",
+                      )}
                     </Button>
                   )}
                 </div>
@@ -176,7 +185,9 @@ function ProxyGroup({
             ))}
           </div>
           {!items.length && (
-            <p className="quiet-empty">No outbounds match your filters.</p>
+            <p className="quiet-empty">
+              {t("No outbounds match your filters.")}
+            </p>
           )}
         </CollapsibleContent>
       </Panel>
@@ -184,55 +195,80 @@ function ProxyGroup({
   );
 }
 export default function Proxies() {
-  const { snapshot } = useWorkspace();
+  const { snapshot, t } = useWorkspace();
   const [search, setSearch] = useState(""),
     [type, setType] = useState("all"),
-    [view, setView] = useState("list");
+    [view, setView] = useState("list"),
+    [groupView, setGroupView] = useState("list");
   const query = useDeferredValue(search.toLowerCase());
   const groups = snapshot.groups ?? [];
   const types = [...new Set(groups.flatMap((g) => g.items.map((i) => i.type)))];
   return (
     <>
-      <PageHeading
-        title="Proxies"
-        description="Find your route. Keep your network moving."
-        action={<Badge variant="outline">{groups.length} groups</Badge>}
-      />
+      <PageHeading title={t("Proxies")} />
       <div className="toolbar">
+        {
+          <Badge variant="outline">
+            {t("{count} groups", { count: groups.length })}
+          </Badge>
+        }
         <div className="search-field">
           <Search />
           <Input
-            aria-label="Search outbounds"
-            placeholder="Search outbounds…"
+            aria-label={t("Search outbounds")}
+            placeholder={t("Search outbounds…")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
         <Choice
-          label="Protocol filter"
+          label={t("Protocol filter")}
           value={type}
           onChange={setType}
           options={[
-            { value: "all", label: "All protocols" },
+            { value: "all", label: t("All protocols") },
             ...types.map((t) => ({ value: t, label: t })),
           ]}
         />
-        <ToggleGroup
-          type="single"
-          value={view}
-          onValueChange={(v) => v && setView(v)}
-          aria-label="Proxy layout"
-        >
-          <ToggleGroupItem value="list" aria-label="List view">
-            <List />
-          </ToggleGroupItem>
-          <ToggleGroupItem value="cards" aria-label="Compact cards">
-            <LayoutGrid />
-          </ToggleGroupItem>
-        </ToggleGroup>
+        <div className="layout-control">
+          <span>{t("Groups")}</span>
+          <ToggleGroup
+            type="single"
+            value={groupView}
+            onValueChange={(v) => v && setGroupView(v)}
+            aria-label={t("Group layout")}
+          >
+            <ToggleGroupItem value="list" aria-label={t("Group list")}>
+              <List />
+            </ToggleGroupItem>
+            <ToggleGroupItem value="cards" aria-label={t("Group cards")}>
+              <LayoutGrid />
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </div>
+        <div className="layout-control">
+          <span>{t("Nodes")}</span>
+          <ToggleGroup
+            type="single"
+            value={view}
+            onValueChange={(v) => v && setView(v)}
+            aria-label={t("Node layout")}
+          >
+            <ToggleGroupItem value="list" aria-label={t("List view")}>
+              <List />
+            </ToggleGroupItem>
+            <ToggleGroupItem value="cards" aria-label={t("Compact cards")}>
+              <LayoutGrid />
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </div>
       </div>
       <ChannelState channel="groups" empty={snapshot.groups?.length === 0}>
-        <div className="feature-stack">
+        <div
+          className={
+            groupView === "cards" ? "proxy-group-grid" : "feature-stack"
+          }
+        >
           {groups.map((group) => (
             <ProxyGroup
               key={group.tag}
@@ -245,8 +281,9 @@ export default function Proxies() {
         </div>
       </ChannelState>
       <p className="footnote">
-        Selection is confirmed by the instance. “No result” can mean untested or
-        a failed test: this API removes failed test history.
+        {t(
+          "Selection is confirmed by the instance. “No result” can mean untested or a failed test: this API removes failed test history.",
+        )}
       </p>
     </>
   );

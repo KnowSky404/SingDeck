@@ -94,16 +94,28 @@ export function applyConnections(
     if (
       e.type === ConnectionEventType.CONNECTION_EVENT_CLOSED ||
       (e.connection && e.connection.closedAt > 0n)
-    )
-      next.delete(e.id);
-    else if (
+    ) {
+      const row = e.connection ?? next.get(e.id);
+      const closedAt = e.closedAt || row?.closedAt;
+      if (row && closedAt && closedAt > 0n)
+        next.set(
+          e.id,
+          create(ConnectionSchema, {
+            ...row,
+            closedAt,
+            uplink: 0n,
+            downlink: 0n,
+          }),
+        );
+      else next.delete(e.id);
+    } else if (
       e.type === ConnectionEventType.CONNECTION_EVENT_NEW &&
       e.connection
     )
       next.set(e.id, e.connection);
     else if (e.type === ConnectionEventType.CONNECTION_EVENT_UPDATE) {
       const row = next.get(e.id);
-      if (row)
+      if (row && row.closedAt === 0n)
         next.set(
           e.id,
           create(ConnectionSchema, {

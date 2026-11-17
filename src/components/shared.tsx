@@ -29,24 +29,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useWorkspace } from "@/app/context";
 import type { Channel } from "@/api/state";
 
-export function PageHeading({
-  title,
-  description,
-  action,
-}: {
-  title: string;
-  description: string;
-  action?: ReactNode;
-}) {
-  return (
-    <header className="page-heading">
-      <div>
-        <h1>{title}</h1>
-        <p>{description}</p>
-      </div>
-      {action}
-    </header>
-  );
+export function PageHeading({ title }: { title: string }) {
+  const { t } = useWorkspace();
+  return <h1 className="sr-only">{t(title)}</h1>;
 }
 export function Panel({
   title,
@@ -61,11 +46,12 @@ export function Panel({
   children: ReactNode;
   className?: string;
 }) {
+  const { t } = useWorkspace();
   return (
     <Card className={className}>
       <CardHeader>
-        <CardTitle>{title}</CardTitle>
-        {description && <CardDescription>{description}</CardDescription>}
+        <CardTitle>{typeof title === "string" ? t(title) : title}</CardTitle>
+        {description && <CardDescription>{t(description)}</CardDescription>}
         {action && <CardAction>{action}</CardAction>}
       </CardHeader>
       <CardContent>{children}</CardContent>
@@ -79,11 +65,14 @@ export function Notice({
   children: ReactNode;
   title?: string;
 }) {
+  const { t } = useWorkspace();
   return (
     <Alert>
       <AlertCircle />
-      <AlertTitle>{title}</AlertTitle>
-      <AlertDescription>{children}</AlertDescription>
+      <AlertTitle>{t(title)}</AlertTitle>
+      <AlertDescription>
+        {typeof children === "string" ? t(children) : children}
+      </AlertDescription>
     </Alert>
   );
 }
@@ -96,14 +85,15 @@ export function EmptyState({
   description: string;
   children?: ReactNode;
 }) {
+  const { t } = useWorkspace();
   return (
     <Empty>
       <EmptyHeader>
         <EmptyMedia variant="icon">
           <Cable />
         </EmptyMedia>
-        <EmptyTitle>{title}</EmptyTitle>
-        <EmptyDescription>{description}</EmptyDescription>
+        <EmptyTitle>{t(title)}</EmptyTitle>
+        <EmptyDescription>{t(description)}</EmptyDescription>
       </EmptyHeader>
       {children && <EmptyContent>{children}</EmptyContent>}
     </Empty>
@@ -122,10 +112,11 @@ export function Choice({
   options: { value: string; label: string }[];
   disabled?: boolean;
 }) {
+  const { t } = useWorkspace();
   return (
     <Select value={value} onValueChange={onChange} disabled={disabled}>
-      <SelectTrigger aria-label={label}>
-        <SelectValue placeholder={label} />
+      <SelectTrigger aria-label={t(label)}>
+        <SelectValue placeholder={t(label)} />
       </SelectTrigger>
       <SelectContent>
         <SelectGroup>
@@ -148,33 +139,38 @@ export function ChannelState({
   children: ReactNode;
   empty?: boolean;
 }) {
-  const { snapshot } = useWorkspace();
+  const { snapshot, t } = useWorkspace();
   const error = snapshot.streamErrors[channel];
   if (snapshot.phase === "disconnected")
     return (
       <EmptyState
-        title="No active connection"
-        description="Connect a trusted instance in Settings or explore the clearly labeled demo."
+        title={t("No active connection")}
+        description={t(
+          "Connect a trusted instance from the entry page or explore the demo.",
+        )}
       />
     );
   if (snapshot.phase === "error" && !snapshot.loaded[channel])
     return (
       <EmptyState
-        title="Data unavailable"
-        description="Correct the connection settings and retry to receive instance data."
+        title={t("Data unavailable")}
+        description={t(
+          "Disconnect and correct the API address or token on the entry page, then retry.",
+        )}
       />
     );
   if (!snapshot.loaded[channel] && !error && snapshot.phase !== "error")
     return (
       <div
         role="status"
-        aria-label="Loading live data"
+        aria-label={t("Loading live data")}
         className="loading-state"
       >
         <Skeleton className="h-5 w-40" />
         <Skeleton className="h-20 w-full" />
         <span>
-          <LoaderCircle className="spin" /> Waiting for the instance…
+          <LoaderCircle className="spin" />
+          {t("Waiting for the instance…")}
         </span>
       </div>
     );
@@ -182,15 +178,27 @@ export function ChannelState({
     <>
       {error && (
         <Notice
-          title={`${channel[0].toUpperCase() + channel.slice(1)} stream interrupted`}
+          title={t("{channel} stream interrupted", {
+            channel: t(
+              {
+                service: "Service",
+                status: "Overview",
+                groups: "Proxies",
+                logs: "Logs",
+                connections: "Connections",
+              }[channel],
+            ),
+          })}
         >
-          {error} Retained data may be stale.
+          {t(error)} {t("Retained data may be stale.")}
         </Notice>
       )}
       {empty ? (
         <EmptyState
-          title="Nothing to show yet"
-          description="No matching data has been received from this instance."
+          title={t("Nothing to show yet")}
+          description={t(
+            "No matching data has been received from this instance.",
+          )}
         />
       ) : (
         children

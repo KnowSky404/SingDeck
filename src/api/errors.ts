@@ -4,7 +4,7 @@ import { Code, ConnectError } from "@connectrpc/connect";
 export function describeError(error: unknown): string {
   switch (ConnectError.from(error).code) {
     case Code.Unauthenticated:
-      return "Authentication failed. Check the Bearer token in Settings.";
+      return "Authentication failed. Disconnect and check the Bearer token on the entry page.";
     case Code.PermissionDenied:
       return "This instance denied access. Check its access policy.";
     case Code.Unimplemented:

@@ -27,35 +27,39 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { bytes, time, uptime } from "@/lib/format";
 import { ServiceStatus_Type } from "@/proto/daemon/started_service_pb";
+import { LogLevel } from "@/proto/daemon/started_service_pb";
 import { LogLine } from "@/features/logs/log-line";
 
 export default function Dashboard() {
-  const { profile, snapshot } = useWorkspace();
+  const { profile, snapshot, t } = useWorkspace();
   const { status, version, traffic, service } = snapshot;
   const latest = traffic.at(-1);
+  const recentLogs = snapshot.logs
+    .filter((entry) => entry.level <= LogLevel.INFO)
+    .slice(-4);
   const available = status?.trafficAvailable;
   const metrics = [
     {
-      label: "Download",
+      label: t("Download"),
       value: available && latest ? `${bytes(latest.down)}/s` : "—",
       icon: ArrowDown,
       kind: "download",
     },
     {
-      label: "Upload",
+      label: t("Upload"),
       value: available && latest ? `${bytes(latest.up)}/s` : "—",
       icon: ArrowUp,
       kind: "upload",
     },
     {
-      label: "Active connections",
+      label: t("Active connections"),
       value: status
         ? String(available ? status.connectionsIn : status.connectionsOut)
         : "—",
       icon: Network,
       kind: "",
     },
-    { label: "Memory", value: bytes(status?.memory), icon: Cpu, kind: "" },
+    { label: t("Memory"), value: bytes(status?.memory), icon: Cpu, kind: "" },
   ];
   const serviceName = service
     ? (["Idle", "Starting", "Running", "Stopping", "Fatal"][service.status] ??
@@ -63,24 +67,7 @@ export default function Dashboard() {
     : "Unavailable";
   return (
     <>
-      <PageHeading
-        title="Overview"
-        description="Your network, at a glance."
-        action={
-          <span className="live-label">
-            <span
-              className={
-                snapshot.phase === "connected"
-                  ? "status-dot"
-                  : "status-dot muted-dot"
-              }
-            />
-            {snapshot.phase === "connected"
-              ? "Live updates"
-              : "Updates inactive"}
-          </span>
-        }
-      />
+      <PageHeading title={t("Overview")} />
       <div className="metrics-grid">
         {metrics.map(({ label, value, icon: Icon, kind }) => (
           <Card key={label} className="metric">
@@ -96,10 +83,12 @@ export default function Dashboard() {
       </div>
       <div className="overview-grid">
         <Panel
-          title="Traffic activity"
+          title={t("Traffic activity")}
           action={
             <span className="subtle">
-              Last {profile.preferences.windowSeconds} seconds
+              {t("Last {seconds} seconds", {
+                seconds: profile.preferences.windowSeconds,
+              })}
             </span>
           }
           className="traffic-panel"
@@ -107,19 +96,26 @@ export default function Dashboard() {
           <ChannelState channel="status">
             {!available ? (
               <EmptyState
-                title="Traffic unavailable"
-                description="The native API has not reported traffic tracking data."
+                title={t("Traffic unavailable")}
+                description={t(
+                  "The native API has not reported traffic tracking data.",
+                )}
               />
             ) : traffic.length < 2 ? (
               <EmptyState
-                title="Collecting traffic samples"
-                description="The graph appears after the next measured interval."
+                title={t("Collecting traffic samples")}
+                description={t(
+                  "The graph appears after the next measured interval.",
+                )}
               />
             ) : (
               <div
                 className="chart-frame"
                 role="img"
-                aria-label={`Traffic history. Current download ${bytes(latest?.down)} per second; upload ${bytes(latest?.up)} per second.`}
+                aria-label={t(
+                  "Traffic history. Current download {down} per second; upload {up} per second.",
+                  { down: bytes(latest?.down), up: bytes(latest?.up) },
+                )}
               >
                 <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                   <AreaChart
@@ -188,7 +184,7 @@ export default function Dashboard() {
                       labelFormatter={(value) => time(Number(value))}
                       formatter={(value, name) => [
                         `${bytes(Number(value))}/s`,
-                        name === "down" ? "Download" : "Upload",
+                        t(name === "down" ? "Download" : "Upload"),
                       ]}
                       contentStyle={{
                         background: "var(--card)",
@@ -220,35 +216,39 @@ export default function Dashboard() {
             <div className="chart-legend">
               <span>
                 <i className="legend-dot download-dot" />
-                Download
+                {t("Download")}
               </span>
               <span>
                 <i className="legend-dot upload-dot" />
-                Upload
+                {t("Upload")}
               </span>
             </div>
           </ChannelState>
         </Panel>
-        <Panel title="Instance details">
+        <Panel title={t("Instance details")}>
           <dl className="detail-list">
             <div>
-              <dt>Instance</dt>
-              <dd>{profile.name}</dd>
+              <dt>{t("Instance")}</dt>
+              <dd>
+                {profile.mode === "mock"
+                  ? t("Demo workspace")
+                  : profile.endpoint}
+              </dd>
             </div>
             <div>
-              <dt>Core version</dt>
+              <dt>{t("Core version")}</dt>
               <dd>{version?.version ?? "—"}</dd>
             </div>
             <div>
-              <dt>API version</dt>
+              <dt>{t("API version")}</dt>
               <dd>{version?.apiVersion ?? "—"}</dd>
             </div>
             <div>
-              <dt>Uptime</dt>
-              <dd>{uptime(snapshot.startedAt)}</dd>
+              <dt>{t("Uptime")}</dt>
+              <dd>{t(uptime(snapshot.startedAt))}</dd>
             </div>
             <div>
-              <dt>Service</dt>
+              <dt>{t("Service")}</dt>
               <dd>
                 <Badge
                   variant={
@@ -257,33 +257,36 @@ export default function Dashboard() {
                       : "secondary"
                   }
                 >
-                  {serviceName}
+                  {t(serviceName)}
                 </Badge>
               </dd>
             </div>
             <div className="detail-break">
-              <dt>Cumulative download</dt>
+              <dt>{t("Cumulative download")}</dt>
               <dd>{available ? bytes(status?.downlinkTotal) : "—"}</dd>
             </div>
             <div>
-              <dt>Cumulative upload</dt>
+              <dt>{t("Cumulative upload")}</dt>
               <dd>{available ? bytes(status?.uplinkTotal) : "—"}</dd>
             </div>
           </dl>
           {service?.status === ServiceStatus_Type.FATAL && (
             <p role="alert">
-              The service reported a fatal error. Inspect the instance locally.
+              {t(
+                "The service reported a fatal error. Inspect the instance locally.",
+              )}
             </p>
           )}
         </Panel>
       </div>
       <div className="overview-bottom">
         <Panel
-          title="Outbound groups"
+          title={t("Outbound groups")}
           action={
             <Button variant="link" size="sm" asChild>
               <a href="#/proxies">
-                View proxies <ArrowRight data-icon="inline-end" />
+                {t("View proxies")}
+                <ArrowRight data-icon="inline-end" />
               </a>
             </Button>
           }
@@ -307,19 +310,24 @@ export default function Dashboard() {
           </ChannelState>
         </Panel>
         <Panel
-          title="Recent logs"
+          title={t("Recent logs")}
           action={
             <Button variant="link" size="sm" asChild>
               <a href="#/logs">
-                View logs <ArrowRight data-icon="inline-end" />
+                {t("View logs")}
+                <ArrowRight data-icon="inline-end" />
               </a>
             </Button>
           }
         >
-          <ChannelState channel="logs" empty={snapshot.logs.length === 0}>
+          <ChannelState channel="logs" empty={recentLogs.length === 0}>
             <div className="recent-logs">
-              {snapshot.logs.slice(-4).map((log) => (
-                <LogLine key={log.id} entry={log} />
+              {recentLogs.map((log) => (
+                <LogLine
+                  receiptLabel={t("Local receipt time")}
+                  key={log.id}
+                  entry={log}
+                />
               ))}
             </div>
           </ChannelState>

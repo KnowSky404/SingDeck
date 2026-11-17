@@ -16,6 +16,7 @@ import {
   type Theme,
 } from "@/features/instances/profiles";
 import { WorkspaceContext } from "./context";
+import { loadLanguage, translate, type Language } from "@/lib/i18n";
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [profiles, setProfiles] = useState(loadProfiles);
@@ -23,6 +24,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [tokens, setTokens] = useState<Record<string, string>>({});
   const [shouldConnect, setShouldConnect] = useState(false);
   const [storageError, setStorageError] = useState<string>();
+  const [language, setLanguage] = useState<Language>(loadLanguage);
+  const t = useMemo(() => translate(language), [language]);
+  useEffect(() => {
+    document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
+    document.title = t("SingDeck · Network workspace");
+    try {
+      localStorage.setItem("singdeck.language", language);
+    } catch {
+      /* Language remains available in memory. */
+    }
+  }, [language, t]);
   const [theme, setTheme] = useState<Theme>(() => {
     try {
       const saved = localStorage.getItem("singdeck.theme");
@@ -122,9 +134,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         profiles,
         session,
         snapshot,
-        mockControl,
         theme,
         setTheme,
+        language,
+        setLanguage,
+        t,
         saveProfile,
         selectProfile,
         token,
@@ -136,6 +150,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         disconnect: () => {
           session.disconnect();
           setShouldConnect(false);
+          setTokens({});
+          setActiveId(profiles[0].id);
         },
       }}
     >

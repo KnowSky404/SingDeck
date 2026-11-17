@@ -135,13 +135,48 @@ test("responsive layout, dark/light/system themes, routes and console health", a
     ).toBe(true);
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
   }
-  await navigate(page, "Settings");
-  await page.getByRole("radio", { name: "dark theme", exact: true }).click();
+  const originalViewport = page.viewportSize()!;
+  await page.setViewportSize({ width: 800, height: 900 });
+  const nav = page.getByRole("navigation", {
+    name: "Main navigation",
+    exact: true,
+  });
+  for (const label of [
+    "Overview",
+    "Proxies",
+    "Connections",
+    "Logs",
+    "Settings",
+  ])
+    await expect(
+      nav.getByRole("link", { name: label, exact: true }),
+    ).toHaveAccessibleName(label);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page
+    .getByRole("button", { name: "Collapse sidebar", exact: true })
+    .click();
+  await expect(
+    nav.getByRole("link", { name: "Overview", exact: true }),
+  ).toHaveAccessibleName("Overview");
+  await page
+    .getByRole("button", { name: "Expand sidebar", exact: true })
+    .click();
+  await page.setViewportSize(originalViewport);
+  await page.getByRole("button", { name: "Theme", exact: true }).click();
+  await page
+    .getByRole("menuitemradio", { name: "Dark theme", exact: true })
+    .click();
   await expect(page.locator("html")).toHaveClass(/dark/);
-  await page.getByRole("radio", { name: "light theme", exact: true }).click();
+  await page.getByRole("button", { name: "Theme", exact: true }).click();
+  await page
+    .getByRole("menuitemradio", { name: "Light theme", exact: true })
+    .click();
   await expect(page.locator("html")).not.toHaveClass(/dark/);
   await page.emulateMedia({ colorScheme: "dark" });
-  await page.getByRole("radio", { name: "system theme", exact: true }).click();
+  await page.getByRole("button", { name: "Theme", exact: true }).click();
+  await page
+    .getByRole("menuitemradio", { name: "System theme", exact: true })
+    .click();
   await expect(page.locator("html")).toHaveClass(/dark/);
   await page.reload();
   await expect(
@@ -150,44 +185,6 @@ test("responsive layout, dark/light/system themes, routes and console health", a
   await expect(page.getByRole("navigation")).toHaveCount(0);
   await expect(page.locator("html")).toHaveClass(/dark/);
   expect(errors).toEqual([]);
-});
-
-test("mock outage recovers and mutation rejection does not change the selected node", async ({
-  page,
-}) => {
-  await demo(page);
-  await navigate(page, "Settings");
-  await page
-    .getByRole("switch", { name: "Simulate disconnect", exact: true })
-    .click();
-  await expect(
-    page.getByRole("status").filter({ hasText: /^Reconnecting$/ }),
-  ).toBeVisible({ timeout: 10000 });
-  await page
-    .getByRole("switch", { name: "Simulate disconnect", exact: true })
-    .click();
-  await expect(
-    page.getByRole("status").filter({ hasText: /^Connected$/ }),
-  ).toBeVisible({ timeout: 15000 });
-  await page
-    .getByRole("switch", { name: "Fail next mutation", exact: true })
-    .click();
-  await navigate(page, "Proxies");
-  const primary = page
-    .locator('[data-slot="card"]')
-    .filter({ has: page.getByText("Primary route", { exact: true }) });
-  await primary
-    .locator(".proxy-row")
-    .filter({ hasText: "Singapore 01" })
-    .getByRole("button", { name: "Select", exact: true })
-    .click();
-  await expect(page.getByText("Selection failed")).toBeVisible();
-  await expect(
-    primary
-      .locator(".proxy-row")
-      .filter({ hasText: "Tokyo 01" })
-      .getByRole("button", { name: "Selected", exact: true }),
-  ).toBeVisible();
 });
 
 test("native failures remain native and credentials never enter persistent storage", async ({
@@ -245,8 +242,9 @@ test("entry choices gate the workspace and disconnect returns to the connection 
     page.getByRole("heading", { name: "Overview", exact: true }),
   ).toBeVisible();
   await page
-    .getByRole("button", { name: "Disconnect instance", exact: true })
+    .getByRole("button", { name: "Current connection", exact: true })
     .click();
+  await page.getByRole("menuitem", { name: "Disconnect", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Connect your network.", exact: true }),
   ).toBeVisible();
@@ -299,6 +297,8 @@ test("outbound filtering composes with network and search without widening the f
 test("ANSI logs render colors and export plain text", async ({ page }) => {
   await demo(page);
   await navigate(page, "Logs");
+  await page.getByRole("combobox", { name: "Log level", exact: true }).click();
+  await page.getByRole("option", { name: "All levels", exact: true }).click();
   const line = page
     .locator(".log-line")
     .filter({ hasText: "1679805080" })
@@ -320,4 +320,157 @@ test("ANSI logs render colors and export plain text", async ({ page }) => {
   expect(text).toContain("DEBUG[16737]");
   expect(text).not.toContain("\u001b");
   expect(text).not.toContain("[38;5;168m");
+});
+
+test("group cards and node cards are independent and settings stay read-only", async ({
+  page,
+}, info) => {
+  await demo(page);
+  await expect(
+    page.getByRole("combobox", { name: "Active instance", exact: true }),
+  ).toHaveCount(0);
+  await expect(page.locator(".page-heading")).toHaveCount(0);
+  if (info.project.name === "desktop") {
+    await page
+      .getByRole("link", { name: "Overview", exact: true })
+      .first()
+      .hover();
+    await expect(page.getByRole("tooltip")).toContainText(
+      "Your network, at a glance.",
+    );
+  }
+  await navigate(page, "Proxies");
+  await page.getByRole("radio", { name: "Group cards", exact: true }).click();
+  await expect(page.locator(".proxy-group-grid > div")).toHaveCount(2);
+  await expect(page.locator(".proxy-cards")).toHaveCount(0);
+  await page.getByRole("radio", { name: "Compact cards", exact: true }).click();
+  await expect(page.locator(".proxy-cards")).toHaveCount(2);
+  await page
+    .getByRole("button", { name: "Collapse Primary route", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Expand Primary route", exact: true }),
+  ).toHaveAttribute("aria-expanded", "false");
+  await navigate(page, "Settings");
+  await expect(
+    page.getByText("Instance details", { exact: true }),
+  ).toBeVisible();
+  for (const text of [
+    "Instance connection",
+    "Development sandbox",
+    "Appearance",
+  ])
+    await expect(page.getByText(text, { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("textbox")).toHaveCount(0);
+  await expect(
+    page.getByRole("link", { name: "Download dashboard", exact: true }),
+  ).toBeVisible();
+});
+
+test("INFO threshold hides debug and trace while retaining warnings and errors", async ({
+  page,
+}) => {
+  await demo(page);
+  await navigate(page, "Logs");
+  await expect(
+    page.getByRole("combobox", { name: "Log level", exact: true }),
+  ).toHaveText("INFO and above");
+  await expect(
+    page.getByText("demo warning: retrying a probe", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("demo error: simulated probe failure", { exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.locator(".log-line").filter({ hasText: "demo trace" }),
+  ).toHaveCount(0);
+  await expect(
+    page.locator(".log-line").filter({ hasText: "DEBUG[16737]" }),
+  ).toHaveCount(0);
+  await page.getByRole("combobox", { name: "Log level", exact: true }).click();
+  await page.getByRole("option", { name: "All levels", exact: true }).click();
+  await expect(
+    page.getByText("demo trace: route lookup", { exact: true }),
+  ).toBeVisible();
+});
+
+test("connection state filter retains closed records and disables close actions on them", async ({
+  page,
+}) => {
+  await demo(page);
+  await navigate(page, "Connections");
+  await expect(
+    page.getByRole("combobox", { name: "Status filter", exact: true }),
+  ).toHaveText("Active");
+  await expect(page.locator(".connection-table tbody tr")).toHaveCount(28);
+  await page.getByRole("button", { name: "Close mock-1", exact: true }).click();
+  await expect(page.locator(".connection-table tbody tr")).toHaveCount(27);
+  await page
+    .getByRole("combobox", { name: "Status filter", exact: true })
+    .click();
+  await page.getByRole("option", { name: "Closed", exact: true }).click();
+  await expect(page.locator(".connection-table tbody tr")).toHaveCount(3);
+  await expect(
+    page.getByRole("button", { name: "Close mock-1", exact: true }),
+  ).toBeDisabled();
+  await page
+    .getByRole("button", { name: "Details for mock-1", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toContainText("Closed");
+  await page.keyboard.press("Escape");
+  await page
+    .getByRole("combobox", { name: "Network filter", exact: true })
+    .click();
+  await page.getByRole("option", { name: "TCP", exact: true }).click();
+  await expect(
+    page.getByText("Nothing to show yet", { exact: true }),
+  ).toBeVisible();
+});
+
+test("language and theme controls work without replacing the session and persist across reload", async ({
+  page,
+}) => {
+  await demo(page);
+  await page.getByRole("button", { name: "Language", exact: true }).click();
+  await page
+    .getByRole("menuitemradio", { name: "简体中文", exact: true })
+    .click();
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
+  await expect(page.getByText("演示模式", { exact: true })).toBeVisible();
+  const collapse = page.getByRole("button", { name: "收起侧栏", exact: true });
+  if (await collapse.isVisible()) {
+    await collapse.click();
+    await page.getByRole("button", { name: "展开侧栏", exact: true }).click();
+  }
+  for (const name of ["代理", "连接", "日志", "设置", "概览"]) {
+    await navigate(page, name);
+    await expect(page.getByRole("heading", { name, exact: true })).toHaveClass(
+      "sr-only",
+    );
+  }
+  await page.getByRole("button", { name: "当前连接", exact: true }).click();
+  await expect(page.getByRole("menu")).toContainText("演示实例");
+  await expect(page).toHaveURL(/#\/$/);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "主题", exact: true }).click();
+  await page
+    .getByRole("menuitemradio", { name: "深色主题", exact: true })
+    .click();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await page.getByRole("button", { name: "当前连接", exact: true }).click();
+  await page.getByRole("menuitem", { name: "退出连接", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "连接", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByLabel("访问密钥", { exact: true })).toHaveValue("");
+  await page.reload();
+  await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await page.getByRole("button", { name: "语言", exact: true }).click();
+  await page
+    .getByRole("menuitemradio", { name: "English", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Explore demo", exact: true }),
+  ).toBeVisible();
 });
