@@ -207,19 +207,10 @@ export class InstanceSession {
             this.update({
               logs: appendLogs(
                 this.pending.logs,
-                this.secret
-                  ? {
-                      ...log,
-                      messages: log.messages.map((m) => ({
-                        ...m,
-                        message: m.message
-                          .split(this.secret)
-                          .join("[redacted]"),
-                      })),
-                    }
-                  : log,
+                log,
                 this.logSequence,
                 Date.now(),
+                this.secret,
               ),
             });
           }

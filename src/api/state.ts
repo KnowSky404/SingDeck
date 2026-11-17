@@ -1,3 +1,4 @@
+import { plainLog } from "@/lib/ansi";
 import { create } from "@bufbuild/protobuf";
 import {
   ConnectionSchema,
@@ -19,6 +20,7 @@ export interface LogEntry {
   receivedAt: number;
   level: LogLevel;
   message: string;
+  text: string;
 }
 export interface TrafficPoint {
   time: number;
@@ -57,18 +59,29 @@ export function appendLogs(
   batch: Log,
   sequence: { value: number },
   now: number,
+  secret = "",
 ): LogEntry[] {
   const base = batch.reset ? [] : current;
   return [
     ...base,
-    ...batch.messages
-      .slice(-LOG_LIMIT)
-      .map((m) => ({
+    ...batch.messages.slice(-LOG_LIMIT).map((m) => {
+      const plain = plainLog(m.message);
+      // Formatting can split a token; redact the visible text before it reaches any view.
+      const safe =
+        secret && plain.includes(secret)
+          ? plain.split(secret).join("[redacted]")
+          : secret
+            ? m.message.split(secret).join("[redacted]")
+            : m.message;
+      const message = safe.slice(0, 16384);
+      return {
         id: ++sequence.value,
         receivedAt: now,
         level: m.level,
-        message: m.message.slice(0, 16384),
-      })),
+        message,
+        text: plainLog(message),
+      };
+    }),
   ].slice(-LOG_LIMIT);
 }
 

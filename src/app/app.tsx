@@ -9,7 +9,6 @@ import {
 } from "react";
 import {
   Activity,
-  ArrowRight,
   Cable,
   ChevronLeft,
   ChevronRight,
@@ -39,6 +38,9 @@ import {
 } from "@/components/ui/dialog";
 import { Choice, EmptyState, Notice } from "@/components/shared";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Brand } from "@/components/brand";
+import EntryPage from "./entry";
+import { version } from "../../package.json";
 import { cn } from "@/lib/utils";
 
 const Overview = lazy(() => import("@/features/dashboard/page"));
@@ -92,16 +94,6 @@ function Navigation({
     </nav>
   );
 }
-function Brand() {
-  return (
-    <a className="brand" href="#/" aria-label="SingDeck overview">
-      <span className="brand-mark">
-        <Layers3 />
-      </span>
-      <span>SingDeck</span>
-    </a>
-  );
-}
 export default function App() {
   const {
     profile,
@@ -136,6 +128,7 @@ export default function App() {
   const partial = Object.entries(snapshot.streamErrors).filter(
     ([channel, error]) => channel !== "status" && error,
   );
+  if (!snapshot.loaded.status) return <EntryPage />;
   return (
     <div className={cn("app-shell", collapsed && "sidebar-collapsed")}>
       <a
@@ -222,43 +215,23 @@ export default function App() {
             )}
           </div>
           <div className="topbar-actions">
-            {snapshot.phase === "connected" ? (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label="Disconnect instance"
-                onClick={disconnect}
-              >
-                <Unplug />
-              </Button>
-            ) : (
+            {snapshot.phase !== "connected" && (
               <Button variant="outline" size="sm" onClick={connect}>
                 <Cable data-icon="inline-start" />
-                {snapshot.phase === "disconnected" ? "Connect" : "Retry"}
+                Retry
               </Button>
             )}
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              aria-label="Disconnect instance"
+              onClick={disconnect}
+            >
+              <Unplug />
+            </Button>
           </div>
         </header>
         <main id="main-content" tabIndex={-1}>
-          {snapshot.phase === "disconnected" && (
-            <div className="welcome-strip">
-              <span>
-                <Cable />
-                Connect your network.
-                <small>
-                  Configure a trusted instance or take a look around.
-                </small>
-              </span>
-              <div className="button-row">
-                <Button variant="outline" size="sm" asChild>
-                  <a href="#/settings">Configure instance</a>
-                </Button>
-                <Button size="sm" onClick={() => selectProfile("demo")}>
-                  Explore demo <ArrowRight data-icon="inline-end" />
-                </Button>
-              </div>
-            </div>
-          )}
           {snapshot.error && (
             <Notice
               title={
@@ -320,7 +293,7 @@ export default function App() {
               >
                 Licenses
               </a>
-              <span className="footer-version">0.1.0</span>
+              <span className="footer-version">{version}</span>
             </span>
           </footer>
         </main>
