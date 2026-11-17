@@ -1,42 +1,58 @@
-name: Deploy GitHub Pages
+name: Release and deploy GitHub Pages
 
 on:
-  push:
-    branches: [main]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: github-pages
   cancel-in-progress: false
 
 jobs:
+  validate:
+    uses: ./.github/workflows/ci.yml
+    with:
+      publish-pages: true
+
   deploy:
+    needs: validate
+    if: github.event_name != 'release' || !github.event.release.prerelease
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
-        with:
-          node-version: 24
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.4
       - uses: actions/configure-pages@v5
-      - run: bun install --frozen-lockfile
-      - run: bun run lint
-      - run: bun run typecheck
-      - run: bun run test
-      - run: bun run build
-      - uses: actions/upload-pages-artifact@v4
-        with:
-          path: dist
-      - name: Deploy
+      - name: Deploy verified build
         id: deployment
         uses: actions/deploy-pages@v4
+
+  release-assets:
+    needs: validate
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v6
+        with:
+          name: github-pages
+          path: ${{ runner.temp }}/pages
+      - name: Attach static dashboard archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          mkdir dist
+          tar --no-same-owner -xf "$RUNNER_TEMP/pages/artifact.tar" -C dist
+          cd dist
+          zip -qr "$RUNNER_TEMP/singdeck-${RELEASE_TAG}.zip" .
+          gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/singdeck-${RELEASE_TAG}.zip" --repo "$GITHUB_REPOSITORY" --clobber
