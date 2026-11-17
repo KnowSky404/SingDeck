@@ -2,63 +2,18 @@
 
 [简体中文](README.zh-CN.md)
 
-A modern, responsive web dashboard for sing-box, powered by the native Service API.
+A web dashboard for **sing-box 1.14.0+ / native Service API 4**. Connect directly to your instance, or [try the demo](https://knowsky404.github.io/SingDeck/).
 
-SingDeck is an independent React application for trusted local or remote sing-box instances. It uses the **native gRPC-Web Service API**, with no Clash REST dependency or extra backend. Baseline: stable **sing-box 1.14.0+ with API version 4**. Other API revisions require verification before use.
+- Live traffic, proxy groups, connections and ANSI-colored logs.
+- Independent group/node card layouts; connection status and outbound filters.
+- English/简体中文 and light/dark/system themes. API tokens stay in memory.
 
-Try the [GitHub Pages preview](https://knowsky404.github.io/SingDeck/) and choose **Connect** with your local/remote API address and token, or **Explore demo** for the simulated workspace. The dashboard opens after a successful connection; manual disconnect returns to the entry screen.
+## Run locally
 
-## What works
-
-- **Overview:** service/core/API status, uptime, measured upload/download rates, totals, active connections, memory and a live traffic chart.
-- **Proxies:** visible groups, protocol/search filters, collapsible groups, independent group and node list/card layouts, latency-test requests and selector changes confirmed by server subscription. Automatic groups stay read only.
-- **Connections:** live native event reduction, search/network/outbound/status filters, Active/Closed records, traffic/newest sort, details, paginated desktop table/mobile cards, individual closure and confirmed close-all.
-- **Logs:** ANSI-colored real-time logs with INFO-and-above default, threshold/search filters, pause/resume, autoscroll, local clear, copy/export, bounded memory and stream-interruption states.
-- **Workspace:** one connection configured at entry; top-right icons for current connection/disconnect, light/dark/system themes and English/简体中文. Settings shows instance/build information and local deployment links. Navigation hover/focus hints replace page slogans.
-- **Explicit mock mode:** streaming traffic/logs/connections, chosen only at entry. Native failures never silently become mock data.
-
-A single real instance is active at a time. The storage model supports a profile array; full profile management, PWA, network-quality/STUN and native Clash Mode UI are planned in [the roadmap](docs/roadmap.md).
-
-## Screenshots
-
-Screenshot slots: desktop overview, mobile overview, dark theme, proxies and logs. These should show the explicit Mock mode badge or use sanitized non-private test instances. Local implementation screenshots were reviewed at desktop and mobile sizes; no real credentials or private connection captures are committed.
-
-## Stack
-
-Bun · React 19 · strict TypeScript 6 · Vite 8 · Tailwind CSS 4 · shadcn/ui + Radix · ConnectRPC 2 / Protobuf ES 2 · Recharts · Lucide · Vitest · Playwright · ESLint.
-
-The latest compatible stable versions at initialization are locked in `bun.lock`. TypeScript 7 is currently rejected by typescript-eslint, hence TypeScript 6. Streaming state belongs to a dedicated external session store; unnecessary router/query/state/motion dependencies are intentionally omitted. Hash routing supports `/dashboard/` and static subdirectories.
-
-## Install and develop
-
-Install Bun 1.4.4 and Node 24+, then:
-
-```sh
-bun install
-bun run dev
-```
-
-Open the Vite URL. Use the entry form to connect a trusted API, or click **Explore demo**. Use the top-right connection icon to inspect the current endpoint or disconnect before configuring a different service. Demo mode is always labeled. Tokens are never persisted: enter them again after reload. Geist font files are bundled; no external font or analytics requests are made.
-
-```sh
-bun run lint
-bun run typecheck
-bun run test
-bunx playwright install chromium
-bun run test:e2e
-bun run build
-bun run preview
-bun run proto:generate
-```
-
-Optional real-service tests require an official binary and a built `dist/`; see [development](docs/development.md). A skipped integration suite is not proof of real API compatibility. CI installs dependencies, regenerates protocol types, lints, type-checks, runs unit/browser tests, builds and checks the official 1.14.0 fixture.
-
-## Deploy
-
-**Recommended: let sing-box download the release ZIP and host it locally.** Merge this `dashboard` object into your existing `services` → `type: api` configuration:
+Set `dashboard` in your existing `services` → `type: api` object to:
 
 ```json
-"dashboard": {
+{
   "enabled": true,
   "path": "./singdeck-dashboard",
   "download_url": "https://github.com/KnowSky404/SingDeck/releases/latest/download/singdeck.zip",
@@ -66,20 +21,14 @@ Optional real-service tests require an official binary and a built `dist/`; see 
 }
 ```
 
-Use an initially empty/new directory and restart sing-box, then open `http://127.0.0.1:<api-port>/dashboard/`. The browser connects to your API directly. The ZIP is downloaded and served on your own machine; GitHub Pages is optional. [Complete example](examples/sing-box-dashboard-download.json). See [deployment](docs/deployment.md) for version pinning, download routing and existing-directory behavior.
+Use a new, writable directory. Restart sing-box, then open `http://127.0.0.1:<api-port>/dashboard/` and enter your API token. Relative paths use the core's working directory.
 
-**Manual/offline:** download `singdeck-v<version>.zip` from [Releases](https://github.com/KnowSky404/SingDeck/releases), verify `SHA256SUMS`, and extract it so `index.html` and `assets/` are directly under `dashboard.path`. A source-code ZIP is not a built dashboard. You can also build and copy `dist/` yourself. The API endpoint is the listener origin, without `/dashboard/`.
+[Download ZIP + checksums](https://github.com/KnowSky404/SingDeck/releases/latest) · [Full example](examples/sing-box-dashboard-download.json) · [Quick start](https://github.com/KnowSky404/SingDeck/wiki/Getting-Started)
 
-**Independent:** upload `dist/` to a static HTTPS host and set your trusted HTTPS API endpoint in the entry form. Configure exact server CORS origins and validate browser network policy. Remote HTTP is refused; loopback HTTP through an SSH tunnel is supported. Never expose an unauthenticated management endpoint.
+**Still seeing the old dashboard?** Try **Ctrl + Shift + R** first. See [cache troubleshooting](https://github.com/KnowSky404/SingDeck/wiki/Troubleshooting#old-dashboard-after-switching-or-updating).
 
-The [validated example configuration](examples/sing-box-1.14.0.json) binds only to loopback and contains a secret placeholder that **must** be replaced outside the repository. It uses direct outbounds for testing. Follow [deployment instructions](docs/deployment.md) for both paths, security and troubleshooting.
+## Documentation
 
-## Architecture and API compatibility
+[Wiki](https://github.com/KnowSky404/SingDeck/wiki) · [中文 Wiki](https://github.com/KnowSky404/SingDeck/wiki/Home-zh-CN) · [Development](docs/development.md) · [Contributing](CONTRIBUTING.md)
 
-Pinned official Protobuf → generated descriptors → native/mock `SingBoxClient` → cancelable `InstanceSession` → workspace hook/provider → lazy feature pages. Separate stream status keeps partial failures visible. Client-side limits: 300 chart points, 2,000 logs, 16K characters/message, 10,000 connection records (closed history is evicted before active rows) and 50 rendered connection rows per page.
-
-Read [architecture](docs/architecture.md), [verified API semantics](docs/api-compatibility.md), [test evidence and limits](docs/verification.md), [contributing](CONTRIBUTING.md) and [agent instructions](AGENTS.md).
-
-## License
-
-AGPL-3.0-or-later; the repository's original [AGPLv3 license](LICENSE) is retained. The unmodified pinned protocol and generated derivatives retain upstream GPL-3.0-or-later notices; see [third-party notices](THIRD_PARTY_NOTICES.md) and [upstream license](proto/LICENSE.sing-box). No official dashboard component/page/style code is reused. Distribute corresponding source and notices with the dashboard.
+[AGPL-3.0-or-later](LICENSE); retain the [third-party notices](THIRD_PARTY_NOTICES.md) and corresponding source when redistributing.
