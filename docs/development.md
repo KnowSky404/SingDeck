@@ -1,6 +1,6 @@
 # Development
 
-Use Bun 1.4.4 and Node 24+. `bun install --frozen-lockfile` installs the exact checked-in dependency graph. TypeScript 6 is deliberate tooling compatibility, not an accidental outdated selection.
+Use Bun 1.4.4 and Node 24+. `bun install --frozen-lockfile` installs the exact checked-in dependency graph. The project uses the public HTTPS npm registry via `bunfig.toml`; lockfile tarball URLs must remain publicly reachable so GitHub-hosted runners can install them. TypeScript 6 is deliberate tooling compatibility, not an accidental outdated selection.
 
 | Command | Purpose |
 | --- | --- |
