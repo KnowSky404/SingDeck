@@ -2,7 +2,7 @@
 
 ## P0 — initial usable release
 
-Implemented: independent responsive shell and tokens; light/dark/system themes; explicit mock and native adapters; typed generated API 4 SDK; bounded/cancelable/reconnecting streams; overview metrics/chart; searchable/list/card proxy groups and server-confirmed selector changes; connection search/filter/sort/details/paginated rendering/close actions; bounded logs with filters, pause, autoscroll, local clear, copy/export; connection settings and metadata profile persistence; unit/browser/official-binary tests and CI; both static deployment paths.
+Implemented: independent responsive shell and tokens; light/dark/system themes; explicit mock and native adapters; typed generated API 4 SDK; bounded/cancelable/reconnecting streams; explicit connect/demo entry; overview metrics/chart; collapsible searchable/list/card proxy groups and server-confirmed selector changes; connection search/network/outbound filter/sort/details/paginated rendering/close actions; bounded ANSI-colored logs with plain-text search/export and filters, pause, autoscroll, local clear, copy/export; connection settings and metadata profile persistence; unit/browser/official-binary tests and CI; both static deployment paths.
 
 Limits are visible, not simulated success: no-result test history cannot distinguish failures from untested nodes; unknown API revisions are gated; absent capabilities are unavailable; only one real profile can be edited in the current UI; remote HTTP is refused. Runtime evidence and remaining checks live in `verification.md`.
 

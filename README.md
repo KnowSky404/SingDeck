@@ -4,14 +4,14 @@ A modern, responsive web dashboard for sing-box, powered by the native Service A
 
 SingDeck is an independent React application for trusted local or remote sing-box instances. It uses the **native gRPC-Web Service API**, with no Clash REST dependency or extra backend. Baseline: stable **sing-box 1.14.0+ with API version 4**. Other API revisions require verification before use.
 
-Try the [GitHub Pages preview](https://knowsky404.github.io/SingDeck/) and click **Explore demo** to use the simulated workspace. Real API connections still require your own trusted HTTPS endpoint.
+Try the [GitHub Pages preview](https://knowsky404.github.io/SingDeck/) and choose **Connect** with your local/remote API address and token, or **Explore demo** for the simulated workspace. The dashboard opens after a successful connection; manual disconnect returns to the entry screen.
 
 ## What works
 
 - **Overview:** service/core/API status, uptime, measured upload/download rates, totals, active connections, memory and a live traffic chart.
-- **Proxies:** visible groups, protocol/search filters, list/compact card layouts, latency-test requests and selector changes confirmed by server subscription. Automatic groups stay read only.
-- **Connections:** live native event reduction, search/network filters, traffic/newest sort, details, paginated desktop table/mobile cards, individual closure and confirmed close-all.
-- **Logs:** real-time level/search filters, pause/resume, autoscroll, local clear, copy/export, bounded memory and stream-interruption states.
+- **Proxies:** visible groups, protocol/search filters, collapsible groups, list/compact card layouts, latency-test requests and selector changes confirmed by server subscription. Automatic groups stay read only.
+- **Connections:** live native event reduction, search/network/outbound filters, traffic/newest sort, details, paginated desktop table/mobile cards, individual closure and confirmed close-all.
+- **Logs:** ANSI-colored real-time logs with plain-text level/search filters, pause/resume, autoscroll, local clear, copy/export, bounded memory and stream-interruption states.
 - **Settings:** endpoint, memory-only Bearer token, real connection test, light/dark/system themes, retry and chart preferences.
 - **Explicit mock mode:** streaming traffic/logs/connections plus controllable outages and mutation failures. Native failures never silently become mock data.
 
@@ -36,7 +36,7 @@ bun install
 bun run dev
 ```
 
-Open the Vite URL. Configure a trusted API in Settings, or click **Explore demo**. Demo mode is always labeled. Tokens are never persisted: enter them again after reload. Geist font files are bundled; no external font or analytics requests are made.
+Open the Vite URL. Use the entry form to connect a trusted API, or click **Explore demo**. After entering the workspace, edit connection preferences in Settings. Demo mode is always labeled. Tokens are never persisted: enter them again after reload. Geist font files are bundled; no external font or analytics requests are made.
 
 ```sh
 bun run lint

@@ -31,6 +31,17 @@ export default function Connections() {
     [network, setNetwork] = useState("all"),
     [sort, setSort] = useState("newest"),
     [page, setPage] = useState(0);
+  const [outbound, setOutbound] = useState<string | null>(null);
+  const outbounds = useMemo(
+    () =>
+      [
+        ...new Set([
+          ...(outbound === null ? [] : [outbound]),
+          ...[...snapshot.connections.values()].map((c) => c.outbound),
+        ]),
+      ].sort((a, b) => a.localeCompare(b)),
+    [snapshot.connections, outbound],
+  );
   const [detail, setDetail] = useState<Connection | null>(null),
     [confirm, setConfirm] = useState(false);
   const action = useAction();
@@ -41,6 +52,7 @@ export default function Connections() {
         .filter(
           (c) =>
             (network === "all" || c.network === network) &&
+            (outbound === null || c.outbound === outbound) &&
             `${c.domain} ${c.destination} ${c.source} ${c.outbound} ${c.protocol}`
               .toLowerCase()
               .includes(query),
@@ -54,7 +66,7 @@ export default function Connections() {
               : b.createdAt - a.createdAt;
           return delta > 0n ? 1 : delta < 0n ? -1 : a.id.localeCompare(b.id);
         }),
-    [snapshot.connections, network, sort, query],
+    [snapshot.connections, network, outbound, sort, query],
   );
   const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE)),
     currentPage = Math.min(page, pages - 1);
@@ -120,6 +132,21 @@ export default function Connections() {
             { value: "all", label: "All networks" },
             { value: "tcp", label: "TCP" },
             { value: "udp", label: "UDP" },
+          ]}
+        />
+        <Choice
+          label="Outbound filter"
+          value={outbound === null ? "all" : `outbound:${outbound}`}
+          onChange={(v) => {
+            setOutbound(v === "all" ? null : v.slice("outbound:".length));
+            setPage(0);
+          }}
+          options={[
+            { value: "all", label: "All outbounds" },
+            ...outbounds.map((tag) => ({
+              value: `outbound:${tag}`,
+              label: tag || "Unknown outbound",
+            })),
           ]}
         />
         <Choice

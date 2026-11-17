@@ -30,6 +30,22 @@ test("mock workspace supports server-confirmed selection, filtering, log control
   await expect(
     singapore.getByRole("button", { name: "Selected", exact: true }),
   ).toBeVisible();
+  await primary
+    .getByRole("button", { name: "Collapse Primary route", exact: true })
+    .click();
+  await expect(primary.locator(".proxy-row")).toHaveCount(0);
+  await expect(primary).toContainText("Selected: Singapore 01");
+  await expect(
+    page
+      .locator('[data-slot="card"]')
+      .filter({ has: page.getByText("Auto route", { exact: true }) })
+      .locator(".proxy-row"),
+  ).toHaveCount(2);
+  await primary
+    .getByRole("button", { name: "Expand Primary route", exact: true })
+    .focus();
+  await page.keyboard.press("Enter");
+  await expect(primary.locator(".proxy-row")).toHaveCount(4);
   await page.getByRole("radio", { name: "Compact cards" }).click();
   await expect(page.locator(".proxy-cards")).toHaveCount(2);
   await page
@@ -129,8 +145,9 @@ test("responsive layout, dark/light/system themes, routes and console health", a
   await expect(page.locator("html")).toHaveClass(/dark/);
   await page.reload();
   await expect(
-    page.getByRole("heading", { name: "Settings", exact: true }),
+    page.getByRole("heading", { name: "Connect your network.", exact: true }),
   ).toBeVisible();
+  await expect(page.getByRole("navigation")).toHaveCount(0);
   await expect(page.locator("html")).toHaveClass(/dark/);
   expect(errors).toEqual([]);
 });
@@ -183,14 +200,18 @@ test("native failures remain native and credentials never enter persistent stora
   await page
     .getByLabel("Bearer token", { exact: true })
     .fill("e2e-private-credential");
-  await page
-    .getByRole("switch", { name: "Automatically reconnect", exact: true })
-    .click();
-  await page.getByRole("button", { name: "Save & connect" }).click();
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
   await expect(
-    page.getByRole("status").filter({ hasText: /^Connection failed$/ }),
+    page.getByText("Connection failed", { exact: true }),
   ).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole("navigation")).toHaveCount(0);
   await expect(page.getByText("Mock mode", { exact: true })).toHaveCount(0);
+  await page
+    .getByRole("button", { name: "Cancel connection", exact: true })
+    .click();
+  await expect(
+    page.getByRole("textbox", { name: "API endpoint", exact: true }),
+  ).toBeEnabled();
   const persisted = await page.evaluate(() =>
     JSON.stringify({
       local: { ...localStorage },
@@ -203,4 +224,100 @@ test("native failures remain native and credentials never enter persistent stora
   await expect(page.getByLabel("Bearer token", { exact: true })).toHaveValue(
     "",
   );
+});
+
+test("entry choices gate the workspace and disconnect returns to the connection form", async ({
+  page,
+}) => {
+  await page.goto("/#/connections");
+  await expect(
+    page.getByRole("heading", { name: "Connect your network.", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("navigation")).toHaveCount(0);
+  await expect(
+    page.getByRole("textbox", { name: "API endpoint", exact: true }),
+  ).toHaveValue("http://127.0.0.1:9090");
+  await expect(page.getByLabel("Bearer token", { exact: true })).toHaveValue(
+    "",
+  );
+  await page.getByRole("button", { name: "Explore demo", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Overview", exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole("button", { name: "Disconnect instance", exact: true })
+    .click();
+  await expect(
+    page.getByRole("heading", { name: "Connect your network.", exact: true }),
+  ).toBeVisible();
+  await expect(page.getByRole("navigation")).toHaveCount(0);
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+});
+
+test("outbound filtering composes with network and search without widening the filter", async ({
+  page,
+}) => {
+  await demo(page);
+  await navigate(page, "Connections");
+  await page
+    .getByRole("combobox", { name: "Outbound filter", exact: true })
+    .click();
+  await page.getByRole("option", { name: "Singapore 01", exact: true }).click();
+  await expect(page.locator(".connection-table tbody tr")).toHaveCount(10);
+  await page
+    .getByRole("combobox", { name: "Network filter", exact: true })
+    .click();
+  await page.getByRole("option", { name: "TCP", exact: true }).click();
+  await expect(page.locator(".connection-table tbody tr")).toHaveCount(7);
+  await page
+    .getByRole("textbox", { name: "Search connections" })
+    .fill("cdn.example.org");
+  await expect(page.locator(".connection-table tbody tr")).toHaveCount(2);
+  for (const row of await page.locator(".connection-table tbody tr").all())
+    await expect(row.locator("td").nth(2)).toContainText("Singapore 01");
+  await page
+    .getByRole("textbox", { name: "Search connections" })
+    .fill("no-such-destination");
+  await expect(page.getByText("Nothing to show yet")).toBeVisible();
+  await expect(
+    page.getByRole("combobox", { name: "Outbound filter", exact: true }),
+  ).toHaveText("Singapore 01");
+  await page.getByRole("textbox", { name: "Search connections" }).clear();
+  await page
+    .getByRole("combobox", { name: "Outbound filter", exact: true })
+    .click();
+  await page
+    .getByRole("option", { name: "All outbounds", exact: true })
+    .click();
+  await expect(page.locator(".connection-table tbody tr")).toHaveCount(21);
+});
+
+test("ANSI logs render colors and export plain text", async ({ page }) => {
+  await demo(page);
+  await navigate(page, "Logs");
+  const line = page
+    .locator(".log-line")
+    .filter({ hasText: "1679805080" })
+    .first();
+  await expect(line).toBeVisible();
+  await expect(line.locator(".log-message")).not.toContainText("[37m");
+  await expect(
+    line.locator(".log-message span").filter({ hasText: /^1679805080$/ }),
+  ).toHaveCSS("color", "rgb(215, 95, 135)");
+  await page.getByRole("textbox", { name: "Search logs" }).fill("DEBUG[16737]");
+  await expect(page.locator(".log-line")).toHaveCount(1);
+  const downloaded = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Export filtered logs" }).click();
+  const download = await downloaded;
+  const stream = await download.createReadStream();
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream!) chunks.push(Buffer.from(chunk));
+  const text = Buffer.concat(chunks).toString("utf8");
+  expect(text).toContain("DEBUG[16737]");
+  expect(text).not.toContain("\u001b");
+  expect(text).not.toContain("[38;5;168m");
 });

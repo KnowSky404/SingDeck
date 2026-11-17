@@ -40,6 +40,7 @@ test("browser uses the official native service through CORS and built-in dashboa
       })
       .toBe(true);
     await page.goto("/#/settings");
+    await expect(page.getByRole("navigation")).toHaveCount(0);
     await page
       .getByRole("textbox", { name: "API endpoint", exact: true })
       .fill("http://127.0.0.1:19190");
@@ -50,7 +51,7 @@ test("browser uses the official native service through CORS and built-in dashboa
     await expect(
       page.getByText("Connection verified: sing-box 1.14.0 · API 4."),
     ).toBeVisible();
-    await page.getByRole("button", { name: "Save & connect" }).click();
+    await page.getByRole("button", { name: "Connect", exact: true }).click();
     await expect(
       page.getByRole("status").filter({ hasText: /^Connected$/ }),
     ).toBeVisible();
@@ -68,18 +69,26 @@ test("browser uses the official native service through CORS and built-in dashboa
     ).toBeVisible();
     await page.goto("http://127.0.0.1:19190/dashboard/#/settings");
     await expect(
-      page.getByRole("heading", { name: "Settings", exact: true }),
+      page.getByRole("heading", { name: "Connect your network.", exact: true }),
     ).toBeVisible();
     await expect(
       page.getByRole("textbox", { name: "API endpoint", exact: true }),
     ).toHaveValue("http://127.0.0.1:19190");
     await page.getByLabel("Bearer token", { exact: true }).fill(secret);
-    await page.getByRole("button", { name: "Save & connect" }).click();
+    await page.getByRole("button", { name: "Connect", exact: true }).click();
     await expect(
       page.getByRole("status").filter({ hasText: /^Connected$/ }),
     ).toBeVisible();
     await page.getByRole("link", { name: "Logs", exact: true }).first().click();
     await page.reload();
+    await expect(
+      page.getByRole("heading", { name: "Connect your network.", exact: true }),
+    ).toBeVisible();
+    await expect(page.getByLabel("Bearer token", { exact: true })).toHaveValue(
+      "",
+    );
+    await page.getByLabel("Bearer token", { exact: true }).fill(secret);
+    await page.getByRole("button", { name: "Connect", exact: true }).click();
     await expect(
       page.getByRole("heading", { name: "Logs", exact: true }),
     ).toBeVisible();

@@ -3,6 +3,7 @@ import { create, toBinary } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { createNativeClient, validateEndpoint } from "@/api/client";
 import { describeError } from "@/api/errors";
+import { inferDefaultEndpoint } from "@/features/instances/profiles";
 import { VersionSchema, StatusSchema } from "@/proto/daemon/started_service_pb";
 
 function frame(bytes: Uint8Array, flag = 0) {
@@ -30,6 +31,19 @@ function response(data: Uint8Array, status = 0) {
   );
 }
 describe("real gRPC-Web adapter", () => {
+  it("infers only valid built-in API origins so every hosting URL can load the entry", () => {
+    for (const [url, expected] of [
+      ["https://knowsky404.github.io/SingDeck/", "http://127.0.0.1:9090"],
+      ["http://127.0.0.1:9091/dashboard/", "http://127.0.0.1:9091"],
+      ["https://api.example.org/dashboard/", "https://api.example.org"],
+      ["http://192.168.1.20:9090/dashboard/", "http://127.0.0.1:9090"],
+    ]) {
+      const endpoint = inferDefaultEndpoint(new URL(url));
+      expect(endpoint).toBe(expected);
+      expect(() => createNativeClient(endpoint, "")).not.toThrow();
+    }
+    expect(inferDefaultEndpoint()).toBe("http://127.0.0.1:9090");
+  });
   it("uses generated descriptors, binary framing, Bearer metadata, deadlines and safe fetch options", async () => {
     let url = "",
       init: RequestInit | undefined;

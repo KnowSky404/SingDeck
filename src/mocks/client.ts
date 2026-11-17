@@ -221,6 +221,7 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
       const signal = opts?.signal ?? new AbortController().signal;
       let i = 0;
       const messages = [
+        "\u001b[37mDEBUG\u001b[0m[16737] [\u001b[38;5;168m1679805080\u001b[0m 0ms] router: pre-match[0] inbound=[mixed-in tun-in] => sniff(500ms)",
         "core: sing-box 1.14.0 started",
         "inbound/mixed: accepted connection from 127.0.0.1",
         "outbound/vless[Tokyo 01]: connection to api.github.com:443",

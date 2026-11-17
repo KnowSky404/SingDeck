@@ -1,6 +1,7 @@
 import { useState, useDeferredValue } from "react";
 import {
   Check,
+  ChevronDown,
   LayoutGrid,
   List,
   Search,
@@ -26,6 +27,11 @@ import {
   ServiceStatus_Type,
 } from "@/proto/daemon/started_service_pb";
 
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { latency } from "./latency";
 
 function ProxyGroup({
@@ -43,6 +49,7 @@ function ProxyGroup({
   const selection = useAction(),
     testing = useAction();
   const [target, setTarget] = useState("");
+  const [expanded, setExpanded] = useState(true);
   const enabled =
     snapshot.phase === "connected" &&
     snapshot.service?.status === ServiceStatus_Type.STARTED &&
@@ -53,106 +60,127 @@ function ProxyGroup({
       (type === "all" || item.type === type),
   );
   return (
-    <Panel
-      title={group.tag}
-      description={`${group.type} · ${group.items.length} outbounds${group.selectable ? "" : " · Automatic selection, read only"}`}
-      action={
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={!enabled || testing.pending}
-          onClick={() => void testing.run(() => session.urlTest(group.tag))}
-        >
-          {testing.pending ? (
-            <LoaderCircle className="spin" data-icon="inline-start" />
-          ) : (
-            <Zap data-icon="inline-start" />
-          )}
-          Test group
-        </Button>
-      }
-    >
-      {selection.error && (
-        <Notice title="Selection failed">{selection.error}</Notice>
-      )}
-      {testing.error && <Notice title="Test failed">{testing.error}</Notice>}
-      <div
-        className={view === "cards" ? "proxy-items proxy-cards" : "proxy-items"}
+    <Collapsible open={expanded} onOpenChange={setExpanded}>
+      <Panel
+        title={
+          <CollapsibleTrigger asChild>
+            <Button
+              variant="ghost"
+              className="group-title-trigger"
+              aria-label={`${expanded ? "Collapse" : "Expand"} ${group.tag}`}
+            >
+              <ChevronDown data-icon="inline-start" />
+              <span>{group.tag}</span>
+            </Button>
+          </CollapsibleTrigger>
+        }
+        description={`${group.type} · ${group.items.length} outbounds · Selected: ${group.selected}${group.selectable ? "" : " · Read only"}`}
+        action={
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!enabled || testing.pending}
+            onClick={() => void testing.run(() => session.urlTest(group.tag))}
+          >
+            {testing.pending ? (
+              <LoaderCircle className="spin" data-icon="inline-start" />
+            ) : (
+              <Zap data-icon="inline-start" />
+            )}
+            Test group
+          </Button>
+        }
       >
-        {items.map((item) => (
+        {selection.error && (
+          <Notice title="Selection failed">{selection.error}</Notice>
+        )}
+        {testing.error && <Notice title="Test failed">{testing.error}</Notice>}
+        <CollapsibleContent>
           <div
-            key={item.tag}
             className={
-              item.tag === group.selected ? "proxy-row selected" : "proxy-row"
+              view === "cards" ? "proxy-items proxy-cards" : "proxy-items"
             }
           >
-            <div className="proxy-identity">
-              <span className="proxy-mark">
-                {item.tag === group.selected ? (
-                  <Check />
-                ) : group.selectable ? (
-                  <span />
-                ) : (
-                  <LockKeyhole />
-                )}
-              </span>
-              <div>
-                <strong>{item.tag}</strong>
-                <span>{item.type}</span>
+            {items.map((item) => (
+              <div
+                key={item.tag}
+                className={
+                  item.tag === group.selected
+                    ? "proxy-row selected"
+                    : "proxy-row"
+                }
+              >
+                <div className="proxy-identity">
+                  <span className="proxy-mark">
+                    {item.tag === group.selected ? (
+                      <Check />
+                    ) : group.selectable ? (
+                      <span />
+                    ) : (
+                      <LockKeyhole />
+                    )}
+                  </span>
+                  <div>
+                    <strong>{item.tag}</strong>
+                    <span>{item.type}</span>
+                  </div>
+                </div>
+                <div className="proxy-actions">
+                  <Badge
+                    variant={
+                      item.urlTestTime > 0n && item.urlTestDelay >= 0
+                        ? "outline"
+                        : "secondary"
+                    }
+                  >
+                    {latency(item)}
+                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={`Test ${item.tag} in ${group.tag}`}
+                    disabled={!enabled || testing.pending}
+                    onClick={() =>
+                      void testing.run(() => session.urlTest(item.tag))
+                    }
+                  >
+                    <Zap />
+                  </Button>
+                  {group.selectable && (
+                    <Button
+                      variant={
+                        item.tag === group.selected ? "secondary" : "outline"
+                      }
+                      size="sm"
+                      disabled={
+                        !enabled ||
+                        selection.pending ||
+                        item.tag === group.selected
+                      }
+                      onClick={() => {
+                        setTarget(item.tag);
+                        void selection.run(() =>
+                          session.selectOutbound(group.tag, item.tag),
+                        );
+                      }}
+                    >
+                      {selection.pending && target === item.tag
+                        ? "Confirming…"
+                        : item.tag === group.selected
+                          ? "Selected"
+                          : "Select"}
+                    </Button>
+                  )}
+                </div>
               </div>
-            </div>
-            <div className="proxy-actions">
-              <Badge
-                variant={
-                  item.urlTestTime > 0n && item.urlTestDelay >= 0
-                    ? "outline"
-                    : "secondary"
-                }
-              >
-                {latency(item)}
-              </Badge>
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                aria-label={`Test ${item.tag} in ${group.tag}`}
-                disabled={!enabled || testing.pending}
-                onClick={() =>
-                  void testing.run(() => session.urlTest(item.tag))
-                }
-              >
-                <Zap />
-              </Button>
-              {group.selectable && (
-                <Button
-                  variant={
-                    item.tag === group.selected ? "secondary" : "outline"
-                  }
-                  size="sm"
-                  disabled={
-                    !enabled || selection.pending || item.tag === group.selected
-                  }
-                  onClick={() => {
-                    setTarget(item.tag);
-                    void selection.run(() =>
-                      session.selectOutbound(group.tag, item.tag),
-                    );
-                  }}
-                >
-                  {selection.pending && target === item.tag
-                    ? "Confirming…"
-                    : item.tag === group.selected
-                      ? "Selected"
-                      : "Select"}
-                </Button>
-              )}
-            </div>
+            ))}
           </div>
-        ))}
-      </div>
-      {!items.length && (
-        <p className="quiet-empty">No outbounds match your filters.</p>
-      )}
-    </Panel>
+          {!items.length && (
+            <p className="quiet-empty">No outbounds match your filters.</p>
+          )}
+        </CollapsibleContent>
+      </Panel>
+    </Collapsible>
   );
 }
 export default function Proxies() {

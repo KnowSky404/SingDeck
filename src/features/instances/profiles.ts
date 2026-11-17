@@ -15,18 +15,27 @@ export interface Profile {
     windowSeconds: number;
   };
 }
+export function inferDefaultEndpoint(page?: Pick<Location, "origin" | "pathname">) {
+  if (page?.pathname.startsWith("/dashboard/")) {
+    try {
+      return validateEndpoint(page.origin);
+    } catch {
+      // Keep the entry form usable when its hosting origin is not a valid API endpoint.
+    }
+  }
+  return "http://127.0.0.1:9090";
+}
+
+const initialEndpoint = inferDefaultEndpoint(
+  typeof location === "undefined" ? undefined : location,
+);
+
 export const defaultProfile: Profile = {
   id: "local",
   name: "Local instance",
-  endpoint:
-    typeof location === "undefined"
-      ? "http://127.0.0.1:9090"
-      : location.protocol === "https:" ||
-          ["localhost", "127.0.0.1", "[::1]"].includes(location.hostname)
-        ? location.origin
-        : "http://127.0.0.1:9090",
+  endpoint: initialEndpoint,
   mode: "native",
-  tls: typeof location !== "undefined" && location.protocol === "https:",
+  tls: initialEndpoint.startsWith("https:"),
   preferences: { autoReconnect: true, intervalMs: 1000, windowSeconds: 60 },
 };
 export const mockProfile: Profile = {

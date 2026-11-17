@@ -23,7 +23,7 @@ Sources: [proto](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/starte
 | Recharts | MIT |
 | Lucide | ISC |
 | Tailwind CSS / clsx / tailwind-merge / class-variance-authority | MIT |
-| tw-animate-css | MIT |
+| tw-animate-css / strip-ansi / ansi-regex | MIT |
 | Geist font | SIL Open Font License 1.1 |
 
 Exact package versions are in `bun.lock`. Package license texts, including transitive runtime dependencies, are bundled in `public/third-party-licenses.txt` and copied to `dist/third-party-licenses.txt`. Update that notice inventory if dependencies change. Generated shadcn source is independently restyled with SingDeck tokens.

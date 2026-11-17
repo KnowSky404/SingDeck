@@ -28,7 +28,7 @@ export default function Logs() {
   const entries = (paused ?? snapshot.logs).filter(
     (log) =>
       (level === "all" || log.level === Number(level)) &&
-      log.message.toLowerCase().includes(query),
+      log.text.toLowerCase().includes(query),
   );
   const endId = entries.at(-1)?.id;
   useEffect(() => {
@@ -39,7 +39,7 @@ export default function Logs() {
     entries
       .map(
         (entry) =>
-          `${new Date(entry.receivedAt).toISOString()} ${levelName(entry.level)} ${entry.message}`,
+          `${new Date(entry.receivedAt).toISOString()} ${levelName(entry.level)} ${entry.text}`,
       )
       .join("\n");
   async function copy() {
