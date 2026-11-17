@@ -2,19 +2,33 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_call:
+    inputs:
+      publish-pages:
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
+      - name: Verify release source
+        if: github.event_name == 'release'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          bun -e 'const tag = process.env.RELEASE_TAG; const version = require("./package.json").version; if (tag !== `v${version}` || !/^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$/.test(tag)) throw new Error("Release tag must match package.json version");'
       - run: bun install --frozen-lockfile
       - run: bun run proto:generate
       - run: git diff --exit-code -- src/proto
@@ -36,3 +50,8 @@ jobs:
           echo "SING_BOX_BINARY=$RUNNER_TEMP/sing-box-1.14.0-linux-amd64/sing-box" >> "$GITHUB_ENV"
       - run: bun run test:integration
       - run: bun run test:e2e -- e2e/native.spec.ts --project desktop
+      - name: Upload verified Pages build
+        if: inputs.publish-pages
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: dist
