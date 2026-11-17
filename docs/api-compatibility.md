@@ -30,8 +30,8 @@ Metadata: `authorization: Bearer <secret>`. No query credentials. Unary deadline
 | URLTest | outboundTag | Empty; latency results arrive through groups, not this response |
 | SubscribeLog | Empty | stream Log.messages[] (level/message), reset flag; no server timestamp |
 | GetDefaultLogLevel | Empty | DefaultLogLevel.level |
-| SubscribeConnections | interval int64 nanoseconds | stream ConnectionEvents (reset + NEW/UPDATE/CLOSED); UPDATE deltas increment totals, CLOSED removes active row |
-| CloseConnection | id | Empty; removal confirmed by stream |
+| SubscribeConnections | interval int64 nanoseconds | stream ConnectionEvents (reset + NEW/UPDATE/CLOSED); UPDATE deltas increment totals, CLOSED stores final counters/closedAt; Active/Closed filters use the timestamp |
+| CloseConnection | id | Empty; closed state confirmed by stream |
 | CloseAllConnections | Empty | Empty; destructive action requires confirmation |
 | GetClashModeStatus | Empty | modeList/currentMode, NotFound if mode manager absent |
 | SetClashMode | mode (field 3) | Empty; SDK only in P0 |
@@ -52,3 +52,5 @@ Vendored proto is unmodified GPL-3.0-or-later, copyright nekohasekai / SagerNet;
 ## Verification ledger
 
 Source review verifies the contract above, not a deployed server. Runtime integration and browser results are recorded in `docs/verification.md` after execution. External VPS TLS, reverse-proxy buffering, CORS/PNA and large real workloads must be verified in the deployment environment.
+
+Connection status: API 4 provides `closedAt` and CLOSED events plus closed history in initial snapshots. SingDeck derives Active/Closed only from those server fields; the contract has no independent Blocked flag. Rejected requests may never appear in tracking, so missing rows are not labeled blocked.

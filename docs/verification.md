@@ -2,6 +2,16 @@
 
 Implementation validation: 2026-11-17, Linux x86_64, Bun 1.4.4, Node 26.13.0, TypeScript 6.0.3, Playwright Chromium 159. CI targets Node 24 and the same Bun version. This file distinguishes mock evidence from real native Service API evidence.
 
+## v0.3.0 local regression record
+
+Worktree feature validation on 2026-11-17: lint, typecheck, production build, frozen installation, actionlint, schema regeneration and license reproducibility pass. Unit tests: **26 pass**. Official sing-box 1.14.0 integration: **5 pass**, including download of a root-layout ZIP from a loopback HTTP fixture, extraction into a new directory and serving HTML/assets under `/dashboard/`. This proves core archive handling; it does not prove a user's GitHub download route.
+
+Desktop/mobile Playwright: **21 pass, 1 intentional duplicate native mobile fixture skip**. The real native browser test checks API CORS and built-in hosting; product feature interactions use explicit mock mode. Covered: separate group/node card controls, collapsed groups, Active/Closed history and filtering, disabled close actions for closed rows, INFO threshold including WARN/ERROR while excluding DEBUG/TRACE, English/Chinese switches, persistent theme/language, current-connection menu/disconnect and absence of removed Settings/profile/sandbox controls. Session unit coverage keeps outage/rejection/cancellation and verifies closed history is evicted before active records at the memory cap.
+
+Visual QA used Playwright (Browser plugin absent), 1440×1000 desktop and 390×844 mobile, with overflow checks at 320/390/768/1440px. Light/dark and English/Chinese views were inspected. Per-page slogans no longer consume body space; navigation hover/focus exposes descriptions. Screenshots are outside source control. Tagged release CI repeats these checks; its final status is recorded on GitHub, not inferred from local validation.
+
+The following sections preserve the **initial implementation** record and its original limits; they are not the v0.3.0 test counts or publication status.
+
 ## Commands and results
 
 | Gate | Result | Evidence scope |

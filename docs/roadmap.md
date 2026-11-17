@@ -2,7 +2,7 @@
 
 ## P0 — initial usable release
 
-Implemented: independent responsive shell and tokens; light/dark/system themes; explicit mock and native adapters; typed generated API 4 SDK; bounded/cancelable/reconnecting streams; explicit connect/demo entry; overview metrics/chart; collapsible searchable/list/card proxy groups and server-confirmed selector changes; connection search/network/outbound filter/sort/details/paginated rendering/close actions; bounded ANSI-colored logs with plain-text search/export and filters, pause, autoscroll, local clear, copy/export; connection settings and metadata profile persistence; unit/browser/official-binary tests and CI; both static deployment paths.
+Implemented: independent responsive shell and tokens; light/dark/system themes; explicit mock and native adapters; typed generated API 4 SDK; bounded/cancelable/reconnecting streams; explicit connect/demo entry; overview metrics/chart; collapsible searchable groups with independent group/node list/card layouts and server-confirmed selector changes; connection search/network/outbound/Active/Closed filtering, final history, sort/details/paginated rendering/close actions; English/Chinese interface; compact navigation hints and top-right appearance/connection controls; bounded INFO-threshold ANSI-colored logs with plain-text search/export and filters, pause, autoscroll, local clear, copy/export; connection settings and metadata profile persistence; unit/browser/official-binary tests and CI; both static deployment paths.
 
 Limits are visible, not simulated success: no-result test history cannot distinguish failures from untested nodes; unknown API revisions are gated; absent capabilities are unavailable; only one real profile can be edited in the current UI; remote HTTP is refused. Runtime evidence and remaining checks live in `verification.md`.
 
@@ -12,7 +12,7 @@ Limits are visible, not simulated success: no-result test history cannot disting
 2. Real-world deployment validation across reverse proxies, trusted TLS, browser local-network policies, Firefox/WebKit and high-volume instances; add targeted compatibility fixtures before widening the API gate.
 3. URL-test progress/result freshness UX based on authoritative available data; network-quality and STUN streaming tools; optional native Clash Mode management without a Clash REST dependency.
 
-Then advanced outbound statistics, traffic history visualization, English/Chinese localization, PWA with a deliberate sensitive-data caching policy, and customizable dashboard layouts. No implied backend or long-term traffic retention in P0.
+Then advanced outbound statistics, traffic history visualization, PWA with a deliberate sensitive-data caching policy, and customizable dashboard layouts. No implied backend or long-term traffic retention in P0.
 
 ## P2 — longer term
 

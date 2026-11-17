@@ -54,5 +54,10 @@ jobs:
           mkdir dist
           tar --no-same-owner -xf "$RUNNER_TEMP/pages/artifact.tar" -C dist
           cd dist
+          test -f index.html
+          test -d assets
           zip -qr "$RUNNER_TEMP/singdeck-${RELEASE_TAG}.zip" .
-          gh release upload "$RELEASE_TAG" "$RUNNER_TEMP/singdeck-${RELEASE_TAG}.zip" --repo "$GITHUB_REPOSITORY" --clobber
+          cd "$RUNNER_TEMP"
+          cp "singdeck-${RELEASE_TAG}.zip" singdeck.zip
+          sha256sum "singdeck-${RELEASE_TAG}.zip" singdeck.zip > SHA256SUMS
+          gh release upload "$RELEASE_TAG" "singdeck-${RELEASE_TAG}.zip" singdeck.zip SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
