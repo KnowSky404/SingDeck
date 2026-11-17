@@ -1,0 +1,38 @@
+name: CI
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - run: bun install --frozen-lockfile
+      - run: bun run proto:generate
+      - run: git diff --exit-code -- src/proto
+      - run: bun run licenses:generate
+      - run: git diff --exit-code -- public/third-party-licenses.txt
+      - run: bun run lint
+      - run: bun run typecheck
+      - run: bun run test
+      - run: bun run build
+      - run: bunx playwright install --with-deps chromium
+      - run: bun run test:e2e
+      - name: Obtain pinned official integration fixture
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh auth status --hostname github.com
+          gh release download v1.14.0 --repo SagerNet/sing-box --pattern sing-box-1.14.0-linux-amd64.tar.gz --dir "$RUNNER_TEMP"
+          tar --no-same-owner -xzf "$RUNNER_TEMP/sing-box-1.14.0-linux-amd64.tar.gz" -C "$RUNNER_TEMP"
+          echo "SING_BOX_BINARY=$RUNNER_TEMP/sing-box-1.14.0-linux-amd64/sing-box" >> "$GITHUB_ENV"
+      - run: bun run test:integration
+      - run: bun run test:e2e -- e2e/native.spec.ts --project desktop

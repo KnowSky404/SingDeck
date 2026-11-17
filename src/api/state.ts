@@ -1,0 +1,122 @@
+import { create } from "@bufbuild/protobuf";
+import {
+  ConnectionSchema,
+  ConnectionEventType,
+  type Connection,
+  type ConnectionEvents,
+  type Log,
+  type LogLevel,
+  type Version,
+  type Status,
+  type ServiceStatus,
+  type Group,
+} from "@/proto/daemon/started_service_pb";
+
+export const LOG_LIMIT = 2000;
+export const CONNECTION_LIMIT = 10000;
+export interface LogEntry {
+  id: number;
+  receivedAt: number;
+  level: LogLevel;
+  message: string;
+}
+export interface TrafficPoint {
+  time: number;
+  down: number;
+  up: number;
+}
+export type Channel = "service" | "status" | "groups" | "logs" | "connections";
+export interface Snapshot {
+  phase: "disconnected" | "connecting" | "connected" | "reconnecting" | "error";
+  error?: string;
+  version?: Version;
+  service?: ServiceStatus;
+  status?: Status;
+  startedAt?: bigint;
+  defaultLogLevel?: LogLevel;
+  groups?: Group[];
+  logs: LogEntry[];
+  connections: ReadonlyMap<string, Connection>;
+  connectionOverflow: boolean;
+  traffic: TrafficPoint[];
+  streamErrors: Partial<Record<Channel, string>>;
+  loaded: Partial<Record<Channel, boolean>>;
+}
+export const initialSnapshot = (): Snapshot => ({
+  phase: "disconnected",
+  logs: [],
+  connections: new Map(),
+  connectionOverflow: false,
+  traffic: [],
+  streamErrors: {},
+  loaded: {},
+});
+
+export function appendLogs(
+  current: LogEntry[],
+  batch: Log,
+  sequence: { value: number },
+  now: number,
+): LogEntry[] {
+  const base = batch.reset ? [] : current;
+  return [
+    ...base,
+    ...batch.messages
+      .slice(-LOG_LIMIT)
+      .map((m) => ({
+        id: ++sequence.value,
+        receivedAt: now,
+        level: m.level,
+        message: m.message.slice(0, 16384),
+      })),
+  ].slice(-LOG_LIMIT);
+}
+
+export function applyConnections(
+  current: ReadonlyMap<string, Connection>,
+  batch: ConnectionEvents,
+): Map<string, Connection> {
+  const next = batch.reset ? new Map<string, Connection>() : new Map(current);
+  for (const e of batch.events) {
+    if (
+      e.type === ConnectionEventType.CONNECTION_EVENT_CLOSED ||
+      (e.connection && e.connection.closedAt > 0n)
+    )
+      next.delete(e.id);
+    else if (
+      e.type === ConnectionEventType.CONNECTION_EVENT_NEW &&
+      e.connection
+    )
+      next.set(e.id, e.connection);
+    else if (e.type === ConnectionEventType.CONNECTION_EVENT_UPDATE) {
+      const row = next.get(e.id);
+      if (row)
+        next.set(
+          e.id,
+          create(ConnectionSchema, {
+            ...row,
+            uplink: e.uplinkDelta,
+            downlink: e.downlinkDelta,
+            uplinkTotal: row.uplinkTotal + e.uplinkDelta,
+            downlinkTotal: row.downlinkTotal + e.downlinkDelta,
+          }),
+        );
+    }
+  }
+  return next;
+}
+
+export function assertCompatible(version: Version) {
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(version.version);
+  if (
+    version.apiVersion !== 4 ||
+    !match ||
+    Number(match[1]) < 1 ||
+    (Number(match[1]) === 1 && Number(match[2]) < 14)
+  ) {
+    throw new CompatibilityError(
+      "Unsupported API. SingDeck currently requires stable sing-box ≥1.14.0 with Service API 4.",
+    );
+  }
+}
+export class CompatibilityError extends Error {}

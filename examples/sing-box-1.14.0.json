@@ -1,0 +1,24 @@
+{
+  "log": { "level": "info", "timestamp": true },
+  "inbounds": [
+    { "type": "mixed", "tag": "mixed-in", "listen": "127.0.0.1", "listen_port": 19080 }
+  ],
+  "outbounds": [
+    { "type": "selector", "tag": "Primary route", "outbounds": ["direct", "direct-backup"], "default": "direct" },
+    { "type": "direct", "tag": "direct" },
+    { "type": "direct", "tag": "direct-backup" }
+  ],
+  "route": { "final": "Primary route" },
+  "services": [
+    {
+      "type": "api",
+      "tag": "api",
+      "listen": "127.0.0.1",
+      "listen_port": 19090,
+      "secret": "REPLACE_WITH_A_LONG_RANDOM_SECRET",
+      "access_control_allow_origin": ["http://127.0.0.1:5173", "http://127.0.0.1:4173"],
+      "access_control_allow_private_network": false,
+      "dashboard": { "enabled": true, "path": "./dist" }
+    }
+  ]
+}
