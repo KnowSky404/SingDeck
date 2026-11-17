@@ -70,6 +70,14 @@ The repository publishes to [https://knowsky404.github.io/SingDeck/](https://kno
 
 For a real connection from this preview, use your own trusted HTTPS API and allow the exact CORS origin `https://knowsky404.github.io` (without `/SingDeck/`). Plain HTTP APIs may be blocked by mixed-content policy; private-network endpoints also depend on browser permissions. Tokens remain in browser memory.
 
+## Old dashboard after switching or updating / 切换或更新后仍显示旧面板
+
+First try **Ctrl + Shift + R** in Firefox on Windows/Linux. In a confirmed migration case, the core was already serving SingDeck while the browser still showed the previous dashboard; a force reload resolved it. This is different from the core failing to download the new files.
+
+先按 **Ctrl + Shift + R** 强制刷新。已确认的迁移案例中，服务端已经返回 SingDeck，浏览器仍显示旧面板，强制刷新后恢复；这种情况无需重新下载面板或修改入口配置。
+
+If force reload does not help, compare a private window and the server response. A remaining Service Worker from a previous dashboard may also need unregistering. See the bilingual Wiki: [English troubleshooting](https://github.com/KnowSky404/SingDeck/wiki/Troubleshooting#old-dashboard-after-switching-or-updating) / [中文排查步骤](https://github.com/KnowSky404/SingDeck/wiki/Troubleshooting-zh-CN#切换或更新后仍显示旧面板). Avoid clearing unrelated sites or deleting the dashboard/configuration directory to fix browser caches.
+
 ## Diagnosing access failures
 
 | Symptom | Check |
