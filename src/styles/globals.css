@@ -1345,18 +1345,16 @@ h3 {
     grid-column: 1/-1;
     max-width: none;
   }
-  .connection-table td:nth-child(4)::before {
+  .connection-table td:nth-child(5)::before {
     content: "↑ ";
     color: var(--muted-foreground);
   }
-  .connection-table td:nth-child(5)::before {
+  .connection-table td:nth-child(6)::before {
     content: "↓ ";
     color: var(--muted-foreground);
   }
   .connection-table td:last-child {
-    grid-column: 1/-1;
     justify-self: end;
-    margin-top: -30px;
   }
   .connection-table td:last-child button {
     min-width: 36px;
@@ -1529,4 +1527,99 @@ h3 {
   --ansi-13: #e8b7e2;
   --ansi-14: #a3e5ed;
   --ansi-15: #e4edf7;
+}
+
+.topbar {
+  height: 56px;
+}
+.topbar-actions,
+.workspace-status,
+.layout-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.topbar-actions {
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.layout-control > span {
+  color: var(--muted-foreground);
+  font-size: 11px;
+}
+.workspace > main {
+  padding-top: 18px;
+  gap: 16px;
+}
+.connection-menu {
+  width: min(340px, calc(100vw - 24px));
+}
+.connection-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  overflow-wrap: anywhere;
+}
+.connection-summary strong {
+  color: var(--foreground);
+}
+.proxy-group-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.proxy-group-grid > *,
+.proxy-group-grid [data-slot="card"] {
+  min-width: 0;
+}
+.proxy-group-grid .proxy-row {
+  flex-wrap: wrap;
+}
+.proxy-group-grid .proxy-actions {
+  width: 100%;
+  margin-left: 0;
+  justify-content: flex-end;
+}
+.proxy-group-grid .proxy-cards {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr));
+}
+.group-title-trigger span,
+[data-slot="card-description"],
+.detail-list dd {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .topbar {
+    min-height: 56px;
+    padding: 8px 12px;
+    flex-wrap: nowrap;
+    gap: 8px;
+  }
+  .mobile-brand {
+    width: auto;
+    flex-shrink: 0;
+  }
+  .topbar-actions {
+    gap: 2px;
+  }
+  .topbar-actions button {
+    width: 32px;
+    height: 36px;
+  }
+  .workspace-status {
+    gap: 6px;
+  }
+  .workspace > main {
+    padding-top: 16px;
+    gap: 14px;
+  }
+}
+@media (max-width: 460px) {
+  .topbar .brand > span:last-child {
+    display: none;
+  }
 }

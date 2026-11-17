@@ -35,7 +35,7 @@ describe("native state semantics", () => {
     ).toBe("Invalid result");
   });
 
-  it("resets connection snapshots, accumulates delta totals and removes closed rows", () => {
+  it("resets connection snapshots, accumulates deltas and retains confirmed closed history", () => {
     let rows = applyConnections(
       new Map(),
       batch({
@@ -59,7 +59,7 @@ describe("native state semantics", () => {
         ],
       }),
     );
-    expect(rows.size).toBe(1);
+    expect(rows.size).toBe(2);
     rows = applyConnections(
       rows,
       batch({
@@ -82,11 +82,39 @@ describe("native state semantics", () => {
       rows,
       batch({
         events: [
-          { id: "a", type: ConnectionEventType.CONNECTION_EVENT_CLOSED },
+          {
+            id: "a",
+            type: ConnectionEventType.CONNECTION_EVENT_CLOSED,
+            closedAt: 20n,
+            connection: create(ConnectionSchema, {
+              id: "a",
+              uplinkTotal: 25n,
+              downlinkTotal: 50n,
+            }),
+          },
         ],
       }),
     );
-    expect(rows.size).toBe(0);
+    expect(rows.get("a")).toMatchObject({
+      closedAt: 20n,
+      uplinkTotal: 25n,
+      downlinkTotal: 50n,
+      uplink: 0n,
+    });
+    expect(rows.get("closed")?.closedAt).toBe(10n);
+    rows = applyConnections(
+      rows,
+      batch({
+        events: [
+          {
+            id: "a",
+            type: ConnectionEventType.CONNECTION_EVENT_UPDATE,
+            uplinkDelta: 99n,
+          },
+        ],
+      }),
+    );
+    expect(rows.get("a")?.uplinkTotal).toBe(25n);
     expect(
       applyConnections(
         new Map([["a", create(ConnectionSchema)]]),

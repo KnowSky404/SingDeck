@@ -108,6 +108,16 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
       ];
     }),
   );
+  for (const id of ["mock-closed-1", "mock-closed-2"]) {
+    connections.set(
+      id,
+      create(ConnectionSchema, {
+        ...connections.get("mock-1")!,
+        id,
+        closedAt: BigInt(Date.now() - 1000),
+      }),
+    );
+  }
   const check = () => {
     if (control.offline)
       throw new ConnectError("Simulated offline", Code.Unavailable);
@@ -167,8 +177,12 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
         yield create(StatusSchema, {
           memory: 84_600_000n,
           goroutines: 78,
-          connectionsIn: connections.size,
-          connectionsOut: connections.size,
+          connectionsIn: [...connections.values()].filter(
+            (c) => c.closedAt === 0n,
+          ).length,
+          connectionsOut: [...connections.values()].filter(
+            (c) => c.closedAt === 0n,
+          ).length,
           trafficAvailable: true,
           downlink,
           uplink,
@@ -232,13 +246,35 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
         check();
         yield create(LogSchema, {
           reset: i === 0,
-          messages: [
-            {
-              level: i % 9 === 8 ? LogLevel.WARN : LogLevel.INFO,
-              message: messages[i++ % messages.length],
-            },
-          ],
+          messages:
+            i === 0
+              ? [
+                  { level: LogLevel.DEBUG, message: messages[0] },
+                  {
+                    level: LogLevel.TRACE,
+                    message: "demo trace: route lookup",
+                  },
+                  { level: LogLevel.INFO, message: messages[1] },
+                  {
+                    level: LogLevel.WARN,
+                    message: "demo warning: retrying a probe",
+                  },
+                  {
+                    level: LogLevel.ERROR,
+                    message: "demo error: simulated probe failure",
+                  },
+                ]
+              : [
+                  {
+                    level:
+                      i % messages.length === 0
+                        ? LogLevel.DEBUG
+                        : LogLevel.INFO,
+                    message: messages[i % messages.length],
+                  },
+                ],
         });
+        i++;
         await delay(1400, signal);
       }
     },
@@ -262,6 +298,7 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
         );
         if (!first)
           for (const c of connections.values()) {
+            if (c.closedAt > 0n) continue;
             c.downlinkTotal += 25000n;
             c.uplinkTotal += 3000n;
           }
@@ -274,12 +311,14 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
     },
     async closeConnection(request, opts) {
       await mutation(opts?.signal);
-      connections.delete(request.id ?? "");
+      const row = connections.get(request.id ?? "");
+      if (row && row.closedAt === 0n) row.closedAt = BigInt(Date.now());
       return empty();
     },
     async closeAllConnections(_, opts) {
       await mutation(opts?.signal);
-      connections.clear();
+      for (const row of connections.values())
+        if (row.closedAt === 0n) row.closedAt = BigInt(Date.now());
       return empty();
     },
     async getClashModeStatus() {

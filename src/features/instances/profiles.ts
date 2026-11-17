@@ -15,7 +15,9 @@ export interface Profile {
     windowSeconds: number;
   };
 }
-export function inferDefaultEndpoint(page?: Pick<Location, "origin" | "pathname">) {
+export function inferDefaultEndpoint(
+  page?: Pick<Location, "origin" | "pathname">,
+) {
   if (page?.pathname.startsWith("/dashboard/")) {
     try {
       return validateEndpoint(page.origin);
@@ -32,7 +34,7 @@ const initialEndpoint = inferDefaultEndpoint(
 
 export const defaultProfile: Profile = {
   id: "local",
-  name: "Local instance",
+  name: "sing-box instance",
   endpoint: initialEndpoint,
   mode: "native",
   tls: initialEndpoint.startsWith("https:"),

@@ -9,7 +9,6 @@ import {
 } from "react";
 import {
   Activity,
-  Cable,
   ChevronLeft,
   ChevronRight,
   FlaskConical,
@@ -20,10 +19,6 @@ import {
   Radio,
   Settings,
   Terminal,
-  Sun,
-  Moon,
-  Monitor,
-  Unplug,
 } from "lucide-react";
 import { useWorkspace } from "./context";
 import { Button } from "@/components/ui/button";
@@ -36,10 +31,17 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { Choice, EmptyState, Notice } from "@/components/shared";
+import { EmptyState, Notice } from "@/components/shared";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Brand } from "@/components/brand";
 import EntryPage from "./entry";
+import { WorkspaceControls } from "@/components/workspace-controls";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { version } from "../../package.json";
 import { cn } from "@/lib/utils";
 
@@ -49,11 +51,36 @@ const Connections = lazy(() => import("@/features/connections/page"));
 const Logs = lazy(() => import("@/features/logs/page"));
 const SettingsPage = lazy(() => import("@/features/settings/page"));
 const links = [
-  { path: "/", label: "Overview", icon: House },
-  { path: "/proxies", label: "Proxies", icon: Layers3 },
-  { path: "/connections", label: "Connections", icon: Network },
-  { path: "/logs", label: "Logs", icon: Terminal },
-  { path: "/settings", label: "Settings", icon: Settings },
+  {
+    path: "/",
+    label: "Overview",
+    description: "Your network, at a glance.",
+    icon: House,
+  },
+  {
+    path: "/proxies",
+    label: "Proxies",
+    description: "Find your route. Keep your network moving.",
+    icon: Layers3,
+  },
+  {
+    path: "/connections",
+    label: "Connections",
+    description: "See where your traffic goes, in real time.",
+    icon: Network,
+  },
+  {
+    path: "/logs",
+    label: "Logs",
+    description: "A live view into your instance.",
+    icon: Terminal,
+  },
+  {
+    path: "/settings",
+    label: "Settings",
+    description: "Instance and dashboard information.",
+    icon: Settings,
+  },
 ];
 const subscribeHash = (listener: () => void) => {
   addEventListener("hashchange", listener);
@@ -77,42 +104,40 @@ function Navigation({
   onNavigate?: () => void;
   mobile?: boolean;
 }) {
+  const { t } = useWorkspace();
   return (
-    <nav aria-label={mobile ? "Mobile navigation" : "Main navigation"}>
-      {links.map(({ path: href, label, icon: Icon }) => (
-        <a
-          key={href}
-          href={`#${href}`}
-          onClick={onNavigate}
-          aria-current={path === href ? "page" : undefined}
-          title={label}
-        >
-          <Icon />
-          <span>{label}</span>
-        </a>
-      ))}
-    </nav>
+    <TooltipProvider delayDuration={400}>
+      <nav aria-label={t(mobile ? "Mobile navigation" : "Main navigation")}>
+        {links.map(({ path: href, label, description, icon: Icon }) => (
+          <Tooltip key={href}>
+            <TooltipTrigger asChild>
+              <a
+                href={`#${href}`}
+                aria-label={t(label)}
+                onClick={onNavigate}
+                aria-current={path === href ? "page" : undefined}
+              >
+                <Icon />
+                <span>{t(label)}</span>
+              </a>
+            </TooltipTrigger>
+            <TooltipContent side={mobile ? "top" : "right"}>
+              {t(description)}
+            </TooltipContent>
+          </Tooltip>
+        ))}
+      </nav>
+    </TooltipProvider>
   );
 }
 export default function App() {
-  const {
-    profile,
-    profiles,
-    session,
-    snapshot,
-    theme,
-    setTheme,
-    selectProfile,
-    connect,
-    disconnect,
-  } = useWorkspace();
+  const { profile, session, snapshot, t } = useWorkspace();
   const path = useSyncExternalStore(subscribeHash, currentPath);
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [path]);
   const [collapsed, setCollapsed] = useState(false),
     [menu, setMenu] = useState(false);
-  const ThemeIcon = theme === "dark" ? Moon : theme === "light" ? Sun : Monitor;
   const Page =
     path === "/"
       ? Overview
@@ -139,7 +164,7 @@ export default function App() {
           document.getElementById("main-content")?.focus();
         }}
       >
-        Skip to content
+        {t("Skip to content")}
       </a>
       <aside className="sidebar">
         <Brand />
@@ -147,31 +172,16 @@ export default function App() {
         <div className="sidebar-bottom">
           <Separator />
           <div className="sidebar-caption">
-            <Radio /> Native Service API
+            <Radio />
+            {t("Native Service API")}
           </div>
           <Button
             variant="ghost"
             onClick={() => setCollapsed(!collapsed)}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={t(collapsed ? "Expand sidebar" : "Collapse sidebar")}
           >
             {collapsed ? <ChevronRight /> : <ChevronLeft />}
-            <span>Collapse sidebar</span>
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() =>
-              setTheme(
-                theme === "light"
-                  ? "dark"
-                  : theme === "dark"
-                    ? "system"
-                    : "light",
-              )
-            }
-            aria-label={`Theme: ${theme}. Change theme.`}
-          >
-            <ThemeIcon />
-            <span>{theme[0].toUpperCase() + theme.slice(1)}</span>
+            <span>{t("Collapse sidebar")}</span>
           </Button>
         </div>
       </aside>
@@ -181,23 +191,14 @@ export default function App() {
             <Button
               variant="ghost"
               size="icon"
-              aria-label="Open navigation"
+              aria-label={t("Open navigation")}
               onClick={() => setMenu(true)}
             >
               <Menu />
             </Button>
             <Brand />
           </div>
-          <div className="instance-controls">
-            <Choice
-              label="Active instance"
-              value={profile.id}
-              onChange={selectProfile}
-              options={[
-                ...profiles.map((p) => ({ value: p.id, label: p.name })),
-                { value: "demo", label: "Demo workspace" },
-              ]}
-            />
+          <div className="workspace-status">
             <span className="connection-status" role="status">
               <span
                 className={cn(
@@ -205,31 +206,16 @@ export default function App() {
                   snapshot.phase !== "connected" && "muted-dot",
                 )}
               />
-              {phaseLabels[snapshot.phase]}
+              {t(phaseLabels[snapshot.phase])}
             </span>
             {profile.mode === "mock" && (
               <Badge variant="secondary" className="mock-badge">
                 <FlaskConical />
-                Mock mode
+                {t("Mock mode")}
               </Badge>
             )}
           </div>
-          <div className="topbar-actions">
-            {snapshot.phase !== "connected" && (
-              <Button variant="outline" size="sm" onClick={connect}>
-                <Cable data-icon="inline-start" />
-                Retry
-              </Button>
-            )}
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="Disconnect instance"
-              onClick={disconnect}
-            >
-              <Unplug />
-            </Button>
-          </div>
+          <WorkspaceControls connection />
         </header>
         <main id="main-content" tabIndex={-1}>
           {snapshot.error && (
@@ -240,13 +226,14 @@ export default function App() {
                   : "Connection failed"
               }
             >
-              {snapshot.error} <a href="#/settings">Open Settings</a>
+              {t(snapshot.error)}
             </Notice>
           )}
           {partial.length > 0 && path === "/" && (
-            <Notice title="Some live data is unavailable">
-              {partial.map(([name]) => name).join(", ")} stream interrupted.
-              Open the relevant page for details.
+            <Notice title={t("Some live data is unavailable")}>
+              {t(
+                "Some streams were interrupted. Open the relevant page for details.",
+              )}
             </Notice>
           )}
           <AppErrorBoundary key={`${profile.id}:${path}`}>
@@ -254,7 +241,7 @@ export default function App() {
               fallback={
                 <div
                   role="status"
-                  aria-label="Loading page"
+                  aria-label={t("Loading page")}
                   className="loading-state"
                 >
                   <Skeleton className="h-10 w-52" />
@@ -266,8 +253,10 @@ export default function App() {
                 <Page key={`${profile.id}:${session.profile.endpoint}`} />
               ) : (
                 <EmptyState
-                  title="Page not found"
-                  description="Choose a page from the navigation to continue."
+                  title={t("Page not found")}
+                  description={t(
+                    "Choose a page from the navigation to continue.",
+                  )}
                 />
               )}
             </Suspense>
@@ -275,7 +264,7 @@ export default function App() {
           <footer className="workspace-footer">
             <span>
               <Activity />
-              Native Service API · gRPC-Web
+              {t("Native Service API · gRPC-Web")}
             </span>
             <span>
               <a
@@ -283,7 +272,7 @@ export default function App() {
                 target="_blank"
                 rel="noreferrer"
               >
-                Source
+                {t("Source")}
               </a>
               <span>·</span>
               <a
@@ -291,7 +280,7 @@ export default function App() {
                 target="_blank"
                 rel="noreferrer"
               >
-                Licenses
+                {t("Licenses")}
               </a>
               <span className="footer-version">{version}</span>
             </span>
@@ -302,21 +291,12 @@ export default function App() {
         <Navigation path={path} mobile />
       </div>
       <Dialog open={menu} onOpenChange={setMenu}>
-        <DialogContent className="navigation-dialog">
+        <DialogContent closeLabel={t("Close")} className="navigation-dialog">
           <DialogHeader>
-            <DialogTitle>SingDeck navigation</DialogTitle>
-            <DialogDescription>Your network workspace</DialogDescription>
+            <DialogTitle>{t("SingDeck navigation")}</DialogTitle>
+            <DialogDescription>{t("Your network workspace")}</DialogDescription>
           </DialogHeader>
           <Navigation path={path} onNavigate={() => setMenu(false)} mobile />
-          <Choice
-            label="Mobile theme"
-            value={theme}
-            onChange={(v) => setTheme(v as typeof theme)}
-            options={["light", "dark", "system"].map((value) => ({
-              value,
-              label: `${value[0].toUpperCase() + value.slice(1)} theme`,
-            }))}
-          />
         </DialogContent>
       </Dialog>
     </div>

@@ -3,12 +3,18 @@ import { parseAnsi } from "@/lib/ansi";
 import { Badge } from "@/components/ui/badge";
 import { time, levelName } from "@/lib/format";
 import type { LogEntry } from "@/api/state";
-export const LogLine = memo(function LogLine({ entry }: { entry: LogEntry }) {
+export const LogLine = memo(function LogLine({
+  entry,
+  receiptLabel = "Local receipt time",
+}: {
+  entry: LogEntry;
+  receiptLabel?: string;
+}) {
   return (
     <div className="log-line">
       <time
         dateTime={new Date(entry.receivedAt).toISOString()}
-        title="Local receipt time"
+        title={receiptLabel}
       >
         {time(entry.receivedAt)}
       </time>

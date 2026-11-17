@@ -1,17 +1,19 @@
 import { createContext, useContext } from "react";
 import type { InstanceSession } from "@/api/session";
 import type { Snapshot } from "@/api/state";
-import type { MockControl } from "@/mocks/client";
 import type { Profile, Theme } from "@/features/instances/profiles";
+import type { Language, Translate } from "@/lib/i18n";
 
 export interface Workspace {
   profile: Profile;
   profiles: Profile[];
   session: InstanceSession;
   snapshot: Snapshot;
-  mockControl: MockControl;
   theme: Theme;
   setTheme: (theme: Theme) => void;
+  language: Language;
+  setLanguage: (language: Language) => void;
+  t: Translate;
   selectProfile: (id: string) => void;
   saveProfile: (profile: Profile, token: string) => void;
   connect: () => void;

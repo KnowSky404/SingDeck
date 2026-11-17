@@ -226,7 +226,12 @@ export class InstanceSession {
               events,
             );
             const overflow = connections.size > CONNECTION_LIMIT;
-            // shortcut: retain at most 10k active rows; use server filtering when managing larger instances.
+            // Discard closed history before active rows when the bounded view is full.
+            for (const [id, row] of connections) {
+              if (connections.size <= CONNECTION_LIMIT) break;
+              if (row.closedAt > 0n) connections.delete(id);
+            }
+            // shortcut: retain at most 10k records; use server filtering for larger instances.
             while (connections.size > CONNECTION_LIMIT)
               connections.delete(connections.keys().next().value!);
             this.update({
