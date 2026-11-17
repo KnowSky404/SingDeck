@@ -37,7 +37,7 @@ Metadata: `authorization: Bearer <secret>`. No query credentials. Unary deadline
 | SetClashMode | mode (field 3) | Empty; SDK only in P0 |
 | GetStartedAt | Empty | startedAt Unix **milliseconds**, used for uptime |
 
-Status rates must divide byte deltas by the selected interval in seconds. First status sample has no measured rate. Group urlTestTime is Unix **seconds**; 0 means untested; failed tests delete history, so missing history cannot distinguish untested from failed. A nonpositive delay with a timestamp is displayed as failed/timeout without inventing a latency. Log receipt timestamps are local, clearly labeled. Missing/disabled traffic tracking is unavailable, never fabricated zero traffic.
+Status rates must divide byte deltas by the selected interval in seconds. First status sample has no measured rate. Group urlTestTime is Unix **seconds**; 0 means no history; failed tests delete history, so missing history cannot distinguish untested from failed. A zero delay with a test timestamp is a valid sub-millisecond success truncated by the server and displays as 0 ms; negative delays are invalid data, not a fabricated timeout. Log receipt timestamps are local, clearly labeled. Missing/disabled traffic tracking is unavailable, never fabricated zero traffic.
 
 ## Browser security and deployment
 

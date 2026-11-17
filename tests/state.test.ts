@@ -8,6 +8,7 @@ import {
 } from "@/api/state";
 import {
   ConnectionSchema,
+  GroupItemSchema,
   ConnectionEventsSchema,
   ConnectionEventType,
   LogSchema,
@@ -15,10 +16,25 @@ import {
 } from "@/proto/daemon/started_service_pb";
 import { loadProfiles, saveProfiles } from "@/features/instances/profiles";
 
+import { latency } from "@/features/proxies/latency";
+
 const batch = (
   events: Parameters<typeof create<typeof ConnectionEventsSchema>>[1],
 ) => create(ConnectionEventsSchema, events);
 describe("native state semantics", () => {
+  it("preserves a successful zero-ms probe and does not invent failure metadata", () => {
+    expect(latency(create(GroupItemSchema))).toBe("No result");
+    expect(
+      latency(create(GroupItemSchema, { urlTestTime: 1n, urlTestDelay: 0 })),
+    ).toBe("0 ms");
+    expect(
+      latency(create(GroupItemSchema, { urlTestTime: 1n, urlTestDelay: 42 })),
+    ).toBe("42 ms");
+    expect(
+      latency(create(GroupItemSchema, { urlTestTime: 1n, urlTestDelay: -1 })),
+    ).toBe("Invalid result");
+  });
+
   it("resets connection snapshots, accumulates delta totals and removes closed rows", () => {
     let rows = applyConnections(
       new Map(),

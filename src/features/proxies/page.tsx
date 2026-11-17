@@ -23,15 +23,11 @@ import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   type Group,
-  type GroupItem,
   ServiceStatus_Type,
 } from "@/proto/daemon/started_service_pb";
 
-function latency(item: GroupItem) {
-  if (item.urlTestTime === 0n) return "No result";
-  if (item.urlTestDelay <= 0) return "Failed / timeout";
-  return `${item.urlTestDelay} ms`;
-}
+import { latency } from "./latency";
+
 function ProxyGroup({
   group,
   search,
@@ -108,7 +104,7 @@ function ProxyGroup({
             <div className="proxy-actions">
               <Badge
                 variant={
-                  item.urlTestTime > 0n && item.urlTestDelay > 0
+                  item.urlTestTime > 0n && item.urlTestDelay >= 0
                     ? "outline"
                     : "secondary"
                 }

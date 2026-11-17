@@ -10,7 +10,7 @@ Implementation validation: 2026-11-17, Linux x86_64, Bun 1.4.4, Node 26.13.0, Ty
 | `bun run dev` | Pass | Vite listening and browser-loaded at `http://127.0.0.1:4173` |
 | `bun run lint` | Pass | ESLint including TS and React hook rules, zero warnings |
 | `bun run typecheck` | Pass | Strict app, tests, e2e, scripts and build-tool types |
-| `bun run test` | 16 pass | Binary gRPC-Web framing/trailers, safe endpoint/auth metadata, state reducers, log bounds/reset/redaction, nanosecond/rate conversion, selection confirmation/rejection/timeout, cancellation, reconnect and API revalidation after an outage |
+| `bun run test` | 17 pass | Binary gRPC-Web framing/trailers, safe endpoint/auth metadata, state reducers, log bounds/reset/redaction, nanosecond/rate conversion, zero-millisecond probe results, selection confirmation/rejection/timeout, cancellation, reconnect and API revalidation after an outage |
 | `bun run build` | Pass | Production SPA with relative assets, split feature/chart chunks and local font files |
 | `bun run preview` | Pass | HTTP preview at loopback port 4273, title and relative asset references checked |
 | `bun run proto:generate` | Pass, unchanged output | Local Buf/protoc-gen-es; generated SHA-256 unchanged before/after regeneration |
