@@ -29,6 +29,14 @@ On the sing-box API service, set `access_control_allow_origin` to the exact dash
 
 For HTTPS reverse proxies, forward binary POST bodies, authorization and gRPC status headers, disable response buffering for server streams, and allow long streaming responses. Terminate TLS with a browser-trusted certificate; never create a publicly accessible unauthenticated relay. Prefer same-origin deployment to minimize browser policy issues. Use a restrictive CSP suited to your host, including `connect-src` only for explicitly trusted API origins; do not permit arbitrary third-party scripts on a management dashboard.
 
+## GitHub Pages preview
+
+The repository publishes to [https://knowsky404.github.io/SingDeck/](https://knowsky404.github.io/SingDeck/). Click **Explore demo** for the clearly labeled simulated workspace. The public site contains only frontend assets; no private API credentials or backend relay are deployed.
+
+`.github/workflows/pages.yml` installs with Bun, runs lint/type checks/unit tests, builds `dist/`, and deploys through GitHub Pages Actions on pushes to `main`. It can also be run manually. Repository Settings → Pages must use **GitHub Actions** as the source. Relative assets and hash routes work under `/SingDeck/` without changing the built-in `/dashboard/` deployment.
+
+For a real connection from this preview, use your own trusted HTTPS API and allow the exact CORS origin `https://knowsky404.github.io` (without `/SingDeck/`). Plain HTTP APIs may be blocked by mixed-content policy; private-network endpoints also depend on browser permissions. Tokens remain in browser memory.
+
 ## Diagnosing access failures
 
 | Symptom | Check |

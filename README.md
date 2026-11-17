@@ -4,6 +4,8 @@ A modern, responsive web dashboard for sing-box, powered by the native Service A
 
 SingDeck is an independent React application for trusted local or remote sing-box instances. It uses the **native gRPC-Web Service API**, with no Clash REST dependency or extra backend. Baseline: stable **sing-box 1.14.0+ with API version 4**. Other API revisions require verification before use.
 
+Try the [GitHub Pages preview](https://knowsky404.github.io/SingDeck/) and click **Explore demo** to use the simulated workspace. Real API connections still require your own trusted HTTPS endpoint.
+
 ## What works
 
 - **Overview:** service/core/API status, uptime, measured upload/download rates, totals, active connections, memory and a live traffic chart.
