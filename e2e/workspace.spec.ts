@@ -277,6 +277,7 @@ test("mock workspace supports server-confirmed selection, filtering, log control
 
 test("responsive layout, dark/light/system themes, routes and console health", async ({
   page,
+  isMobile,
 }) => {
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -337,7 +338,16 @@ test("responsive layout, dark/light/system themes, routes and console health", a
     .getByRole("button", { name: "Expand sidebar", exact: true })
     .click();
   await page.setViewportSize(originalViewport);
-  await page.getByRole("button", { name: "Theme", exact: true }).click();
+  const themeButton = page.getByRole("button", { name: "Theme", exact: true });
+  if (isMobile) await themeButton.focus();
+  else await themeButton.hover();
+  await expect(page.getByRole("tooltip")).toHaveText("System theme");
+  if (!isMobile) {
+    await page.getByRole("button", { name: "Language", exact: true }).hover();
+    await expect(page.getByRole("tooltip")).toHaveText("Language · English");
+  }
+  await themeButton.click();
+  await expect(page.getByRole("tooltip")).toBeHidden();
   await page
     .getByRole("menuitemradio", { name: "Dark theme", exact: true })
     .click();
@@ -702,7 +712,14 @@ test("language and theme controls work without replacing the session and persist
   page,
 }) => {
   await demo(page);
-  await page.getByRole("button", { name: "Language", exact: true }).click();
+  const languageButton = page.getByRole("button", {
+    name: "Language",
+    exact: true,
+  });
+  await languageButton.focus();
+  await expect(page.getByRole("tooltip")).toHaveText("Language · English");
+  await languageButton.press("Enter");
+  await expect(page.getByRole("tooltip")).toBeHidden();
   await page
     .getByRole("menuitemradio", { name: "简体中文", exact: true })
     .click();
@@ -737,7 +754,13 @@ test("language and theme controls work without replacing the session and persist
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
   await expect(page.locator("html")).toHaveClass(/dark/);
-  await page.getByRole("button", { name: "语言", exact: true }).click();
+  const translatedLanguageButton = page.getByRole("button", {
+    name: "语言",
+    exact: true,
+  });
+  await translatedLanguageButton.focus();
+  await expect(page.getByRole("tooltip")).toHaveText("语言 · 简体中文");
+  await translatedLanguageButton.click();
   await page
     .getByRole("menuitemradio", { name: "English", exact: true })
     .click();
