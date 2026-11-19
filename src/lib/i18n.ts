@@ -131,7 +131,11 @@ const zh: Record<string, string> = {
   Nodes: "节点",
   "{count} groups": "{count} 个代理组",
   "Node details for {name}": "查看 {name} 的节点详情",
-  "Node names and latency": "节点全名与延迟",
+  "Server and transport settings are stored in the sing-box configuration file.":
+    "服务器地址、端口和传输设置请查看 sing-box 配置文件。",
+  "Outbound type": "出站类型",
+  Latency: "延迟",
+  "Last tested": "最后测速",
   "Selected: {name}": "已选择：{name}",
   "Read only": "只读",
   "Collapse {name}": "收起 {name}",
@@ -148,8 +152,6 @@ const zh: Record<string, string> = {
   "No outbounds match your filters.": "没有符合筛选条件的节点。",
   "No result": "无结果",
   "Invalid result": "无效结果",
-  "Selection is confirmed by the instance. “No result” can mean untested or a failed test: this API removes failed test history.":
-    "选择结果由实例确认。“无结果”可能表示未测试或测试失败：API 不保留失败的测试记录。",
   "Close all connections": "关闭全部连接",
   "Search connections": "搜索连接",
   "Search destinations, sources, routes…": "搜索目标、来源、路由…",
