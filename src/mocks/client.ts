@@ -39,6 +39,7 @@ export class MockControl {
 const empty = () => create(EmptySchema);
 export function createMockClient(control = new MockControl()): SingBoxClient {
   const boot = Date.now() - 8_040_000;
+  const initialTestTime = BigInt(Math.floor(Date.now() / 1000));
   let revision = 0;
   let count = 0;
   let mode = "rule";
@@ -58,7 +59,7 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
         create(GroupItemSchema, {
           tag: String(tag),
           type: String(type),
-          urlTestTime: delayMs ? BigInt(Math.floor(Date.now() / 1000)) : 0n,
+          urlTestTime: delayMs ? initialTestTime : 0n,
           urlTestDelay: Number(delayMs),
         }),
       ),
@@ -72,13 +73,15 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
         create(GroupItemSchema, {
           tag: "Singapore 01",
           type: "trojan",
-          urlTestTime: BigInt(Math.floor(Date.now() / 1000)),
+          urlTestTime: initialTestTime,
           urlTestDelay: 68,
         }),
         create(GroupItemSchema, { tag: "London 01", type: "vless" }),
       ],
     }),
   ];
+  const groupsByTag = new Map(groups.map((group) => [group.tag, group]));
+  const items = groups.flatMap((group) => group.items);
   const connections = new Map(
     Array.from({ length: 28 }, (_, i) => {
       const id = `mock-${i + 1}`;
@@ -200,14 +203,28 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
         check();
         if (seen !== revision) {
           seen = revision;
-          yield clone(GroupsSchema, create(GroupsSchema, { group: groups }));
+          const snapshot = clone(
+            GroupsSchema,
+            create(GroupsSchema, { group: groups }),
+          );
+          for (const item of snapshot.group.flatMap((group) => group.items)) {
+            const group = groupsByTag.get(item.tag);
+            const member = group?.items.find(
+              (candidate) => candidate.tag === group.selected,
+            );
+            if (member) {
+              item.urlTestDelay = member.urlTestDelay;
+              item.urlTestTime = member.urlTestTime;
+            }
+          }
+          yield snapshot;
         }
         await delay(150, signal);
       }
     },
     async selectOutbound(request, opts) {
       await mutation(opts?.signal);
-      const group = groups.find((g) => g.tag === request.groupTag);
+      const group = groupsByTag.get(request.groupTag ?? "");
       if (
         !group?.selectable ||
         !group.items.some((i) => i.tag === request.outboundTag)
@@ -219,16 +236,20 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
     },
     async uRLTest(request, opts) {
       await mutation(opts?.signal);
-      for (const group of groups)
-        for (const item of group.items) {
-          if (
-            item.tag === request.outboundTag ||
-            group.tag === request.outboundTag
-          ) {
-            item.urlTestDelay = 25 + ((item.tag.length * 7) % 110);
-            item.urlTestTime = BigInt(Math.floor(Date.now() / 1000));
-          }
+      const tag = request.outboundTag ?? "";
+      const group = groupsByTag.get(tag);
+      const tested = new Set(
+        group?.items.map(
+          ({ tag }) => groupsByTag.get(tag)?.selected ?? tag,
+        ) ?? [tag],
+      );
+      const testedAt = BigInt(Math.floor(Date.now() / 1000));
+      for (const item of items) {
+        if (tested.has(item.tag)) {
+          item.urlTestDelay = 25 + ((item.tag.length * 7) % 110);
+          item.urlTestTime = testedAt;
         }
+      }
       revision++;
       return empty();
     },

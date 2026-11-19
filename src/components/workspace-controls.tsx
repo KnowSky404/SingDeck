@@ -8,7 +8,7 @@ import {
   Sun,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { Popover } from "radix-ui";
+import { Popover, RadioGroup } from "radix-ui";
 import { useWorkspace } from "@/app/context";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,14 +25,13 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { Theme } from "@/features/instances/profiles";
 import type { Language } from "@/lib/i18n";
 
 const themes = {
-  light: { icon: Sun, label: "Light theme" },
-  dark: { icon: Moon, label: "Dark theme" },
-  system: { icon: Monitor, label: "System theme" },
+  light: { icon: Sun, label: "Light theme", shortLabel: "Light" },
+  dark: { icon: Moon, label: "Dark theme", shortLabel: "Dark" },
+  system: { icon: Monitor, label: "System theme", shortLabel: "System" },
 };
 
 const languages = {
@@ -43,11 +42,13 @@ const languages = {
 function DisplayOption({
   children,
   label,
+  shortLabel = label,
   value,
   side,
 }: {
   children: ReactNode;
   label: string;
+  shortLabel?: string;
   value: string;
   side: "top" | "bottom";
 }) {
@@ -55,17 +56,36 @@ function DisplayOption({
     <TooltipProvider delayDuration={400}>
       <Tooltip>
         <TooltipTrigger asChild>
-          <ToggleGroupItem
-            aria-label={label}
-            value={value}
-            className="group/display-option relative aria-checked:bg-sidebar-accent aria-checked:text-sidebar-accent-foreground"
-          >
-            {children}
-            <Check
-              aria-hidden="true"
-              className="invisible absolute right-1 top-1 size-2.5 group-aria-checked/display-option:visible"
-            />
-          </ToggleGroupItem>
+          <div>
+            <Button
+              variant="ghost"
+              asChild
+              className="relative h-9 w-full p-1 aria-checked:bg-sidebar-accent aria-checked:text-sidebar-accent-foreground [@media(hover:none)]:h-12 [@media(hover:none)]:flex-col [@media(hover:none)]:gap-1"
+            >
+              <RadioGroup.Item
+                aria-label={label}
+                value={value}
+                onClick={(event) => {
+                  // Radix selects on arrow focus with a programmatic click.
+                  if (!event.nativeEvent.isTrusted) event.stopPropagation();
+                }}
+              >
+                {children}
+                <span
+                  aria-hidden="true"
+                  className="hidden text-[10px] leading-none [@media(hover:none)]:block"
+                >
+                  {shortLabel}
+                </span>
+                <RadioGroup.Indicator asChild>
+                  <Check
+                    aria-hidden="true"
+                    className="absolute right-1 top-1 size-2.5"
+                  />
+                </RadioGroup.Indicator>
+              </RadioGroup.Item>
+            </Button>
+          </div>
         </TooltipTrigger>
         <TooltipContent side={side} sideOffset={6}>
           {label}
@@ -110,25 +130,27 @@ function DisplaySettings() {
             >
               {t("Theme")}
             </span>
-            <ToggleGroup
-              type="single"
-              size="lg"
+            <RadioGroup.Root
+              orientation="horizontal"
               aria-label={t("Theme")}
               className="grid w-full grid-cols-3 gap-1"
               value={theme}
-              onValueChange={(value) => value && setTheme(value as Theme)}
+              onValueChange={(value) => setTheme(value as Theme)}
             >
-              {Object.entries(themes).map(([value, { icon: Icon, label }]) => (
-                <DisplayOption
-                  key={value}
-                  value={value}
-                  label={t(label)}
-                  side="top"
-                >
-                  <Icon aria-hidden="true" />
-                </DisplayOption>
-              ))}
-            </ToggleGroup>
+              {Object.entries(themes).map(
+                ([value, { icon: Icon, label, shortLabel }]) => (
+                  <DisplayOption
+                    key={value}
+                    value={value}
+                    label={t(label)}
+                    shortLabel={t(shortLabel)}
+                    side="top"
+                  >
+                    <Icon aria-hidden="true" />
+                  </DisplayOption>
+                ),
+              )}
+            </RadioGroup.Root>
           </div>
           <div className="grid gap-1 border-t border-border pt-2">
             <span
@@ -137,13 +159,12 @@ function DisplaySettings() {
             >
               {t("Language")}
             </span>
-            <ToggleGroup
-              type="single"
-              size="lg"
+            <RadioGroup.Root
+              orientation="horizontal"
               aria-label={t("Language")}
               className="grid w-full grid-cols-2 gap-1"
               value={language}
-              onValueChange={(value) => value && setLanguage(value as Language)}
+              onValueChange={(value) => setLanguage(value as Language)}
             >
               {Object.entries(languages).map(([value, { glyph, label }]) => (
                 <DisplayOption
@@ -160,7 +181,7 @@ function DisplaySettings() {
                   </span>
                 </DisplayOption>
               ))}
-            </ToggleGroup>
+            </RadioGroup.Root>
           </div>
         </Popover.Content>
       </Popover.Portal>
