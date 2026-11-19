@@ -950,9 +950,16 @@ h3 {
 .proxy-cards .proxy-actions {
   justify-content: space-between;
 }
-.proxy-test {
+.proxy-node-actions {
+  display: flex;
+  align-items: center;
+}
+.proxy-test,
+.proxy-node-details {
   position: relative;
   z-index: 1;
+}
+.proxy-test {
   /* Disabled test buttons still cover the row's selection button. */
   pointer-events: auto;
 }

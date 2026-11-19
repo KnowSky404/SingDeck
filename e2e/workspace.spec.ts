@@ -83,17 +83,35 @@ test("mock workspace supports server-confirmed selection, filtering, log control
   const singapore = primary
     .locator(".proxy-row")
     .filter({ hasText: "Singapore 01" });
-  const details = primary.getByRole("button", {
-    name: "Node details for Primary route",
+  const details = singapore.getByRole("button", {
+    name: "Node details for Singapore 01",
   });
-  const latencyDialog = page.getByRole("dialog", { name: "Primary route" });
-  await details.click();
+  const nodeDialog = page.getByRole("dialog", { name: "Singapore 01" });
   await expect(
-    latencyDialog.getByText("Singapore 01", { exact: true }),
+    primary
+      .locator('[data-slot="card-header"]')
+      .getByRole("button", { name: /Node details for/ }),
+  ).toHaveCount(0);
+  const groupReference = primary
+    .locator(".proxy-row")
+    .filter({ hasText: "Auto route" });
+  await expect(
+    groupReference.getByRole("button", {
+      name: "Select Auto route",
+      exact: true,
+    }),
   ).toBeVisible();
-  await latencyDialog
-    .getByRole("button", { name: "Close", exact: true })
-    .click();
+  await expect(
+    groupReference.getByRole("button", { name: /Node details for/ }),
+  ).toHaveCount(0);
+  await details.click();
+  await expect(nodeDialog.getByText("trojan", { exact: true })).toBeVisible();
+  await expect(nodeDialog.getByText("68 ms", { exact: true })).toBeVisible();
+  await expect(nodeDialog.locator("time[datetime]")).toBeVisible();
+  await nodeDialog.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(
+    primary.getByRole("button", { name: "Selected: Tokyo 01", exact: true }),
+  ).toBeDisabled();
   await singapore
     .getByRole("button", { name: "Select Singapore 01", exact: true })
     .click();
@@ -115,20 +133,31 @@ test("mock workspace supports server-confirmed selection, filtering, log control
   await expect(
     page
       .locator('[data-slot="card"]')
-      .filter({ has: page.getByText("Auto route", { exact: true }) })
+      .filter({
+        has: page
+          .locator(".proxy-group-name")
+          .filter({ hasText: /^Auto route$/ }),
+      })
       .locator(".proxy-row"),
   ).toHaveCount(2);
   await expandPrimary.press("Enter");
-  await expect(primary.locator(".proxy-row")).toHaveCount(4);
-  await details.press("Enter");
-  await expect(latencyDialog.getByText("68 ms", { exact: true })).toBeVisible();
+  await expect(primary.locator(".proxy-row")).toHaveCount(5);
+  const directDetails = primary.getByRole("button", {
+    name: "Node details for Direct",
+    exact: true,
+  });
+  await directDetails.press("Enter");
+  const directDialog = page.getByRole("dialog", {
+    name: "Direct",
+    exact: true,
+  });
   await expect(
-    latencyDialog.getByText("No result", { exact: true }),
+    directDialog.getByText("No result", { exact: true }),
   ).toBeVisible();
   await page.keyboard.press("Escape");
-  await expect(latencyDialog).toBeHidden();
-  await expect(details).toBeFocused();
-  await expect(page.locator(".proxy-cards")).toHaveCount(2);
+  await expect(directDialog).toBeHidden();
+  await expect(directDetails).toBeFocused();
+  await expect(page.locator(".proxy-cards")).toHaveCount(0);
   const testButton = primary.getByRole("button", {
     name: "Test Direct in Primary route",
   });
@@ -446,19 +475,18 @@ test("group cards and node cards are independent and settings stay read-only", a
   }
   await navigate(page, "Proxies");
   await expect(page.getByRole("radio", { name: "Group cards" })).toBeChecked();
-  await expect(
-    page.getByRole("radio", { name: "Compact cards" }),
-  ).toBeChecked();
+  await expect(page.getByRole("radio", { name: "List view" })).toBeChecked();
   await expect(page.locator(".proxy-group-grid > div")).toHaveCount(2);
-  const tiles = page.locator(".proxy-cards .proxy-row");
+  const rows = page.locator(".proxy-items .proxy-row");
+  await expect(rows).toHaveCount(0);
   const search = page.getByRole("textbox", { name: "Search outbounds" });
   await search.fill("London");
-  await expect(tiles).toHaveCount(1);
-  await expect(tiles).toContainText("London 01");
+  await expect(rows).toHaveCount(1);
+  await expect(rows).toContainText("London 01");
   await page
     .getByRole("button", { name: "Collapse Auto route", exact: true })
     .click();
-  await expect(tiles).toHaveCount(0);
+  await expect(rows).toHaveCount(0);
   await search.clear();
   await page
     .getByRole("button", { name: "Expand Primary route", exact: true })
@@ -466,7 +494,21 @@ test("group cards and node cards are independent and settings stay read-only", a
   await page
     .getByRole("button", { name: "Expand Auto route", exact: true })
     .click();
-  await expect(tiles).toHaveCount(6);
+  await expect(page.locator(".proxy-cards")).toHaveCount(0);
+  await expect(rows).toHaveCount(7);
+  const rowHeights = await rows.evaluateAll((elements) =>
+    elements.map((element) => element.getBoundingClientRect().height),
+  );
+  expect(Math.max(...rowHeights)).toBeLessThanOrEqual(40);
+  await page.getByRole("radio", { name: "Compact cards", exact: true }).click();
+  await expect(page.locator(".proxy-cards")).toHaveCount(2);
+  const tiles = page.locator(".proxy-cards .proxy-row");
+  await expect(tiles).toHaveCount(7);
+  await expect(
+    tiles
+      .filter({ hasText: "Auto route" })
+      .getByRole("button", { name: /Node details for/ }),
+  ).toHaveCount(0);
   const sizes = await tiles.evaluateAll((nodes) =>
     nodes.map((node) => {
       const { width, height } = node.getBoundingClientRect();
@@ -477,17 +519,7 @@ test("group cards and node cards are independent and settings stay read-only", a
     expect(Math.abs(size.width - sizes[0].width)).toBeLessThan(1);
     expect(Math.abs(size.height - sizes[0].height)).toBeLessThan(1);
   }
-  await page.getByRole("radio", { name: "List view", exact: true }).click();
   await expect(page.locator(".proxy-group-grid > div")).toHaveCount(2);
-  await expect(page.locator(".proxy-cards")).toHaveCount(0);
-  const rows = page.locator(".proxy-items .proxy-row");
-  await expect(rows).toHaveCount(6);
-  const rowHeights = await rows.evaluateAll((elements) =>
-    elements.map((element) => element.getBoundingClientRect().height),
-  );
-  expect(Math.max(...rowHeights)).toBeLessThanOrEqual(40);
-  await page.getByRole("radio", { name: "Compact cards", exact: true }).click();
-  await expect(page.locator(".proxy-cards")).toHaveCount(2);
   await page.getByRole("radio", { name: "Group list", exact: true }).click();
   await expect(page.locator(".proxy-group-grid")).toHaveCount(0);
   await expect(page.locator(".proxy-cards")).toHaveCount(2);

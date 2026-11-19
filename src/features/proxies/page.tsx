@@ -45,47 +45,81 @@ import {
 } from "@/components/ui/collapsible";
 import { latency, latencyTone } from "./latency";
 
-function LatencyDetails({
-  items,
-  selected,
-}: {
-  items: GroupItem[];
-  selected: string;
-}) {
+function NodeDetails({ node }: { node: GroupItem }) {
   const { t } = useWorkspace();
-  return items.length ? (
-    <ul className="grid gap-2">
-      {items.map((item) => (
-        <li key={item.tag} className="flex items-start justify-between gap-3">
-          <span className="min-w-0 wrap-anywhere">
-            {item.tag === selected
-              ? t("Selected: {name}", { name: item.tag })
-              : item.tag}
-          </span>
-          <Badge
-            variant="outline"
-            className="proxy-latency"
-            data-latency={latencyTone(item)}
-          >
-            {t(latency(item))}
-          </Badge>
-        </li>
-      ))}
-    </ul>
-  ) : (
-    <p className="text-muted-foreground">
-      {t("No outbounds match your filters.")}
-    </p>
+  const label = t("Node details for {name}", { name: node.tag });
+  return (
+    <Dialog>
+      <DialogTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="proxy-node-details"
+          aria-label={label}
+          title={label}
+        >
+          <Info aria-hidden="true" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent
+        closeLabel={t("Close")}
+        className="max-h-[calc(100dvh-2rem)] overflow-y-auto"
+      >
+        <DialogHeader>
+          <DialogTitle className="pr-8 wrap-anywhere">{node.tag}</DialogTitle>
+          <DialogDescription>
+            {t(
+              "Server and transport settings are stored in the sing-box configuration file.",
+            )}
+          </DialogDescription>
+        </DialogHeader>
+        <NodeMeasurements node={node} />
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function NodeMeasurements({ node }: { node: GroupItem }) {
+  const { language, t } = useWorkspace();
+  const measuredAt = new Date(Number(node.urlTestTime) * 1000);
+  const tested = node.urlTestTime > 0n && Number.isFinite(measuredAt.valueOf());
+  return (
+    <dl className="detail-list">
+      <div>
+        <dt>{t("Outbound type")}</dt>
+        <dd>{node.type}</dd>
+      </div>
+      <div>
+        <dt>{t("Latency")}</dt>
+        <dd className="proxy-latency" data-latency={latencyTone(node)}>
+          {t(latency(node))}
+        </dd>
+      </div>
+      <div>
+        <dt>{t("Last tested")}</dt>
+        <dd>
+          {tested ? (
+            <time dateTime={measuredAt.toISOString()}>
+              {measuredAt.toLocaleString(language)}
+            </time>
+          ) : (
+            "—"
+          )}
+        </dd>
+      </div>
+    </dl>
   );
 }
 
 function ProxyGroup({
   group,
+  groupTags,
   search,
   type,
   view,
 }: {
   group: Group;
+  groupTags: ReadonlySet<string>;
   search: string;
   type: string;
   view: string;
@@ -118,7 +152,6 @@ function ProxyGroup({
   );
   const current = group.items.find((item) => item.tag === group.selected);
   const selected = t("Selected: {name}", { name: group.selected || "—" });
-  const detailsLabel = t("Node details for {name}", { name: group.tag });
   const cards = view === "cards";
   return (
     <Collapsible
@@ -170,38 +203,7 @@ function ProxyGroup({
             </CollapsibleTrigger>
           </CardTitle>
           {expanded && (
-            <CardAction className="flex gap-1">
-              <Dialog>
-                <DialogTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    aria-label={detailsLabel}
-                    title={detailsLabel}
-                  >
-                    <Info aria-hidden="true" />
-                  </Button>
-                </DialogTrigger>
-                <DialogContent
-                  closeLabel={t("Close")}
-                  className="max-h-[calc(100dvh-2rem)] overflow-y-auto"
-                >
-                  <DialogHeader>
-                    <DialogTitle className="pr-8 wrap-anywhere">
-                      {group.tag}
-                    </DialogTitle>
-                    <DialogDescription>
-                      {t("Node names and latency")}
-                    </DialogDescription>
-                  </DialogHeader>
-                  <LatencyDetails items={items} selected={group.selected} />
-                <p className="footnote">
-                  {t(
-                    "Selection is confirmed by the instance. “No result” can mean untested or a failed test: this API removes failed test history.",
-                  )}
-                </p>
-                </DialogContent>
-              </Dialog>
+            <CardAction>
               <Button
                 variant="ghost"
                 size="icon"
@@ -293,21 +295,28 @@ function ProxyGroup({
                           }}
                         />
                       )}
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        className="proxy-test"
-                        aria-label={t("Test {name} in {group}", {
-                          name: item.tag,
-                          group: group.tag,
-                        })}
-                        disabled={!enabled || testing.pending}
-                        onClick={() =>
-                          void testing.run(() => session.urlTest(item.tag))
-                        }
-                      >
-                        <Zap />
-                      </Button>
+                      <div className="proxy-node-actions">
+                        {item.type !== "selector" &&
+                          item.type !== "urltest" &&
+                          !groupTags.has(item.tag) && (
+                            <NodeDetails node={item} />
+                          )}
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="proxy-test"
+                          aria-label={t("Test {name} in {group}", {
+                            name: item.tag,
+                            group: group.tag,
+                          })}
+                          disabled={!enabled || testing.pending}
+                          onClick={() =>
+                            void testing.run(() => session.urlTest(item.tag))
+                          }
+                        >
+                          <Zap />
+                        </Button>
+                      </div>
                     </div>
                   </div>
                 );
@@ -328,10 +337,11 @@ export default function Proxies() {
   const { snapshot, t } = useWorkspace();
   const [search, setSearch] = useState(""),
     [type, setType] = useState("all"),
-    [view, setView] = useState("cards"),
+    [view, setView] = useState("list"),
     [groupView, setGroupView] = useState("cards");
   const query = useDeferredValue(search.toLowerCase());
   const groups = snapshot.groups ?? [];
+  const groupTags = new Set(groups.map((group) => group.tag));
   const types = [...new Set(groups.flatMap((g) => g.items.map((i) => i.type)))];
   return (
     <>
@@ -403,6 +413,7 @@ export default function Proxies() {
             <ProxyGroup
               key={group.tag}
               group={group}
+              groupTags={groupTags}
               search={query}
               type={type}
               view={view}

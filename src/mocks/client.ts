@@ -53,6 +53,7 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
         ["Singapore 01", "trojan", 68],
         ["Frankfurt 01", "shadowsocks", 168],
         ["Direct", "direct", 0],
+        ["Auto route", "urltest", 0],
       ].map(([tag, type, delayMs]) =>
         create(GroupItemSchema, {
           tag: String(tag),
