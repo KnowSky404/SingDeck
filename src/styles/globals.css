@@ -1695,6 +1695,16 @@ h3 {
   margin-left: auto;
   flex-shrink: 0;
 }
+@media (hover: none), (any-pointer: coarse) {
+  .display-option {
+    height: 3rem;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .display-option-label {
+    display: block;
+  }
+}
 .layout-control > span {
   color: var(--muted-foreground);
   font-size: 11px;
