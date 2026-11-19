@@ -2,6 +2,7 @@ import { useState, useDeferredValue, useId } from "react";
 import {
   Check,
   ChevronDown,
+  Circle,
   Info,
   LayoutGrid,
   List,
@@ -286,7 +287,9 @@ function ProxyGroup({
                           <LoaderCircle className="spin" />
                         ) : active ? (
                           <Check />
-                        ) : group.selectable ? null : (
+                        ) : group.selectable ? (
+                          <Circle />
+                        ) : (
                           <LockKeyhole />
                         )}
                       </span>

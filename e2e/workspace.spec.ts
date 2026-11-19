@@ -167,6 +167,7 @@ test("mock workspace supports server-confirmed selection, filtering, log control
   await expect(
     primary.getByRole("button", { name: "Selected: Tokyo 01", exact: true }),
   ).toBeDisabled();
+  await expect(singapore.locator(".proxy-mark .lucide-circle")).toBeVisible();
   await singapore
     .getByRole("button", { name: "Select Singapore 01", exact: true })
     .click();
