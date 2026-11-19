@@ -54,17 +54,21 @@ test("project information is available before and after connecting", async ({
   await expect(trigger).toBeInViewport({ ratio: 1 });
   if (!isMobile) {
     await page.getByRole("button", { name: "Collapse sidebar" }).click();
+    const viewport = page.viewportSize()!;
+    await page.setViewportSize({ width: 800, height: 380 });
     const bottom = page.locator(".sidebar-bottom");
     const bottomTrigger = bottom.getByRole("button", {
       name: "About SingDeck",
       exact: true,
     });
+    await bottomTrigger.scrollIntoViewIfNeeded();
     await expect(bottomTrigger).toBeInViewport({ ratio: 1 });
     await bottomTrigger.click();
     await expect(dialog).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
     await expect(bottomTrigger).toBeFocused();
+    await page.setViewportSize(viewport);
     await page.getByRole("button", { name: "Expand sidebar" }).click();
     await expect(
       trigger.locator("..").getByRole("link", { name: "SingDeck overview" }),
@@ -160,14 +164,6 @@ test("mock workspace supports server-confirmed selection, filtering, log control
     groupTestTime!,
   );
   await nodeDialog.getByRole("button", { name: "Close", exact: true }).click();
-  await groupReference
-    .getByRole("button", {
-      name: "Test Auto route in Primary route",
-      exact: true,
-    })
-    .click();
-  await expect(groupReference.locator(".proxy-latency")).toHaveText("109 ms");
-  await expect(singapore.locator(".proxy-latency")).toHaveText("109 ms");
   await expect(
     primary.getByRole("button", { name: "Selected: Tokyo 01", exact: true }),
   ).toBeDisabled();
@@ -185,9 +181,9 @@ test("mock workspace supports server-confirmed selection, filtering, log control
     .click();
   await expect(primary.locator(".proxy-row")).toHaveCount(0);
   await expect(expandPrimary).toHaveAccessibleDescription(
-    "Selected: Singapore 01 · Latency 109 ms",
+    "Selected: Singapore 01 · Latency 68 ms",
   );
-  await expect(primary.locator(".proxy-current-latency")).toHaveText("109 ms");
+  await expect(primary.locator(".proxy-current-latency")).toHaveText("68 ms");
   await expect(details).toBeHidden();
   await expect(
     page
@@ -238,6 +234,17 @@ test("mock workspace supports server-confirmed selection, filtering, log control
       .filter({ hasText: "Direct" })
       .locator(".proxy-latency"),
   ).toHaveText(/\d+ ms/);
+  const londonLatency = page
+    .locator(".proxy-row")
+    .filter({ hasText: "London 01" })
+    .locator(".proxy-latency");
+  await expect(londonLatency).toHaveAttribute("data-latency", "unknown");
+  await primary
+    .getByRole("button", { name: "Test Primary route", exact: true })
+    .click();
+  await expect(londonLatency).toHaveText("88 ms");
+  await expect(groupReference.locator(".proxy-latency")).toHaveText("109 ms");
+  await expect(singapore.locator(".proxy-latency")).toHaveText("109 ms");
   await expect(
     singapore.getByRole("button", { name: "Selected: Singapore 01" }),
   ).toBeDisabled();
