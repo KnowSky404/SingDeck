@@ -147,12 +147,27 @@ test("mock workspace supports server-confirmed selection, filtering, log control
   await expect(
     groupDialog.getByText("Singapore 01", { exact: true }),
   ).toBeVisible();
+  await expect(groupDialog.getByText("68 ms", { exact: true })).toBeVisible();
+  const groupTestTime = await groupDialog
+    .locator("time")
+    .getAttribute("datetime");
   await groupDialog.getByRole("button", { name: "Close", exact: true }).click();
   await details.click();
   await expect(nodeDialog.getByText("trojan", { exact: true })).toBeVisible();
   await expect(nodeDialog.getByText("68 ms", { exact: true })).toBeVisible();
-  await expect(nodeDialog.locator("time[datetime]")).toBeVisible();
+  await expect(nodeDialog.locator("time")).toHaveAttribute(
+    "datetime",
+    groupTestTime!,
+  );
   await nodeDialog.getByRole("button", { name: "Close", exact: true }).click();
+  await groupReference
+    .getByRole("button", {
+      name: "Test Auto route in Primary route",
+      exact: true,
+    })
+    .click();
+  await expect(groupReference.locator(".proxy-latency")).toHaveText("109 ms");
+  await expect(singapore.locator(".proxy-latency")).toHaveText("109 ms");
   await expect(
     primary.getByRole("button", { name: "Selected: Tokyo 01", exact: true }),
   ).toBeDisabled();
@@ -170,9 +185,9 @@ test("mock workspace supports server-confirmed selection, filtering, log control
     .click();
   await expect(primary.locator(".proxy-row")).toHaveCount(0);
   await expect(expandPrimary).toHaveAccessibleDescription(
-    "Selected: Singapore 01 · Latency 68 ms",
+    "Selected: Singapore 01 · Latency 109 ms",
   );
-  await expect(primary.locator(".proxy-current-latency")).toHaveText("68 ms");
+  await expect(primary.locator(".proxy-current-latency")).toHaveText("109 ms");
   await expect(details).toBeHidden();
   await expect(
     page
@@ -353,7 +368,10 @@ test("responsive layout, dark/light/system themes, routes and console health", a
   const themeOptions = settings
     .getByRole("radiogroup", { name: "Theme" })
     .getByRole("radio");
-  await expect(themeOptions).toHaveText(["", "", ""]);
+  await expect(themeOptions).toHaveText(
+    isMobile ? ["Light", "Dark", "System"] : ["", "", ""],
+    { useInnerText: true },
+  );
   await expect(
     settings.getByRole("radio", { name: "System theme", exact: true }),
   ).toHaveAttribute("aria-checked", "true");
@@ -729,6 +747,7 @@ test("connection state filter retains closed records and disables close actions 
 
 test("language and theme controls work without replacing the session and persist across reload", async ({
   page,
+  isMobile,
 }) => {
   await demo(page);
   const settingsButton = page.getByRole("button", {
@@ -739,20 +758,33 @@ test("language and theme controls work without replacing the session and persist
   await expect(page.getByRole("tooltip")).toHaveText("System theme · English");
   await settingsButton.press("Enter");
   const languages = page.getByRole("radiogroup", { name: "Language" });
-  await expect(languages.getByRole("radio")).toHaveText(["A", "中"]);
-  await languages.getByRole("radio", { name: "English", exact: true }).focus();
-  await page.keyboard.press("ArrowRight");
-  const chinese = languages.getByRole("radio", {
+  await expect(languages.getByText("English", { exact: true })).toHaveCount(1);
+  if (isMobile)
+    await expect(languages.getByText("English", { exact: true })).toBeVisible();
+  else
+    await expect(languages.getByRole("radio")).toHaveText(["A", "中"], {
+      useInnerText: true,
+    });
+  await expect(
+    page.getByRole("radio", { name: "System theme", exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(
+    languages.getByRole("radio", { name: "English", exact: true }),
+  ).toBeFocused();
+  await page.keyboard.down("ArrowRight");
+  const chinese = page.getByRole("radio", {
     name: "简体中文",
     exact: true,
   });
   await expect(chinese).toBeFocused();
+  await expect(chinese).toBeChecked();
+  await page.keyboard.up("ArrowRight");
   await expect(
     page.locator('[data-slot="tooltip-content"]').filter({
       hasText: "简体中文",
     }),
   ).toBeVisible();
-  await page.keyboard.press("Enter");
   await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
   await expect(page.getByText("演示模式", { exact: true })).toBeVisible();
   const translatedSettingsButton = page.getByRole("button", {
