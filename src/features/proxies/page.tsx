@@ -45,16 +45,29 @@ import {
 } from "@/components/ui/collapsible";
 import { latency, latencyTone } from "./latency";
 
-function NodeDetails({ node }: { node: GroupItem }) {
+function OutboundDetails({
+  item,
+  referencedGroup,
+}: {
+  item: GroupItem;
+  referencedGroup?: Group;
+}) {
   const { t } = useWorkspace();
-  const label = t("Node details for {name}", { name: node.tag });
+  const isGroup =
+    Boolean(referencedGroup) ||
+    item.type === "selector" ||
+    item.type === "urltest";
+  const label = t(
+    isGroup ? "Group details for {name}" : "Node details for {name}",
+    { name: item.tag },
+  );
   return (
     <Dialog>
       <DialogTrigger asChild>
         <Button
           variant="ghost"
           size="icon-sm"
-          className="proxy-node-details"
+          className="proxy-outbound-details"
           aria-label={label}
           title={label}
         >
@@ -66,33 +79,47 @@ function NodeDetails({ node }: { node: GroupItem }) {
         className="max-h-[calc(100dvh-2rem)] overflow-y-auto"
       >
         <DialogHeader>
-          <DialogTitle className="pr-8 wrap-anywhere">{node.tag}</DialogTitle>
+          <DialogTitle className="pr-8 wrap-anywhere">{item.tag}</DialogTitle>
           <DialogDescription>
             {t(
-              "Server and transport settings are stored in the sing-box configuration file.",
+              isGroup
+                ? "Referenced proxy group"
+                : "Server and transport settings are stored in the sing-box configuration file.",
             )}
           </DialogDescription>
         </DialogHeader>
-        <NodeMeasurements node={node} />
+        <OutboundFacts item={item} referencedGroup={referencedGroup} />
       </DialogContent>
     </Dialog>
   );
 }
 
-function NodeMeasurements({ node }: { node: GroupItem }) {
+function OutboundFacts({
+  item,
+  referencedGroup,
+}: {
+  item: GroupItem;
+  referencedGroup?: Group;
+}) {
   const { language, t } = useWorkspace();
-  const measuredAt = new Date(Number(node.urlTestTime) * 1000);
-  const tested = node.urlTestTime > 0n && Number.isFinite(measuredAt.valueOf());
+  const measuredAt = new Date(Number(item.urlTestTime) * 1000);
+  const tested = item.urlTestTime > 0n && Number.isFinite(measuredAt.valueOf());
   return (
     <dl className="detail-list">
       <div>
         <dt>{t("Outbound type")}</dt>
-        <dd>{node.type}</dd>
+        <dd>{referencedGroup?.type || item.type}</dd>
       </div>
+      {referencedGroup && (
+        <div>
+          <dt>{t("Selected member")}</dt>
+          <dd>{referencedGroup.selected || "—"}</dd>
+        </div>
+      )}
       <div>
         <dt>{t("Latency")}</dt>
-        <dd className="proxy-latency" data-latency={latencyTone(node)}>
-          {t(latency(node))}
+        <dd className="proxy-latency" data-latency={latencyTone(item)}>
+          {t(latency(item))}
         </dd>
       </div>
       <div>
@@ -113,13 +140,13 @@ function NodeMeasurements({ node }: { node: GroupItem }) {
 
 function ProxyGroup({
   group,
-  groupTags,
+  groupsByTag,
   search,
   type,
   view,
 }: {
   group: Group;
-  groupTags: ReadonlySet<string>;
+  groupsByTag: ReadonlyMap<string, Group>;
   search: string;
   type: string;
   view: string;
@@ -129,17 +156,18 @@ function ProxyGroup({
     testing = useAction();
   const [target, setTarget] = useState("");
   const [open, setOpen] = useState(false);
-  const [filteredDisclosure, setFilteredDisclosure] = useState<{
-    search: string;
-    type: string;
-    open: boolean;
-  }>();
+  const [filteredDisclosure, setFilteredDisclosure] = useState({
+    search,
+    type,
+    open: true,
+  });
+  const filterChanged =
+    filteredDisclosure.search !== search || filteredDisclosure.type !== type;
+  if (filterChanged) {
+    setFilteredDisclosure({ search, type, open: true });
+  }
   const filtering = search !== "" || type !== "all";
-  const expanded = filtering
-    ? filteredDisclosure?.search !== search ||
-      filteredDisclosure.type !== type ||
-      filteredDisclosure.open
-    : open;
+  const expanded = filtering ? filterChanged || filteredDisclosure.open : open;
   const currentDescription = useId();
   const enabled =
     snapshot.phase === "connected" &&
@@ -299,11 +327,10 @@ function ProxyGroup({
                         />
                       )}
                       <div className="proxy-node-actions">
-                        {item.type !== "selector" &&
-                          item.type !== "urltest" &&
-                          !groupTags.has(item.tag) && (
-                            <NodeDetails node={item} />
-                          )}
+                        <OutboundDetails
+                          item={item}
+                          referencedGroup={groupsByTag.get(item.tag)}
+                        />
                         <Button
                           variant="ghost"
                           size="icon-sm"
@@ -344,7 +371,7 @@ export default function Proxies() {
     [groupView, setGroupView] = useState("cards");
   const query = useDeferredValue(search.toLowerCase());
   const groups = snapshot.groups ?? [];
-  const groupTags = new Set(groups.map((group) => group.tag));
+  const groupsByTag = new Map(groups.map((group) => [group.tag, group]));
   const types = [...new Set(groups.flatMap((g) => g.items.map((i) => i.type)))];
   return (
     <>
@@ -416,7 +443,7 @@ export default function Proxies() {
             <ProxyGroup
               key={group.tag}
               group={group}
-              groupTags={groupTags}
+              groupsByTag={groupsByTag}
               search={query}
               type={type}
               view={view}

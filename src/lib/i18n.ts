@@ -131,6 +131,9 @@ const zh: Record<string, string> = {
   Nodes: "节点",
   "{count} groups": "{count} 个代理组",
   "Node details for {name}": "查看 {name} 的节点详情",
+  "Group details for {name}": "查看 {name} 的代理组详情",
+  "Referenced proxy group": "引用的代理组",
+  "Selected member": "当前选中的成员",
   "Server and transport settings are stored in the sing-box configuration file.":
     "服务器地址、端口和传输设置请查看 sing-box 配置文件。",
   "Outbound type": "出站类型",

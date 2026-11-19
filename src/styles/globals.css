@@ -789,6 +789,7 @@ h3 {
 }
 .proxy-group-copy {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   justify-items: start;
   gap: 4px;
   min-width: 0;
@@ -946,6 +947,7 @@ h3 {
   align-items: flex-start;
   gap: 1px;
 }
+.proxy-cards .proxy-identity strong,
 .proxy-cards .proxy-identity > div > span {
   max-width: 100%;
 }
@@ -957,7 +959,7 @@ h3 {
   align-items: center;
 }
 .proxy-test,
-.proxy-node-details {
+.proxy-outbound-details {
   position: relative;
   z-index: 1;
 }
