@@ -70,8 +70,11 @@ test("project information is available before and after connecting", async ({
       trigger.locator("..").getByRole("link", { name: "SingDeck overview" }),
     ).toBeVisible();
   }
-  await page.getByRole("button", { name: "Language", exact: true }).click();
-  await page.getByRole("menuitemradio", { name: "简体中文" }).click();
+  await page
+    .getByRole("button", { name: "Display settings", exact: true })
+    .click();
+  await page.getByRole("radio", { name: "简体中文" }).click();
+  await page.getByRole("button", { name: "显示设置", exact: true }).click();
   await page.getByRole("button", { name: "关于 SingDeck" }).click();
   const translated = page.getByRole("dialog", { name: "关于 SingDeck" });
   await expect(translated).toHaveAccessibleDescription(
@@ -338,21 +341,23 @@ test("responsive layout, dark/light/system themes, routes and console health", a
     .getByRole("button", { name: "Expand sidebar", exact: true })
     .click();
   await page.setViewportSize(originalViewport);
-  const themeButton = page.getByRole("button", { name: "Theme", exact: true });
-  if (isMobile) await themeButton.focus();
-  else await themeButton.hover();
-  await expect(page.getByRole("tooltip")).toHaveText("System theme");
-  if (!isMobile) {
-    await page.getByRole("button", { name: "Language", exact: true }).hover();
-    await expect(page.getByRole("tooltip")).toHaveText("Language · English");
-  }
-  await themeButton.click();
-  const themeOptions = page.getByRole("menuitemradio");
+  const settingsButton = page.getByRole("button", {
+    name: "Display settings",
+    exact: true,
+  });
+  if (isMobile) await settingsButton.focus();
+  else await settingsButton.hover();
+  await expect(page.getByRole("tooltip")).toHaveText("System theme · English");
+  await settingsButton.click();
+  const settings = page.getByRole("dialog", { name: "Display settings" });
+  const themeOptions = settings
+    .getByRole("radiogroup", { name: "Theme" })
+    .getByRole("radio");
   await expect(themeOptions).toHaveText(["", "", ""]);
   await expect(
-    page.getByRole("menuitemradio", { name: "System theme", exact: true }),
+    settings.getByRole("radio", { name: "System theme", exact: true }),
   ).toHaveAttribute("aria-checked", "true");
-  const darkTheme = page.getByRole("menuitemradio", {
+  const darkTheme = settings.getByRole("radio", {
     name: "Dark theme",
     exact: true,
   });
@@ -366,17 +371,17 @@ test("responsive layout, dark/light/system themes, routes and console health", a
   }
   await darkTheme.click();
   await expect(page.locator("html")).toHaveClass(/dark/);
-  await page.getByRole("button", { name: "Theme", exact: true }).click();
-  await page
-    .getByRole("menuitemradio", { name: "Light theme", exact: true })
+  await settings
+    .getByRole("radio", { name: "Light theme", exact: true })
     .click();
   await expect(page.locator("html")).not.toHaveClass(/dark/);
   await page.emulateMedia({ colorScheme: "dark" });
-  await page.getByRole("button", { name: "Theme", exact: true }).click();
-  await page
-    .getByRole("menuitemradio", { name: "System theme", exact: true })
+  await settings
+    .getByRole("radio", { name: "System theme", exact: true })
     .click();
   await expect(page.locator("html")).toHaveClass(/dark/);
+  await settingsButton.click();
+  await expect(settings).toBeHidden();
   await page.reload();
   await expect(
     page.getByRole("heading", { name: "Connect your network.", exact: true }),
@@ -726,19 +731,18 @@ test("language and theme controls work without replacing the session and persist
   page,
 }) => {
   await demo(page);
-  const languageButton = page.getByRole("button", {
-    name: "Language",
+  const settingsButton = page.getByRole("button", {
+    name: "Display settings",
     exact: true,
   });
-  await languageButton.focus();
-  await expect(page.getByRole("tooltip")).toHaveText("Language · English");
-  await languageButton.press("Enter");
-  await expect(page.getByRole("menuitemradio")).toHaveText(["A", "中"]);
-  await expect(
-    page.getByRole("menuitemradio", { name: "English", exact: true }),
-  ).toBeFocused();
-  await page.keyboard.press("ArrowDown");
-  const chinese = page.getByRole("menuitemradio", {
+  await settingsButton.focus();
+  await expect(page.getByRole("tooltip")).toHaveText("System theme · English");
+  await settingsButton.press("Enter");
+  const languages = page.getByRole("radiogroup", { name: "Language" });
+  await expect(languages.getByRole("radio")).toHaveText(["A", "中"]);
+  await languages.getByRole("radio", { name: "English", exact: true }).focus();
+  await page.keyboard.press("ArrowRight");
+  const chinese = languages.getByRole("radio", {
     name: "简体中文",
     exact: true,
   });
@@ -751,6 +755,16 @@ test("language and theme controls work without replacing the session and persist
   await page.keyboard.press("Enter");
   await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
   await expect(page.getByText("演示模式", { exact: true })).toBeVisible();
+  const translatedSettingsButton = page.getByRole("button", {
+    name: "显示设置",
+    exact: true,
+  });
+  await page
+    .getByRole("dialog", { name: "显示设置" })
+    .getByRole("radio", { name: "深色主题", exact: true })
+    .click();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await translatedSettingsButton.click();
   const collapse = page.getByRole("button", { name: "收起侧栏", exact: true });
   if (await collapse.isVisible()) {
     await collapse.click();
@@ -766,11 +780,6 @@ test("language and theme controls work without replacing the session and persist
   await expect(page.getByRole("menu")).toContainText("演示实例");
   await expect(page).toHaveURL(/#\/$/);
   await page.keyboard.press("Escape");
-  await page.getByRole("button", { name: "主题", exact: true }).click();
-  await page
-    .getByRole("menuitemradio", { name: "深色主题", exact: true })
-    .click();
-  await expect(page.locator("html")).toHaveClass(/dark/);
   await page.getByRole("button", { name: "当前连接", exact: true }).click();
   await page.getByRole("menuitem", { name: "退出连接", exact: true }).click();
   await expect(
@@ -780,16 +789,10 @@ test("language and theme controls work without replacing the session and persist
   await page.reload();
   await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
   await expect(page.locator("html")).toHaveClass(/dark/);
-  const translatedLanguageButton = page.getByRole("button", {
-    name: "语言",
-    exact: true,
-  });
-  await translatedLanguageButton.focus();
-  await expect(page.getByRole("tooltip")).toHaveText("语言 · 简体中文");
-  await translatedLanguageButton.click();
-  await page
-    .getByRole("menuitemradio", { name: "English", exact: true })
-    .click();
+  await translatedSettingsButton.focus();
+  await expect(page.getByRole("tooltip")).toHaveText("深色主题 · 简体中文");
+  await translatedSettingsButton.click();
+  await page.getByRole("radio", { name: "English", exact: true }).click();
   await expect(
     page.getByRole("button", { name: "Explore demo", exact: true }),
   ).toBeVisible();

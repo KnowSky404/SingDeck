@@ -71,6 +71,7 @@ const zh: Record<string, string> = {
   "Demo workspace": "演示实例",
   "Mock mode": "演示模式",
   "No server is contacted.": "不会连接任何服务器。",
+  "Display settings": "显示设置",
   Theme: "主题",
   Language: "语言",
   Light: "浅色",
