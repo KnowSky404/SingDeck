@@ -23,7 +23,9 @@ describe("language selection and interpolation", () => {
     expect(translate("en")("Selected: {name}", { name: "节点" })).toBe(
       "Selected: 节点",
     );
-    expect(translate("zh")("{count} groups", { count: 2 })).toBe("2 个代理组");
+    expect(
+      translate("zh")("Dashboard version {version}", { version: "v0.4.0" }),
+    ).toBe("面板版本 v0.4.0");
     expect(translate("zh")("server-specific message")).toBe(
       "server-specific message",
     );

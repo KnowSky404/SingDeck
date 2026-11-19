@@ -66,19 +66,6 @@ export default function Logs() {
     <>
       <PageHeading title={t("Logs")} />
       <div className="toolbar">
-        {
-          <Button
-            variant="outline"
-            onClick={() => setPaused(paused ? null : [...snapshot.logs])}
-          >
-            {paused ? (
-              <Play data-icon="inline-start" />
-            ) : (
-              <Pause data-icon="inline-start" />
-            )}
-            {t(paused ? "Resume" : "Pause")}
-          </Button>
-        }
         <div className="search-field">
           <Search />
           <Input
@@ -100,14 +87,27 @@ export default function Logs() {
             })),
           ]}
         />
-        <Field orientation="horizontal">
-          <Switch
-            id="auto-scroll"
-            checked={autoScroll}
-            onCheckedChange={setAutoScroll}
-          />
-          <FieldLabel htmlFor="auto-scroll">{t("Auto scroll")}</FieldLabel>
-        </Field>
+        <div className="button-row toolbar-actions">
+          <Button
+            variant="outline"
+            onClick={() => setPaused(paused ? null : [...snapshot.logs])}
+          >
+            {paused ? (
+              <Play data-icon="inline-start" />
+            ) : (
+              <Pause data-icon="inline-start" />
+            )}
+            {t(paused ? "Resume" : "Pause")}
+          </Button>
+          <Field orientation="horizontal">
+            <Switch
+              id="auto-scroll"
+              checked={autoScroll}
+              onCheckedChange={setAutoScroll}
+            />
+            <FieldLabel htmlFor="auto-scroll">{t("Auto scroll")}</FieldLabel>
+          </Field>
+        </div>
       </div>
       {paused && (
         <Notice title={t("View paused")}>

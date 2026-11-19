@@ -129,7 +129,6 @@ const zh: Record<string, string> = {
   "Compact cards": "节点卡片",
   Groups: "代理组",
   Nodes: "节点",
-  "{count} groups": "{count} 个代理组",
   "Node details for {name}": "查看 {name} 的节点详情",
   "Group details for {name}": "查看 {name} 的代理组详情",
   "Referenced proxy group": "引用的代理组",

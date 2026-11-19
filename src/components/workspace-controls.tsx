@@ -1,6 +1,5 @@
 import { Cable, Languages, LogOut, Monitor, Moon, Sun } from "lucide-react";
 import { useWorkspace } from "@/app/context";
-import { AboutDialog } from "@/components/about-dialog";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -136,7 +135,6 @@ export function WorkspaceControls({
           </DropdownMenuContent>
         </DropdownMenu>
       )}
-      <AboutDialog />
     </div>
   );
 }

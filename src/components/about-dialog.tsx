@@ -17,7 +17,13 @@ export function AboutDialog() {
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label={title} title={title}>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="text-muted-foreground"
+          aria-label={title}
+          title={title}
+        >
           <Info aria-hidden="true" />
         </Button>
       </DialogTrigger>
