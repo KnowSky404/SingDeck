@@ -21,6 +21,9 @@ test("project information is available before and after connecting", async ({
   await page.goto("/");
   const trigger = page.getByRole("button", { name: "About SingDeck" });
   const dialog = page.getByRole("dialog", { name: "About SingDeck" });
+  await expect(
+    trigger.locator("..").getByRole("link", { name: "SingDeck overview" }),
+  ).toBeVisible();
   await expect(trigger).toBeInViewport({ ratio: 1 });
   await trigger.focus();
   await page.keyboard.press("Enter");
@@ -45,7 +48,28 @@ test("project information is available before and after connecting", async ({
   await page.getByRole("button", { name: "Explore demo", exact: true }).click();
   await expect(page.getByText("Mock mode", { exact: true })).toBeVisible();
   if (isMobile) await page.setViewportSize({ width: 280, height: 700 });
+  await expect(
+    trigger.locator("..").getByRole("link", { name: "SingDeck overview" }),
+  ).toBeVisible();
   await expect(trigger).toBeInViewport({ ratio: 1 });
+  if (!isMobile) {
+    await page.getByRole("button", { name: "Collapse sidebar" }).click();
+    const bottom = page.locator(".sidebar-bottom");
+    const bottomTrigger = bottom.getByRole("button", {
+      name: "About SingDeck",
+      exact: true,
+    });
+    await expect(bottomTrigger).toBeInViewport({ ratio: 1 });
+    await bottomTrigger.click();
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(bottomTrigger).toBeFocused();
+    await page.getByRole("button", { name: "Expand sidebar" }).click();
+    await expect(
+      trigger.locator("..").getByRole("link", { name: "SingDeck overview" }),
+    ).toBeVisible();
+  }
   await page.getByRole("button", { name: "Language", exact: true }).click();
   await page.getByRole("menuitemradio", { name: "简体中文" }).click();
   await page.getByRole("button", { name: "关于 SingDeck" }).click();

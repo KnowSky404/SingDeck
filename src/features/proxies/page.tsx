@@ -14,7 +14,6 @@ import { useWorkspace } from "@/app/context";
 import { useAction } from "@/hooks/use-action";
 import { ChannelState, Choice, Notice, PageHeading } from "@/components/shared";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import {
   Card,
   CardAction,
@@ -377,9 +376,6 @@ export default function Proxies() {
     <>
       <PageHeading title={t("Proxies")} />
       <div className="toolbar proxy-toolbar">
-        <Badge variant="outline">
-          {t("{count} groups", { count: groups.length })}
-        </Badge>
         <div className="search-field">
           <Search />
           <Input

@@ -103,15 +103,6 @@ export default function Connections() {
     <>
       <PageHeading title={t("Connections")} />
       <div className="toolbar">
-        {
-          <Button
-            variant="outline"
-            disabled={!enabled || !activeCount}
-            onClick={() => setConfirm(true)}
-          >
-            {t("Close all connections")}
-          </Button>
-        }
         <Choice
           label={t("Status filter")}
           value={state}
@@ -177,6 +168,14 @@ export default function Connections() {
             { value: "traffic", label: t("Most traffic") },
           ]}
         />
+        <Button
+          variant="outline"
+          className="toolbar-actions"
+          disabled={!enabled || !activeCount}
+          onClick={() => setConfirm(true)}
+        >
+          {t("Close all connections")}
+        </Button>
       </div>
       {action.error && (
         <Notice title={t("Connection action failed")}>{t(action.error)}</Notice>

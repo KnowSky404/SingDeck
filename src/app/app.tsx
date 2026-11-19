@@ -33,6 +33,7 @@ import {
 } from "@/components/ui/dialog";
 import { EmptyState, Notice } from "@/components/shared";
 import { Skeleton } from "@/components/ui/skeleton";
+import { AboutDialog } from "@/components/about-dialog";
 import { Brand } from "@/components/brand";
 import EntryPage from "./entry";
 import { WorkspaceControls } from "@/components/workspace-controls";
@@ -170,6 +171,9 @@ export default function App() {
         <Brand />
         <Navigation path={path} />
         <div className="sidebar-bottom">
+          <div className="sidebar-about">
+            <AboutDialog />
+          </div>
           <Separator />
           <div className="sidebar-caption">
             <Radio />
