@@ -73,7 +73,9 @@ test("mock workspace supports server-confirmed selection, filtering, log control
     name: "Expand Primary route",
     exact: true,
   });
-  await expect(expandPrimary).toHaveAccessibleDescription("Selected: Tokyo 01");
+  await expect(expandPrimary).toHaveAccessibleDescription(
+    "Selected: Tokyo 01 · Latency 42 ms",
+  );
   await expect(page.locator(".proxy-row")).toHaveCount(0);
   await expect(primary).not.toContainText("selector");
   await expandPrimary.click();
@@ -126,7 +128,7 @@ test("mock workspace supports server-confirmed selection, filtering, log control
     .click();
   await expect(primary.locator(".proxy-row")).toHaveCount(0);
   await expect(expandPrimary).toHaveAccessibleDescription(
-    "Selected: Singapore 01",
+    "Selected: Singapore 01 · Latency 68 ms",
   );
   await expect(primary.locator(".proxy-current-latency")).toHaveText("68 ms");
   await expect(details).toBeHidden();
@@ -500,6 +502,21 @@ test("group cards and node cards are independent and settings stay read-only", a
     elements.map((element) => element.getBoundingClientRect().height),
   );
   expect(Math.max(...rowHeights)).toBeLessThanOrEqual(40);
+  const referenceName = rows
+    .filter({ hasText: "Auto route" })
+    .locator("strong");
+  expect(
+    await referenceName.evaluate((element) => {
+      const name = element.textContent;
+      const height = element.clientHeight;
+      element.textContent = "A very long group reference name ".repeat(8);
+      const wrapped =
+        element.clientHeight > height &&
+        element.scrollWidth <= element.clientWidth;
+      element.textContent = name;
+      return wrapped;
+    }),
+  ).toBe(true);
   await page.getByRole("radio", { name: "Compact cards", exact: true }).click();
   await expect(page.locator(".proxy-cards")).toHaveCount(2);
   const tiles = page.locator(".proxy-cards .proxy-row");
