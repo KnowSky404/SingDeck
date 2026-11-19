@@ -1,4 +1,12 @@
-import { Cable, Languages, LogOut, Monitor, Moon, Sun } from "lucide-react";
+import {
+  Cable,
+  Languages,
+  LogOut,
+  Monitor,
+  Moon,
+  Sun,
+  type LucideIcon,
+} from "lucide-react";
 import { useWorkspace } from "@/app/context";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,8 +19,49 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { Theme } from "@/features/instances/profiles";
 import type { Language } from "@/lib/i18n";
+
+const themes = {
+  light: { icon: Sun, label: "Light theme" },
+  dark: { icon: Moon, label: "Dark theme" },
+  system: { icon: Monitor, label: "System theme" },
+};
+
+const languages = { en: "English", zh: "简体中文" };
+
+function IconMenuTrigger({
+  icon: Icon,
+  label,
+  tooltip,
+}: {
+  icon: LucideIcon;
+  label: string;
+  tooltip: string;
+}) {
+  return (
+    <TooltipProvider delayDuration={400}>
+      <Tooltip>
+        <DropdownMenuTrigger asChild>
+          <TooltipTrigger asChild>
+            <Button variant="ghost" size="icon" aria-label={label}>
+              <Icon aria-hidden="true" />
+            </Button>
+          </TooltipTrigger>
+        </DropdownMenuTrigger>
+        <TooltipContent side="bottom" sideOffset={6}>
+          {tooltip}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
 
 export function WorkspaceControls({
   connection = false,
@@ -30,55 +79,44 @@ export function WorkspaceControls({
     connect,
     disconnect,
   } = useWorkspace();
-  const ThemeIcon = theme === "dark" ? Moon : theme === "light" ? Sun : Monitor;
+  const appearance = themes[theme];
   return (
     <div className="topbar-actions">
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={t("Theme")}
-            title={t("Theme")}
-          >
-            <ThemeIcon />
-          </Button>
-        </DropdownMenuTrigger>
+        <IconMenuTrigger
+          icon={appearance.icon}
+          label={t("Theme")}
+          tooltip={t(appearance.label)}
+        />
         <DropdownMenuContent align="end">
           <DropdownMenuRadioGroup
             value={theme}
             onValueChange={(value) => setTheme(value as Theme)}
           >
-            <DropdownMenuRadioItem value="light">
-              {t("Light theme")}
-            </DropdownMenuRadioItem>
-            <DropdownMenuRadioItem value="dark">
-              {t("Dark theme")}
-            </DropdownMenuRadioItem>
-            <DropdownMenuRadioItem value="system">
-              {t("System theme")}
-            </DropdownMenuRadioItem>
+            {Object.entries(themes).map(([value, { label }]) => (
+              <DropdownMenuRadioItem key={value} value={value}>
+                {t(label)}
+              </DropdownMenuRadioItem>
+            ))}
           </DropdownMenuRadioGroup>
         </DropdownMenuContent>
       </DropdownMenu>
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label={t("Language")}
-            title={t("Language")}
-          >
-            <Languages />
-          </Button>
-        </DropdownMenuTrigger>
+        <IconMenuTrigger
+          icon={Languages}
+          label={t("Language")}
+          tooltip={`${t("Language")} · ${languages[language]}`}
+        />
         <DropdownMenuContent align="end">
           <DropdownMenuRadioGroup
             value={language}
             onValueChange={(value) => setLanguage(value as Language)}
           >
-            <DropdownMenuRadioItem value="en">English</DropdownMenuRadioItem>
-            <DropdownMenuRadioItem value="zh">简体中文</DropdownMenuRadioItem>
+            {Object.entries(languages).map(([value, label]) => (
+              <DropdownMenuRadioItem key={value} value={value}>
+                {label}
+              </DropdownMenuRadioItem>
+            ))}
           </DropdownMenuRadioGroup>
         </DropdownMenuContent>
       </DropdownMenu>
