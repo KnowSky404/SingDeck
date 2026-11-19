@@ -69,6 +69,17 @@ test("mock workspace supports server-confirmed selection, filtering, log control
   const primary = page
     .locator('[data-slot="card"]')
     .filter({ has: page.getByText("Primary route", { exact: true }) });
+  const expandPrimary = primary.getByRole("button", {
+    name: "Expand Primary route",
+    exact: true,
+  });
+  await expect(expandPrimary).toHaveAccessibleDescription("Selected: Tokyo 01");
+  await expect(page.locator(".proxy-row")).toHaveCount(0);
+  await expect(primary).not.toContainText("selector");
+  await expandPrimary.click();
+  await page
+    .getByRole("button", { name: "Expand Auto route", exact: true })
+    .click();
   const singapore = primary
     .locator(".proxy-row")
     .filter({ hasText: "Singapore 01" });
@@ -96,15 +107,19 @@ test("mock workspace supports server-confirmed selection, filtering, log control
     .getByRole("button", { name: "Collapse Primary route", exact: true })
     .click();
   await expect(primary.locator(".proxy-row")).toHaveCount(0);
-  await expect(primary).toContainText("Selected: Singapore 01");
-  const preview = primary.getByRole("list", { name: "Node latency preview" });
-  await expect(preview.getByRole("listitem")).toHaveCount(4);
-  await expect(preview.locator("[data-selected]")).toContainText(
-    "Singapore 01 · 68 ms · Selected",
+  await expect(expandPrimary).toHaveAccessibleDescription(
+    "Selected: Singapore 01",
   );
-  await expect(preview.locator('[data-latency="unknown"]')).toContainText(
-    "Direct · No result",
-  );
+  await expect(primary.locator(".proxy-current-latency")).toHaveText("68 ms");
+  await expect(details).toBeHidden();
+  await expect(
+    page
+      .locator('[data-slot="card"]')
+      .filter({ has: page.getByText("Auto route", { exact: true }) })
+      .locator(".proxy-row"),
+  ).toHaveCount(2);
+  await expandPrimary.press("Enter");
+  await expect(primary.locator(".proxy-row")).toHaveCount(4);
   await details.press("Enter");
   await expect(latencyDialog.getByText("68 ms", { exact: true })).toBeVisible();
   await expect(
@@ -113,18 +128,6 @@ test("mock workspace supports server-confirmed selection, filtering, log control
   await page.keyboard.press("Escape");
   await expect(latencyDialog).toBeHidden();
   await expect(details).toBeFocused();
-  await expect(
-    page
-      .locator('[data-slot="card"]')
-      .filter({ has: page.getByText("Auto route", { exact: true }) })
-      .locator(".proxy-row"),
-  ).toHaveCount(2);
-  await primary
-    .getByRole("button", { name: "Expand Primary route", exact: true })
-    .focus();
-  await page.keyboard.press("Enter");
-  await expect(primary.locator(".proxy-row")).toHaveCount(4);
-  await expect(preview).toBeHidden();
   await expect(page.locator(".proxy-cards")).toHaveCount(2);
   const testButton = primary.getByRole("button", {
     name: "Test Direct in Primary route",
@@ -448,6 +451,21 @@ test("group cards and node cards are independent and settings stay read-only", a
   ).toBeChecked();
   await expect(page.locator(".proxy-group-grid > div")).toHaveCount(2);
   const tiles = page.locator(".proxy-cards .proxy-row");
+  const search = page.getByRole("textbox", { name: "Search outbounds" });
+  await search.fill("London");
+  await expect(tiles).toHaveCount(1);
+  await expect(tiles).toContainText("London 01");
+  await page
+    .getByRole("button", { name: "Collapse Auto route", exact: true })
+    .click();
+  await expect(tiles).toHaveCount(0);
+  await search.clear();
+  await page
+    .getByRole("button", { name: "Expand Primary route", exact: true })
+    .click();
+  await page
+    .getByRole("button", { name: "Expand Auto route", exact: true })
+    .click();
   await expect(tiles).toHaveCount(6);
   const sizes = await tiles.evaluateAll((nodes) =>
     nodes.map((node) => {
@@ -462,6 +480,12 @@ test("group cards and node cards are independent and settings stay read-only", a
   await page.getByRole("radio", { name: "List view", exact: true }).click();
   await expect(page.locator(".proxy-group-grid > div")).toHaveCount(2);
   await expect(page.locator(".proxy-cards")).toHaveCount(0);
+  const rows = page.locator(".proxy-items .proxy-row");
+  await expect(rows).toHaveCount(6);
+  const rowHeights = await rows.evaluateAll((elements) =>
+    elements.map((element) => element.getBoundingClientRect().height),
+  );
+  expect(Math.max(...rowHeights)).toBeLessThanOrEqual(40);
   await page.getByRole("radio", { name: "Compact cards", exact: true }).click();
   await expect(page.locator(".proxy-cards")).toHaveCount(2);
   await page.getByRole("radio", { name: "Group list", exact: true }).click();

@@ -60,6 +60,9 @@ test("browser uses the official native service through CORS and built-in dashboa
       .getByRole("link", { name: "Proxies", exact: true })
       .first()
       .click();
+    await page
+      .getByRole("button", { name: "Expand Primary route", exact: true })
+      .click();
     const backup = page
       .locator(".proxy-row")
       .filter({ has: page.getByText("direct-backup", { exact: true }) });
