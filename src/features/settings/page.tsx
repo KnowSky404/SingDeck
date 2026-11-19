@@ -33,7 +33,7 @@ export default function Settings() {
             </div>
           </dl>
         </Panel>
-        <Panel title={t("About SingDeck")}>
+        <Panel title={t("Dashboard compatibility")}>
           <dl className="detail-list">
             <div>
               <dt>{t("Dashboard")}</dt>
