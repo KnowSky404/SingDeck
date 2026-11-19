@@ -92,7 +92,7 @@ test("mock workspace supports server-confirmed selection, filtering, log control
   await expect(
     primary
       .locator('[data-slot="card-header"]')
-      .getByRole("button", { name: /Node details for/ }),
+      .getByRole("button", { name: /(Node|Group) details for/ }),
   ).toHaveCount(0);
   const groupReference = primary
     .locator(".proxy-row")
@@ -106,6 +106,21 @@ test("mock workspace supports server-confirmed selection, filtering, log control
   await expect(
     groupReference.getByRole("button", { name: /Node details for/ }),
   ).toHaveCount(0);
+  await groupReference
+    .getByRole("button", { name: "Group details for Auto route", exact: true })
+    .click();
+  const groupDialog = page.getByRole("dialog", {
+    name: "Auto route",
+    exact: true,
+  });
+  await expect(groupDialog).toHaveAccessibleDescription(
+    "Referenced proxy group",
+  );
+  await expect(groupDialog.getByText("urltest", { exact: true })).toBeVisible();
+  await expect(
+    groupDialog.getByText("Singapore 01", { exact: true }),
+  ).toBeVisible();
+  await groupDialog.getByRole("button", { name: "Close", exact: true }).click();
   await details.click();
   await expect(nodeDialog.getByText("trojan", { exact: true })).toBeVisible();
   await expect(nodeDialog.getByText("68 ms", { exact: true })).toBeVisible();
@@ -479,6 +494,24 @@ test("group cards and node cards are independent and settings stay read-only", a
   await expect(page.getByRole("radio", { name: "Group cards" })).toBeChecked();
   await expect(page.getByRole("radio", { name: "List view" })).toBeChecked();
   await expect(page.locator(".proxy-group-grid > div")).toHaveCount(2);
+  const primaryGroup = page.getByRole("button", {
+    name: "Expand Primary route",
+    exact: true,
+  });
+  expect(
+    await primaryGroup.locator(".proxy-current-name").evaluate((element) => {
+      const name = element.textContent;
+      element.textContent = "very-long-selected-node-name".repeat(12);
+      const summary = element.closest(".proxy-group-current")!;
+      const copy = element.closest(".proxy-group-copy")!;
+      const fits =
+        summary.getBoundingClientRect().right <=
+          copy.getBoundingClientRect().right &&
+        element.scrollWidth > element.clientWidth;
+      element.textContent = name;
+      return fits;
+    }),
+  ).toBe(true);
   const rows = page.locator(".proxy-items .proxy-row");
   await expect(rows).toHaveCount(0);
   const search = page.getByRole("textbox", { name: "Search outbounds" });
@@ -490,9 +523,12 @@ test("group cards and node cards are independent and settings stay read-only", a
     .click();
   await expect(rows).toHaveCount(0);
   await search.clear();
-  await page
-    .getByRole("button", { name: "Expand Primary route", exact: true })
-    .click();
+  await expect(primaryGroup).toBeVisible();
+  await search.fill("London");
+  await expect(rows).toHaveCount(1);
+  await expect(rows).toContainText("London 01");
+  await search.clear();
+  await primaryGroup.click();
   await page
     .getByRole("button", { name: "Expand Auto route", exact: true })
     .click();
@@ -521,11 +557,27 @@ test("group cards and node cards are independent and settings stay read-only", a
   await expect(page.locator(".proxy-cards")).toHaveCount(2);
   const tiles = page.locator(".proxy-cards .proxy-row");
   await expect(tiles).toHaveCount(7);
+  expect(
+    await tiles
+      .first()
+      .locator("strong")
+      .evaluate((element) => {
+        const name = element.textContent;
+        element.textContent = "very-long-node-name".repeat(12);
+        const truncated =
+          element.clientWidth <= element.parentElement!.clientWidth &&
+          element.scrollWidth > element.clientWidth &&
+          getComputedStyle(element).textOverflow === "ellipsis";
+        element.textContent = name;
+        return truncated;
+      }),
+  ).toBe(true);
   await expect(
-    tiles
-      .filter({ hasText: "Auto route" })
-      .getByRole("button", { name: /Node details for/ }),
-  ).toHaveCount(0);
+    tiles.filter({ hasText: "Auto route" }).getByRole("button", {
+      name: "Group details for Auto route",
+      exact: true,
+    }),
+  ).toBeVisible();
   const sizes = await tiles.evaluateAll((nodes) =>
     nodes.map((node) => {
       const { width, height } = node.getBoundingClientRect();
