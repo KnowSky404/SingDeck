@@ -756,93 +756,101 @@ h3 {
   flex-direction: column;
   gap: 20px;
 }
+
 .proxy-group-card[data-slot="card"] {
-  gap: 12px;
-  padding-block: 14px;
+  gap: 0;
+  padding-block: 0;
+  border-color: color-mix(in srgb, var(--border) 75%, transparent);
+  background: color-mix(in srgb, var(--card) 84%, var(--sidebar-accent));
+  box-shadow: none;
 }
-.proxy-group-card > [data-slot="card-header"],
-.proxy-group-card [data-slot="card-content"] {
-  padding-inline: 14px;
+.proxy-group-card > .proxy-group-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+}
+.proxy-group-header > [data-slot="card-action"] {
+  align-self: center;
 }
 .group-title-trigger {
   width: 100%;
-  justify-content: flex-start;
-  padding-inline: 0 6px;
-  font-size: inherit;
-  font-weight: inherit;
-}
-.group-title-trigger svg {
-  transition: transform 0.15s;
-}
-.group-title-trigger[data-state="closed"] svg {
-  transform: rotate(-90deg);
-}
-.group-title-trigger[data-state="open"] {
   height: auto;
-  min-height: 32px;
+  min-height: 62px;
+  justify-content: space-between;
+  padding: 7px 9px;
+  border-radius: calc(var(--radius) - 3px);
+  background: transparent;
   text-align: start;
+  font: inherit;
 }
-.group-title-trigger span,
-.proxy-group-description > span,
-.proxy-cards .proxy-identity strong,
-.proxy-cards .proxy-identity > div > span {
+.group-title-trigger:hover {
+  background: color-mix(in srgb, var(--sidebar-accent) 42%, transparent);
+}
+.proxy-group-copy {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+.proxy-group-name,
+.proxy-current-name,
+.proxy-identity strong,
+.proxy-identity > div > span,
+.proxy-latency {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.group-title-trigger[data-state="open"] span {
+.proxy-group-name {
+  width: 100%;
+}
+.group-title-trigger[data-state="open"] .proxy-group-name {
   overflow-wrap: anywhere;
   white-space: normal;
 }
-.proxy-group-description {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-  padding-inline-start: 22px;
-}
-.proxy-group-description > span:first-child {
-  color: var(--foreground);
-}
-.proxy-preview {
-  display: flex;
+.proxy-group-current {
+  display: inline-flex;
   align-items: center;
   gap: 5px;
-  min-height: 22px;
-  min-width: 0;
-  margin: 0;
-  padding-inline: 3px;
-  list-style: none;
-  overflow: hidden;
-  color: var(--muted-foreground);
-  font-size: 11px;
+  max-width: 100%;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
+  font-size: 12px;
+  font-weight: 550;
 }
-p.proxy-preview {
-  display: block;
-  line-height: 22px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.proxy-group-current svg {
+  width: 12px;
+  height: 12px;
 }
-.proxy-dot {
+.proxy-current-latency {
   flex: none;
-  width: 10px;
-  height: 10px;
-  border: 1px solid currentColor;
-  border-radius: 50%;
-  color: var(--latency-color, var(--muted-foreground));
-  background-color: currentColor;
+  padding-inline-start: 5px;
+  font-variant-numeric: tabular-nums;
 }
-.proxy-dot[data-latency="unknown"] {
-  background-color: transparent;
+.proxy-disclosure-icon {
+  color: var(--muted-foreground);
+  transition: transform 160ms ease;
 }
-.proxy-dot[data-latency="medium"] {
-  background: linear-gradient(to right, currentColor 50%, transparent 50%);
+.group-title-trigger[data-state="closed"] .proxy-disclosure-icon {
+  transform: rotate(-90deg);
 }
-.proxy-dot[data-latency="high"] {
-  background: radial-gradient(circle, currentColor 30%, transparent 40%);
+.proxy-group-body {
+  border-top: 1px solid var(--border);
 }
-.proxy-dot[data-selected] {
-  outline: 1px solid var(--foreground);
-  outline-offset: 2px;
+.proxy-group-body[data-state="open"] {
+  animation: proxy-disclose 160ms ease-out;
+}
+@keyframes proxy-disclose {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.proxy-group-card [data-slot="card-content"] {
+  padding: 10px;
 }
 [data-latency="low"] {
   --latency-color: var(--primary);
@@ -855,118 +863,100 @@ p.proxy-preview {
 }
 .proxy-latency {
   color: var(--latency-color, var(--muted-foreground));
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 .proxy-items {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  gap: 2px;
 }
 .proxy-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  padding: 14px 12px;
-  border-bottom: 1px solid var(--border);
-}
-.proxy-row:last-child {
-  border: 0;
+  gap: 6px;
+  min-height: 36px;
+  padding: 3px 6px;
+  border-radius: calc(var(--radius) - 4px);
 }
 .proxy-row.selected {
-  background: color-mix(in srgb, var(--accent) 65%, transparent);
-  border-radius: 8px;
+  background: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
+}
+.proxy-row.selected .proxy-latency[data-latency="low"] {
+  color: var(--sidebar-accent-foreground);
 }
 .proxy-identity,
+.proxy-identity > div,
 .proxy-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
-}
-.proxy-identity {
   min-width: 0;
-}
-.proxy-identity > div {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  gap: 4px;
+  gap: 6px;
 }
 .proxy-identity strong {
   font-size: 13px;
-  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+.proxy-identity > div {
+  overflow: hidden;
+}
+.proxy-items:not(.proxy-cards) .proxy-identity strong {
+  flex: none;
+  max-width: 100%;
 }
 .proxy-identity > div > span {
+  max-width: 5.5rem;
   color: var(--muted-foreground);
   font-size: 11px;
+  font-weight: 400;
 }
 .proxy-mark {
-  flex: none;
-  width: 24px;
-  height: 24px;
   display: grid;
   place-items: center;
-  color: var(--primary);
+  flex: none;
+  width: 16px;
+  color: var(--muted-foreground);
 }
-.proxy-mark > span {
-  width: 9px;
-  height: 9px;
-  border: 1px solid var(--input);
-  border-radius: 50%;
+.proxy-row.selected .proxy-mark,
+.proxy-mark .spin {
+  color: var(--sidebar-accent-foreground);
 }
 .proxy-mark svg {
-  width: 17px;
-  height: 17px;
-}
-.proxy-actions {
-  gap: 8px;
-  flex-shrink: 0;
-}
-.proxy-actions [data-slot="badge"] {
-  white-space: nowrap;
+  width: 14px;
+  height: 14px;
 }
 .proxy-cards {
-  display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 8.75rem), 1fr));
   gap: 8px;
 }
 .proxy-cards .proxy-row {
-  display: grid;
   grid-template-columns: minmax(0, 1fr);
-  position: relative;
-  min-width: 0;
-  padding: 9px 10px 6px;
+  padding: 8px 9px 4px;
   gap: 4px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
 }
-.proxy-cards .proxy-row.selected {
-  border-color: var(--primary);
-}
-.proxy-cards .proxy-identity {
-  gap: 7px;
+.proxy-cards .proxy-row:not(.selected) {
+  background: color-mix(in srgb, var(--card) 66%, var(--muted));
 }
 .proxy-cards .proxy-identity > div {
+  flex-direction: column;
+  align-items: flex-start;
   gap: 1px;
 }
+.proxy-cards .proxy-identity > div > span {
+  max-width: 100%;
+}
 .proxy-cards .proxy-actions {
-  width: auto;
-  margin: 0;
   justify-content: space-between;
 }
-.proxy-cards .proxy-latency {
-  display: block;
-  min-width: 0;
-  flex-shrink: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.proxy-cards .proxy-test {
+.proxy-test {
   position: relative;
   z-index: 1;
-  /* Disabled test buttons still cover the card's selection button. */
+  /* Disabled test buttons still cover the row's selection button. */
   pointer-events: auto;
 }
-.proxy-cards .proxy-select {
+.proxy-select {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -974,9 +964,17 @@ p.proxy-preview {
   border-radius: inherit;
   background: transparent;
 }
-.proxy-cards .proxy-select:enabled:hover {
+.proxy-select:enabled:hover {
   cursor: pointer;
-  background: color-mix(in srgb, var(--primary) 6%, transparent);
+  background: color-mix(in srgb, var(--sidebar-accent) 35%, transparent);
+}
+.proxy-select:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.proxy-toolbar [data-state="on"] {
+  background: var(--sidebar-accent);
+  color: var(--sidebar-accent-foreground);
 }
 .quiet-empty {
   padding: 24px;
@@ -1429,18 +1427,8 @@ p.proxy-preview {
   .toolbar [data-slot="field"] {
     margin-left: 0;
   }
-  .proxy-row {
-    flex-wrap: wrap;
-    padding: 14px 4px;
-    gap: 12px;
-  }
-  .proxy-actions {
-    margin-left: 32px;
-    width: calc(100% - 32px);
-    justify-content: flex-end;
-  }
-  .proxy-actions > [data-slot="badge"] {
-    margin-right: auto;
+  .proxy-items:not(.proxy-cards) .proxy-row {
+    min-height: 40px;
   }
   .log-console {
     height: 58dvh;
@@ -1716,14 +1704,6 @@ p.proxy-preview {
 .proxy-group-grid > [data-state="open"] > .proxy-group-card {
   min-width: 0;
   flex: 1;
-}
-.proxy-group-grid .proxy-items:not(.proxy-cards) .proxy-row {
-  flex-wrap: wrap;
-}
-.proxy-group-grid .proxy-items:not(.proxy-cards) .proxy-actions {
-  width: 100%;
-  margin-left: 0;
-  justify-content: flex-end;
 }
 [data-slot="card-description"],
 .detail-list dd {
