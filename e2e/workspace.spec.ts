@@ -617,9 +617,14 @@ test("group cards and node cards are independent and settings stay read-only", a
       const name = element.textContent;
       const height = element.clientHeight;
       element.textContent = "A very long group reference name ".repeat(8);
+      const protocol = element.nextElementSibling!;
+      const identity = element.parentElement!.getBoundingClientRect();
       const wrapped =
         element.clientHeight > height &&
-        element.scrollWidth <= element.clientWidth;
+        element.scrollWidth <= element.clientWidth &&
+        protocol.clientWidth >= protocol.scrollWidth &&
+        protocol.clientWidth > 0 &&
+        protocol.getBoundingClientRect().right <= identity.right;
       element.textContent = name;
       return wrapped;
     }),
