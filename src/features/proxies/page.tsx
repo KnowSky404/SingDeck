@@ -151,6 +151,8 @@ function ProxyGroup({
       (type === "all" || item.type === type),
   );
   const current = group.items.find((item) => item.tag === group.selected);
+  const currentLatency =
+    current && latencyTone(current) !== "unknown" ? latency(current) : null;
   const selected = t("Selected: {name}", { name: group.selected || "—" });
   const cards = view === "cards";
   return (
@@ -183,9 +185,9 @@ function ProxyGroup({
                       <span className="proxy-current-name">
                         {group.selected}
                       </span>
-                      {current && latencyTone(current) !== "unknown" && (
+                      {currentLatency && (
                         <span className="proxy-current-latency">
-                          {latency(current)}
+                          {currentLatency}
                         </span>
                       )}
                     </span>
@@ -197,6 +199,7 @@ function ProxyGroup({
                 />
                 <span id={currentDescription} className="sr-only">
                   {selected}
+                  {currentLatency ? ` · ${t("Latency")} ${currentLatency}` : ""}
                   {group.selectable ? "" : ` · ${t("Read only")}`}
                 </span>
               </Button>
