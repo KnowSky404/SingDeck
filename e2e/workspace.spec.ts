@@ -347,10 +347,24 @@ test("responsive layout, dark/light/system themes, routes and console health", a
     await expect(page.getByRole("tooltip")).toHaveText("Language · English");
   }
   await themeButton.click();
-  await expect(page.getByRole("tooltip")).toBeHidden();
-  await page
-    .getByRole("menuitemradio", { name: "Dark theme", exact: true })
-    .click();
+  const themeOptions = page.getByRole("menuitemradio");
+  await expect(themeOptions).toHaveText(["", "", ""]);
+  await expect(
+    page.getByRole("menuitemradio", { name: "System theme", exact: true }),
+  ).toHaveAttribute("aria-checked", "true");
+  const darkTheme = page.getByRole("menuitemradio", {
+    name: "Dark theme",
+    exact: true,
+  });
+  if (!isMobile) {
+    await darkTheme.hover();
+    await expect(
+      page.locator('[data-slot="tooltip-content"]').filter({
+        hasText: "Dark theme",
+      }),
+    ).toBeVisible();
+  }
+  await darkTheme.click();
   await expect(page.locator("html")).toHaveClass(/dark/);
   await page.getByRole("button", { name: "Theme", exact: true }).click();
   await page
@@ -719,10 +733,22 @@ test("language and theme controls work without replacing the session and persist
   await languageButton.focus();
   await expect(page.getByRole("tooltip")).toHaveText("Language · English");
   await languageButton.press("Enter");
-  await expect(page.getByRole("tooltip")).toBeHidden();
-  await page
-    .getByRole("menuitemradio", { name: "简体中文", exact: true })
-    .click();
+  await expect(page.getByRole("menuitemradio")).toHaveText(["A", "中"]);
+  await expect(
+    page.getByRole("menuitemradio", { name: "English", exact: true }),
+  ).toBeFocused();
+  await page.keyboard.press("ArrowDown");
+  const chinese = page.getByRole("menuitemradio", {
+    name: "简体中文",
+    exact: true,
+  });
+  await expect(chinese).toBeFocused();
+  await expect(
+    page.locator('[data-slot="tooltip-content"]').filter({
+      hasText: "简体中文",
+    }),
+  ).toBeVisible();
+  await page.keyboard.press("Enter");
   await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
   await expect(page.getByText("演示模式", { exact: true })).toBeVisible();
   const collapse = page.getByRole("button", { name: "收起侧栏", exact: true });

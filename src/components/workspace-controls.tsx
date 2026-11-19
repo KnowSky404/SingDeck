@@ -7,6 +7,7 @@ import {
   Sun,
   type LucideIcon,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import { useWorkspace } from "@/app/context";
 import { Button } from "@/components/ui/button";
 import {
@@ -34,7 +35,10 @@ const themes = {
   system: { icon: Monitor, label: "System theme" },
 };
 
-const languages = { en: "English", zh: "简体中文" };
+const languages = {
+  en: { label: "English", glyph: "A" },
+  zh: { label: "简体中文", glyph: "中" },
+};
 
 function IconMenuTrigger({
   icon: Icon,
@@ -57,6 +61,40 @@ function IconMenuTrigger({
         </DropdownMenuTrigger>
         <TooltipContent side="bottom" sideOffset={6}>
           {tooltip}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+function IconMenuOption({
+  children,
+  label,
+  value,
+}: {
+  children: ReactNode;
+  label: string;
+  value: string;
+}) {
+  return (
+    <TooltipProvider delayDuration={400}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuRadioItem
+            aria-label={label}
+            textValue={label}
+            value={value}
+            className="min-h-9 pl-2 aria-checked:bg-sidebar-accent aria-checked:text-sidebar-accent-foreground"
+          >
+            {children}
+          </DropdownMenuRadioItem>
+        </TooltipTrigger>
+        <TooltipContent
+          side="left"
+          sideOffset={10}
+          className="pointer-events-auto"
+        >
+          {label}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -88,15 +126,15 @@ export function WorkspaceControls({
           label={t("Theme")}
           tooltip={t(appearance.label)}
         />
-        <DropdownMenuContent align="end">
+        <DropdownMenuContent align="end" className="w-auto min-w-0">
           <DropdownMenuRadioGroup
             value={theme}
             onValueChange={(value) => setTheme(value as Theme)}
           >
-            {Object.entries(themes).map(([value, { label }]) => (
-              <DropdownMenuRadioItem key={value} value={value}>
-                {t(label)}
-              </DropdownMenuRadioItem>
+            {Object.entries(themes).map(([value, { icon: Icon, label }]) => (
+              <IconMenuOption key={value} value={value} label={t(label)}>
+                <Icon aria-hidden="true" />
+              </IconMenuOption>
             ))}
           </DropdownMenuRadioGroup>
         </DropdownMenuContent>
@@ -105,17 +143,22 @@ export function WorkspaceControls({
         <IconMenuTrigger
           icon={Languages}
           label={t("Language")}
-          tooltip={`${t("Language")} · ${languages[language]}`}
+          tooltip={`${t("Language")} · ${languages[language].label}`}
         />
-        <DropdownMenuContent align="end">
+        <DropdownMenuContent align="end" className="w-auto min-w-0">
           <DropdownMenuRadioGroup
             value={language}
             onValueChange={(value) => setLanguage(value as Language)}
           >
-            {Object.entries(languages).map(([value, label]) => (
-              <DropdownMenuRadioItem key={value} value={value}>
-                {label}
-              </DropdownMenuRadioItem>
+            {Object.entries(languages).map(([value, { glyph, label }]) => (
+              <IconMenuOption key={value} value={value} label={label}>
+                <span
+                  aria-hidden="true"
+                  className="grid size-4 place-items-center rounded border border-current text-[10px] leading-none font-semibold"
+                >
+                  {glyph}
+                </span>
+              </IconMenuOption>
             ))}
           </DropdownMenuRadioGroup>
         </DropdownMenuContent>
