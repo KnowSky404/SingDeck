@@ -60,7 +60,7 @@ function DisplayOption({
             <Button
               variant="ghost"
               asChild
-              className="relative h-9 w-full p-1 aria-checked:bg-sidebar-accent aria-checked:text-sidebar-accent-foreground [@media(hover:none)]:h-12 [@media(hover:none)]:flex-col [@media(hover:none)]:gap-1"
+              className="display-option relative h-9 w-full p-1 aria-checked:bg-sidebar-accent aria-checked:text-sidebar-accent-foreground"
             >
               <RadioGroup.Item
                 aria-label={label}
@@ -73,7 +73,7 @@ function DisplayOption({
                 {children}
                 <span
                   aria-hidden="true"
-                  className="hidden text-[10px] leading-none [@media(hover:none)]:block"
+                  className="display-option-label hidden text-[10px] leading-none"
                 >
                   {shortLabel}
                 </span>
