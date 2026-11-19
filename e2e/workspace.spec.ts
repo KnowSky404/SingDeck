@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import metadata from "../package.json" with { type: "json" };
 
 async function demo(page: Page) {
   await page.goto("/");
@@ -11,6 +12,50 @@ async function demo(page: Page) {
 async function navigate(page: Page, name: string) {
   await page.getByRole("link", { name, exact: true }).first().click();
 }
+
+test("project information is available before and after connecting", async ({
+  page,
+  isMobile,
+}) => {
+  if (isMobile) await page.setViewportSize({ width: 320, height: 700 });
+  await page.goto("/");
+  const trigger = page.getByRole("button", { name: "About SingDeck" });
+  const dialog = page.getByRole("dialog", { name: "About SingDeck" });
+  await trigger.focus();
+  await page.keyboard.press("Enter");
+  await expect(dialog).toHaveAccessibleDescription(
+    `Dashboard version v${metadata.version}`,
+  );
+  await expect(
+    dialog.getByRole("link", { name: /^KnowSky404 \(/ }),
+  ).toHaveAttribute("href", "https://github.com/KnowSky404");
+  const repository = dialog.getByRole("link", {
+    name: /^KnowSky404\/SingDeck/,
+  });
+  await expect(repository).toHaveAttribute(
+    "href",
+    "https://github.com/KnowSky404/SingDeck",
+  );
+  await expect(repository).toHaveAttribute("target", "_blank");
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+  await expect(trigger).toBeFocused();
+
+  await page.getByRole("button", { name: "Explore demo", exact: true }).click();
+  await expect(page.getByText("Mock mode", { exact: true })).toBeVisible();
+  if (isMobile) await page.setViewportSize({ width: 280, height: 700 });
+  await expect(trigger).toBeInViewport({ ratio: 1 });
+  await page.getByRole("button", { name: "Language", exact: true }).click();
+  await page.getByRole("menuitemradio", { name: "简体中文" }).click();
+  await page.getByRole("button", { name: "关于 SingDeck" }).click();
+  const translated = page.getByRole("dialog", { name: "关于 SingDeck" });
+  await expect(translated).toHaveAccessibleDescription(
+    `面板版本 v${metadata.version}`,
+  );
+  await expect(translated.getByText("项目仓库")).toBeVisible();
+  await translated.getByRole("button", { name: "关闭" }).click();
+  await expect(translated).toBeHidden();
+});
 
 test("mock workspace supports server-confirmed selection, filtering, log controls and safe connection actions", async ({
   page,

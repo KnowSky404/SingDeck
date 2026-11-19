@@ -574,6 +574,12 @@ h3 {
 .detail-list > div:last-child {
   border-bottom: 0;
 }
+.about-details > div {
+  gap: 8px;
+}
+.about-details a {
+  padding-inline: 0;
+}
 .detail-list dt {
   color: var(--muted-foreground);
 }
@@ -1612,6 +1618,7 @@ h3 {
   }
   .workspace-status {
     gap: 6px;
+    flex-wrap: wrap;
   }
   .workspace > main {
     padding-top: 16px;
@@ -1621,5 +1628,11 @@ h3 {
 @media (max-width: 460px) {
   .topbar .brand > span:last-child {
     display: none;
+  }
+}
+@media (width < 320px) {
+  .topbar {
+    height: auto;
+    flex-wrap: wrap;
   }
 }
