@@ -17,10 +17,11 @@ test("project information is available before and after connecting", async ({
   page,
   isMobile,
 }) => {
-  if (isMobile) await page.setViewportSize({ width: 320, height: 700 });
+  if (isMobile) await page.setViewportSize({ width: 260, height: 700 });
   await page.goto("/");
   const trigger = page.getByRole("button", { name: "About SingDeck" });
   const dialog = page.getByRole("dialog", { name: "About SingDeck" });
+  await expect(trigger).toBeInViewport({ ratio: 1 });
   await trigger.focus();
   await page.keyboard.press("Enter");
   await expect(dialog).toHaveAccessibleDescription(
