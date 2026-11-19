@@ -63,9 +63,14 @@ test("browser uses the official native service through CORS and built-in dashboa
     const backup = page
       .locator(".proxy-row")
       .filter({ has: page.getByText("direct-backup", { exact: true }) });
-    await backup.getByRole("button", { name: "Select", exact: true }).click();
+    await backup
+      .getByRole("button", { name: "Select direct-backup", exact: true })
+      .click();
     await expect(
-      backup.getByRole("button", { name: "Selected", exact: true }),
+      backup.getByRole("button", {
+        name: "Selected: direct-backup",
+        exact: true,
+      }),
     ).toBeVisible();
     await page.goto("http://127.0.0.1:19190/dashboard/#/settings");
     await expect(
