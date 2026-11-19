@@ -236,16 +236,15 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
     },
     async uRLTest(request, opts) {
       await mutation(opts?.signal);
-      const tag = request.outboundTag ?? "";
-      const group = groupsByTag.get(tag);
-      const tested = new Set(
-        group?.items.map(
-          ({ tag }) => groupsByTag.get(tag)?.selected ?? tag,
-        ) ?? [tag],
-      );
+      const tested = new Set([request.outboundTag ?? ""]);
+      for (const tag of tested) {
+        for (const member of groupsByTag.get(tag)?.items ?? []) {
+          tested.add(member.tag);
+        }
+      }
       const testedAt = BigInt(Math.floor(Date.now() / 1000));
       for (const item of items) {
-        if (tested.has(item.tag)) {
+        if (tested.has(item.tag) && !groupsByTag.has(item.tag)) {
           item.urlTestDelay = 25 + ((item.tag.length * 7) % 110);
           item.urlTestTime = testedAt;
         }
