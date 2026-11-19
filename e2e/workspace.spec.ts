@@ -72,15 +72,47 @@ test("mock workspace supports server-confirmed selection, filtering, log control
   const singapore = primary
     .locator(".proxy-row")
     .filter({ hasText: "Singapore 01" });
-  await singapore.getByRole("button", { name: "Select", exact: true }).click();
+  const details = primary.getByRole("button", {
+    name: "Node details for Primary route",
+  });
+  const latencyDialog = page.getByRole("dialog", { name: "Primary route" });
+  await details.click();
   await expect(
-    singapore.getByRole("button", { name: "Selected", exact: true }),
+    latencyDialog.getByText("Singapore 01", { exact: true }),
+  ).toBeVisible();
+  await latencyDialog
+    .getByRole("button", { name: "Close", exact: true })
+    .click();
+  await singapore
+    .getByRole("button", { name: "Select Singapore 01", exact: true })
+    .click();
+  await expect(
+    singapore.getByRole("button", {
+      name: "Selected: Singapore 01",
+      exact: true,
+    }),
   ).toBeVisible();
   await primary
     .getByRole("button", { name: "Collapse Primary route", exact: true })
     .click();
   await expect(primary.locator(".proxy-row")).toHaveCount(0);
   await expect(primary).toContainText("Selected: Singapore 01");
+  const preview = primary.getByRole("list", { name: "Node latency preview" });
+  await expect(preview.getByRole("listitem")).toHaveCount(4);
+  await expect(preview.locator("[data-selected]")).toContainText(
+    "Singapore 01 · 68 ms · Selected",
+  );
+  await expect(preview.locator('[data-latency="unknown"]')).toContainText(
+    "Direct · No result",
+  );
+  await details.press("Enter");
+  await expect(latencyDialog.getByText("68 ms", { exact: true })).toBeVisible();
+  await expect(
+    latencyDialog.getByText("No result", { exact: true }),
+  ).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(latencyDialog).toBeHidden();
+  await expect(details).toBeFocused();
   await expect(
     page
       .locator('[data-slot="card"]')
@@ -92,8 +124,32 @@ test("mock workspace supports server-confirmed selection, filtering, log control
     .focus();
   await page.keyboard.press("Enter");
   await expect(primary.locator(".proxy-row")).toHaveCount(4);
-  await page.getByRole("radio", { name: "Compact cards" }).click();
+  await expect(preview).toBeHidden();
   await expect(page.locator(".proxy-cards")).toHaveCount(2);
+  const testButton = primary.getByRole("button", {
+    name: "Test Direct in Primary route",
+  });
+  await expect(testButton).toBeEnabled();
+  await testButton.scrollIntoViewIfNeeded();
+  expect(
+    await testButton.evaluate((button: HTMLButtonElement) => {
+      const { x, y, width, height } = button.getBoundingClientRect();
+      button.disabled = true;
+      const hit = document.elementFromPoint(x + width / 2, y + height / 2);
+      button.disabled = false;
+      return hit === button;
+    }),
+  ).toBe(true);
+  await testButton.click();
+  await expect(
+    primary
+      .locator(".proxy-row")
+      .filter({ hasText: "Direct" })
+      .locator(".proxy-latency"),
+  ).toHaveText(/\d+ ms/);
+  await expect(
+    singapore.getByRole("button", { name: "Selected: Singapore 01" }),
+  ).toBeDisabled();
   await page
     .getByRole("textbox", { name: "Search outbounds" })
     .fill("no-such-node");
@@ -386,10 +442,30 @@ test("group cards and node cards are independent and settings stay read-only", a
     );
   }
   await navigate(page, "Proxies");
-  await page.getByRole("radio", { name: "Group cards", exact: true }).click();
+  await expect(page.getByRole("radio", { name: "Group cards" })).toBeChecked();
+  await expect(
+    page.getByRole("radio", { name: "Compact cards" }),
+  ).toBeChecked();
+  await expect(page.locator(".proxy-group-grid > div")).toHaveCount(2);
+  const tiles = page.locator(".proxy-cards .proxy-row");
+  await expect(tiles).toHaveCount(6);
+  const sizes = await tiles.evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const { width, height } = node.getBoundingClientRect();
+      return { width, height };
+    }),
+  );
+  for (const size of sizes) {
+    expect(Math.abs(size.width - sizes[0].width)).toBeLessThan(1);
+    expect(Math.abs(size.height - sizes[0].height)).toBeLessThan(1);
+  }
+  await page.getByRole("radio", { name: "List view", exact: true }).click();
   await expect(page.locator(".proxy-group-grid > div")).toHaveCount(2);
   await expect(page.locator(".proxy-cards")).toHaveCount(0);
   await page.getByRole("radio", { name: "Compact cards", exact: true }).click();
+  await expect(page.locator(".proxy-cards")).toHaveCount(2);
+  await page.getByRole("radio", { name: "Group list", exact: true }).click();
+  await expect(page.locator(".proxy-group-grid")).toHaveCount(0);
   await expect(page.locator(".proxy-cards")).toHaveCount(2);
   await page
     .getByRole("button", { name: "Collapse Primary route", exact: true })
