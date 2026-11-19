@@ -918,6 +918,10 @@ h3 {
 .proxy-identity > div {
   overflow: hidden;
 }
+.proxy-items:not(.proxy-cards) .proxy-identity > div {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
 .proxy-items:not(.proxy-cards) .proxy-identity strong {
   flex: none;
   max-width: 100%;
