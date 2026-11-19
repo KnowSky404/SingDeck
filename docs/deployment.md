@@ -46,7 +46,7 @@ The official [native API dashboard options](https://sing-box.sagernet.org/config
 - `dashboard.path` 最初应不存在或为空，且运行 sing-box 的用户有写入权限。相对路径基于 sing-box 的工作目录，建议按自己的系统改成绝对路径。
 - 重启 sing-box 后会异步下载；下载完成再打开 `http://127.0.0.1:9090/dashboard/`，入口会识别 API 地址。填写相同的 `secret` 即可连接，刷新后需重新输入密钥。
 - `latest/download/singdeck.zip` 跟随最新稳定版本；`update_interval` 控制后台更新检查。首发下载需能访问 GitHub 及其发布资产域名，失败会在核心日志中显示。
-- 如需固定本版，将 URL 改为 `https://github.com/KnowSky404/SingDeck/releases/download/v0.3.0/singdeck-v0.3.0.zip`。固定 URL 不会自动跳到后续版本。
+- 如需固定本版，将 URL 改为 `https://github.com/KnowSky404/SingDeck/releases/download/v0.4.0/singdeck-v0.4.0.zip`。固定 URL 不会自动跳到后续版本。
 - 已手动放入文件且没有 sing-box 管理标记的目录，会被当作用户提供的面板，自动更新不会启用。切换到自动下载时使用新的空目录，保留旧目录作备份；不要删除私人配置，也不要手工伪造 `.etag`。
 - 如果下载需要经代理，可按官方 [HTTP client options](https://sing-box.sagernet.org/configuration/shared/http-client/) 配置 `dashboard.http_client`；不要把代理或 API 密钥放到下载 URL 中。
 
