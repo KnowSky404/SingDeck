@@ -372,6 +372,13 @@ export default function Proxies() {
   const groups = snapshot.groups ?? [];
   const groupsByTag = new Map(groups.map((group) => [group.tag, group]));
   const types = [...new Set(groups.flatMap((g) => g.items.map((i) => i.type)))];
+  const isExpanded = (tag: string) =>
+    filtering ? !filteredDisclosure.closedGroups.has(tag) : openGroups.has(tag);
+  const allExpanded =
+    groups.length > 0 && groups.every(({ tag }) => isExpanded(tag));
+  const bulkAction = t(
+    allExpanded ? "Collapse all groups" : "Expand all groups",
+  );
   function setExpanded(tags: string[], open: boolean) {
     const update = (current: Set<string>) => {
       const exceptions = new Set(current);
@@ -447,38 +454,26 @@ export default function Proxies() {
             </ToggleGroup>
           </div>
         </div>
-        <div className="button-row toolbar-actions">
-          <Button
-            variant="outline"
-            size="icon"
-            aria-label={t("Expand all groups")}
-            title={t("Expand all groups")}
-            disabled={!groups.length}
-            onClick={() =>
-              setExpanded(
-                groups.map(({ tag }) => tag),
-                true,
-              )
-            }
-          >
-            <ChevronsUpDown aria-hidden="true" />
-          </Button>
-          <Button
-            variant="outline"
-            size="icon"
-            aria-label={t("Collapse all groups")}
-            title={t("Collapse all groups")}
-            disabled={!groups.length}
-            onClick={() =>
-              setExpanded(
-                groups.map(({ tag }) => tag),
-                false,
-              )
-            }
-          >
+        <Button
+          variant="outline"
+          size="icon"
+          className="toolbar-actions"
+          aria-label={bulkAction}
+          title={bulkAction}
+          disabled={!groups.length}
+          onClick={() =>
+            setExpanded(
+              groups.map(({ tag }) => tag),
+              !allExpanded,
+            )
+          }
+        >
+          {allExpanded ? (
             <ChevronsDownUp aria-hidden="true" />
-          </Button>
-        </div>
+          ) : (
+            <ChevronsUpDown aria-hidden="true" />
+          )}
+        </Button>
       </div>
       <ChannelState channel="groups" empty={snapshot.groups?.length === 0}>
         <div
@@ -494,11 +489,7 @@ export default function Proxies() {
               search={query}
               type={type}
               view={view}
-              expanded={
-                filtering
-                  ? !filteredDisclosure.closedGroups.has(group.tag)
-                  : openGroups.has(group.tag)
-              }
+              expanded={isExpanded(group.tag)}
               onOpenChange={(open) => setExpanded([group.tag], open)}
             />
           ))}

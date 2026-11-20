@@ -593,12 +593,24 @@ test("group cards and node cards are independent and settings stay read-only", a
   ).toBe(true);
   const rows = page.locator(".proxy-items .proxy-row");
   await expect(rows).toHaveCount(0);
-  const expandAll = page.getByRole("button", { name: "Expand all groups" });
-  const collapseAll = page.getByRole("button", { name: "Collapse all groups" });
+  const expandAll = page.getByRole("button", {
+    name: "Expand all groups",
+    exact: true,
+  });
+  const collapseAll = page.getByRole("button", {
+    name: "Collapse all groups",
+    exact: true,
+  });
+  await expect(expandAll.locator(".lucide-chevrons-up-down")).toBeVisible();
+  await expect(collapseAll).toHaveCount(0);
   await expandAll.click();
   await expect(rows).toHaveCount(7);
+  await expect(collapseAll.locator(".lucide-chevrons-down-up")).toBeVisible();
+  await expect(expandAll).toHaveCount(0);
   await page.getByRole("button", { name: "Collapse Primary route" }).click();
   await expect(rows).toHaveCount(2);
+  await expandAll.click();
+  await expect(rows).toHaveCount(7);
   await collapseAll.click();
   await expect(rows).toHaveCount(0);
   const search = page.getByRole("textbox", { name: "Search outbounds" });
