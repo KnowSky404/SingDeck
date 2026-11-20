@@ -2,6 +2,8 @@ import { useState, useDeferredValue, useId } from "react";
 import {
   Check,
   ChevronDown,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Circle,
   Info,
   LayoutGrid,
@@ -144,30 +146,21 @@ function ProxyGroup({
   search,
   type,
   view,
+  expanded,
+  onOpenChange,
 }: {
   group: Group;
   groupsByTag: ReadonlyMap<string, Group>;
   search: string;
   type: string;
   view: string;
+  expanded: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
   const { snapshot, session, t } = useWorkspace();
   const selection = useAction(),
     testing = useAction();
   const [target, setTarget] = useState("");
-  const [open, setOpen] = useState(false);
-  const [filteredDisclosure, setFilteredDisclosure] = useState({
-    search,
-    type,
-    open: true,
-  });
-  const filterChanged =
-    filteredDisclosure.search !== search || filteredDisclosure.type !== type;
-  if (filterChanged) {
-    setFilteredDisclosure({ search, type, open: true });
-  }
-  const filtering = search !== "" || type !== "all";
-  const expanded = filtering ? filterChanged || filteredDisclosure.open : open;
   const currentDescription = useId();
   const enabled =
     snapshot.phase === "connected" &&
@@ -184,13 +177,7 @@ function ProxyGroup({
   const selected = t("Selected: {name}", { name: group.selected || "—" });
   const cards = view === "cards";
   return (
-    <Collapsible
-      open={expanded}
-      onOpenChange={(next) => {
-        if (filtering) setFilteredDisclosure({ search, type, open: next });
-        else setOpen(next);
-      }}
-    >
+    <Collapsible open={expanded} onOpenChange={onOpenChange}>
       <Card className="proxy-group-card ring-0">
         <CardHeader className="proxy-group-header">
           <CardTitle className="min-w-0 flex-1">
@@ -372,9 +359,38 @@ export default function Proxies() {
     [view, setView] = useState("list"),
     [groupView, setGroupView] = useState("cards");
   const query = useDeferredValue(search.toLowerCase());
+  const [openGroups, setOpenGroups] = useState(() => new Set<string>());
+  const [filteredDisclosure, setFilteredDisclosure] = useState(() => ({
+    query,
+    type,
+    closedGroups: new Set<string>(),
+  }));
+  if (filteredDisclosure.query !== query || filteredDisclosure.type !== type) {
+    setFilteredDisclosure({ query, type, closedGroups: new Set() });
+  }
+  const filtering = query !== "" || type !== "all";
   const groups = snapshot.groups ?? [];
   const groupsByTag = new Map(groups.map((group) => [group.tag, group]));
   const types = [...new Set(groups.flatMap((g) => g.items.map((i) => i.type)))];
+  function setExpanded(tags: string[], open: boolean) {
+    const update = (current: Set<string>) => {
+      const exceptions = new Set(current);
+      for (const tag of tags) {
+        if (open === filtering) exceptions.delete(tag);
+        else exceptions.add(tag);
+      }
+      return exceptions;
+    };
+    if (filtering) {
+      setFilteredDisclosure((current) => ({
+        ...current,
+        closedGroups: update(current.closedGroups),
+      }));
+    } else {
+      setOpenGroups(update);
+    }
+  }
+
   return (
     <>
       <PageHeading title={t("Proxies")} />
@@ -431,6 +447,38 @@ export default function Proxies() {
             </ToggleGroup>
           </div>
         </div>
+        <div className="button-row toolbar-actions">
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label={t("Expand all groups")}
+            title={t("Expand all groups")}
+            disabled={!groups.length}
+            onClick={() =>
+              setExpanded(
+                groups.map(({ tag }) => tag),
+                true,
+              )
+            }
+          >
+            <ChevronsUpDown aria-hidden="true" />
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label={t("Collapse all groups")}
+            title={t("Collapse all groups")}
+            disabled={!groups.length}
+            onClick={() =>
+              setExpanded(
+                groups.map(({ tag }) => tag),
+                false,
+              )
+            }
+          >
+            <ChevronsDownUp aria-hidden="true" />
+          </Button>
+        </div>
       </div>
       <ChannelState channel="groups" empty={snapshot.groups?.length === 0}>
         <div
@@ -446,6 +494,12 @@ export default function Proxies() {
               search={query}
               type={type}
               view={view}
+              expanded={
+                filtering
+                  ? !filteredDisclosure.closedGroups.has(group.tag)
+                  : openGroups.has(group.tag)
+              }
+              onOpenChange={(open) => setExpanded([group.tag], open)}
             />
           ))}
         </div>

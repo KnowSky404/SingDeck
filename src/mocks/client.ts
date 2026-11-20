@@ -275,7 +275,10 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
                     level: LogLevel.TRACE,
                     message: "demo trace: route lookup",
                   },
-                  { level: LogLevel.INFO, message: messages[1] },
+                  ...messages.slice(1, 5).map((message) => ({
+                    level: LogLevel.INFO,
+                    message,
+                  })),
                   {
                     level: LogLevel.WARN,
                     message: "demo warning: retrying a probe",

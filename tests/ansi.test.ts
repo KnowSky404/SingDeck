@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { LogLine } from "@/features/logs/log-line";
+import { logSource } from "@/features/logs/log-source";
 import { appendLogs } from "@/api/state";
 import { create } from "@bufbuild/protobuf";
 import { LogSchema, LogLevel } from "@/proto/daemon/started_service_pb";
@@ -81,4 +82,14 @@ describe("safe ANSI log rendering", () => {
     expect(rendered).not.toContain("<img");
     expect(rendered).not.toContain("private-token");
   });
+});
+
+it.each([
+  ["[321 1m2s] dns/https[remote]: exchanged example.org", "dns"],
+  ["inbound/mixed[local]: connection from 127.0.0.1", "inbound"],
+  ["[321 0ms] outbound/direct: connected", "outbound"],
+  ["\u001b[37mDEBUG\u001b[0m[16737] [321 0ms] router: pre-match inbound=dns", "router"],
+  ["core: dns: outbound: inbound: embedded message", "other"],
+])("classifies the logger prefix in %s", (message, source) => {
+  expect(logSource(plainLog(message))).toBe(source);
 });

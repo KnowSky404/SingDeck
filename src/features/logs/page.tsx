@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { LogLine } from "./log-line";
+import { logSource } from "./log-source";
 import { LogLevel } from "@/proto/daemon/started_service_pb";
 import { levelName } from "@/lib/format";
 
@@ -21,6 +22,7 @@ export default function Logs() {
   const { snapshot, session, t } = useWorkspace();
   const [search, setSearch] = useState(""),
     [level, setLevel] = useState(String(LogLevel.INFO)),
+    [source, setSource] = useState("all"),
     [autoScroll, setAutoScroll] = useState(true);
   const [paused, setPaused] = useState<LogEntry[] | null>(null);
   const [feedback, setFeedback] = useState("");
@@ -29,7 +31,8 @@ export default function Logs() {
   const entries = (paused ?? snapshot.logs).filter(
     (log) =>
       (level === "all" || log.level <= Number(level)) &&
-      log.text.toLowerCase().includes(query),
+      log.text.toLowerCase().includes(query) &&
+      (source === "all" || logSource(log.text) === source),
   );
   const endId = entries.at(-1)?.id;
   useEffect(() => {
@@ -85,6 +88,19 @@ export default function Logs() {
               value: String(i),
               label: t("{level} and above", { level: levelName(i) }),
             })),
+          ]}
+        />
+        <Choice
+          label={t("Log source")}
+          value={source}
+          onChange={setSource}
+          options={[
+            { value: "all", label: t("All sources") },
+            { value: "dns", label: "DNS" },
+            { value: "inbound", label: t("Inbound") },
+            { value: "outbound", label: t("Outbound") },
+            { value: "router", label: t("Router") },
+            { value: "other", label: t("Other") },
           ]}
         />
         <div className="button-row toolbar-actions">

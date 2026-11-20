@@ -1,5 +1,14 @@
 import { useDeferredValue, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Search, X, Info } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  ChevronLeft,
+  ChevronRight,
+  Search,
+  X,
+  Info,
+} from "lucide-react";
 import { useWorkspace } from "@/app/context";
 import { useAction } from "@/hooks/use-action";
 import {
@@ -25,13 +34,39 @@ import { bytes } from "@/lib/format";
 import type { Connection } from "@/proto/daemon/started_service_pb";
 
 const PAGE_SIZE = 50;
+const sortColumns = [
+  { key: "createdAt", label: "Start time" },
+  { key: "uplinkTotal", label: "Upload" },
+  { key: "downlinkTotal", label: "Download" },
+] as const;
+type ConnectionSort = {
+  column: (typeof sortColumns)[number]["key"];
+  direction: "ascending" | "descending";
+};
+
+function hasStartTime(timestamp: bigint) {
+  return timestamp > 0n && timestamp <= 8_640_000_000_000_000n;
+}
+
 export default function Connections() {
-  const { snapshot, session, token, t } = useWorkspace();
+  const { snapshot, session, token, language, t } = useWorkspace();
   const [search, setSearch] = useState(""),
     [network, setNetwork] = useState("all"),
     [state, setState] = useState("active"),
-    [sort, setSort] = useState("newest"),
+    [sort, setSort] = useState<ConnectionSort>({
+      column: "createdAt",
+      direction: "descending",
+    }),
     [page, setPage] = useState(0);
+  const startTimeFormat = useMemo(
+    () =>
+      new Intl.DateTimeFormat(language, {
+        dateStyle: "short",
+        timeStyle: "medium",
+        hour12: false,
+      }),
+    [language],
+  );
   const [outbound, setOutbound] = useState<string | null>(null);
   const outbounds = useMemo(
     () =>
@@ -61,13 +96,23 @@ export default function Connections() {
               .includes(query),
         )
         .sort((a, b) => {
-          const delta =
-            sort === "traffic"
-              ? b.downlinkTotal +
-                b.uplinkTotal -
-                (a.downlinkTotal + a.uplinkTotal)
-              : b.createdAt - a.createdAt;
-          return delta > 0n ? 1 : delta < 0n ? -1 : a.id.localeCompare(b.id);
+          const missing =
+            Number(hasStartTime(b.createdAt)) -
+            Number(hasStartTime(a.createdAt));
+          if (sort.column === "createdAt" && missing) return missing;
+          if (a[sort.column] !== b[sort.column]) {
+            const order = a[sort.column] < b[sort.column] ? -1 : 1;
+            return sort.direction === "ascending" ? order : -order;
+          }
+          const newestFirst = b.createdAt - a.createdAt;
+          return (
+            missing ||
+            (newestFirst > 0n
+              ? 1
+              : newestFirst < 0n
+                ? -1
+                : a.id.localeCompare(b.id))
+          );
         }),
     [snapshot.connections, state, network, outbound, sort, query],
   );
@@ -156,18 +201,6 @@ export default function Connections() {
             })),
           ]}
         />
-        <Choice
-          label={t("Sort connections")}
-          value={sort}
-          onChange={(v) => {
-            setSort(v);
-            setPage(0);
-          }}
-          options={[
-            { value: "newest", label: t("Newest first") },
-            { value: "traffic", label: t("Most traffic") },
-          ]}
-        />
         <Button
           variant="outline"
           className="toolbar-actions"
@@ -204,64 +237,119 @@ export default function Connections() {
                   <th scope="col">{t("Network")}</th>
                   <th scope="col">{t("Outbound")}</th>
                   <th scope="col">{t("Status")}</th>
-                  <th scope="col">{t("Upload")}</th>
-                  <th scope="col">{t("Download")}</th>
+                  {sortColumns.map(({ key, label }) => {
+                    const direction =
+                      sort.column === key ? sort.direction : undefined;
+                    const Icon =
+                      direction === "ascending"
+                        ? ArrowUp
+                        : direction === "descending"
+                          ? ArrowDown
+                          : ArrowUpDown;
+                    return (
+                      <th
+                        key={key}
+                        scope="col"
+                        className="connection-sort"
+                        aria-sort={direction}
+                      >
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-auto min-h-7 whitespace-normal text-inherit"
+                          onClick={() => {
+                            setSort({
+                              column: key,
+                              direction:
+                                direction === "descending"
+                                  ? "ascending"
+                                  : "descending",
+                            });
+                            setPage(0);
+                          }}
+                        >
+                          {t(label)}
+                          <Icon aria-hidden="true" />
+                        </Button>
+                      </th>
+                    );
+                  })}
                   <th scope="col">
                     <span className="sr-only">{t("Actions")}</span>
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {visible.map((c) => (
-                  <tr key={c.id}>
-                    <td>
-                      <strong>{c.domain || c.destination}</strong>
-                      <span>{c.domain ? c.destination : c.source}</span>
-                    </td>
-                    <td>
-                      <Badge variant="secondary">
-                        {c.network.toUpperCase()}
-                      </Badge>
-                      <span>{c.protocol || t("Unknown")}</span>
-                    </td>
-                    <td>
-                      <strong>{c.outbound || "—"}</strong>
-                      <span>{c.outboundType}</span>
-                    </td>
-                    <td>
-                      <Badge
-                        variant={c.closedAt > 0n ? "secondary" : "outline"}
-                      >
-                        {t(c.closedAt > 0n ? "Closed" : "Active")}
-                      </Badge>
-                    </td>
-                    <td>{bytes(c.uplinkTotal)}</td>
-                    <td>{bytes(c.downlinkTotal)}</td>
-                    <td>
-                      <div className="button-row">
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={t("Details for {id}", { id: c.id })}
-                          onClick={() => setDetail(c)}
+                {visible.map((c) => {
+                  const started = hasStartTime(c.createdAt)
+                    ? new Date(Number(c.createdAt))
+                    : null;
+                  return (
+                    <tr key={c.id}>
+                      <td>
+                        <strong>{c.domain || c.destination}</strong>
+                        <span>{c.domain ? c.destination : c.source}</span>
+                      </td>
+                      <td>
+                        <Badge variant="secondary">
+                          {c.network.toUpperCase()}
+                        </Badge>
+                        <span>{c.protocol || t("Unknown")}</span>
+                      </td>
+                      <td>
+                        <strong>{c.outbound || "—"}</strong>
+                        <span>{c.outboundType}</span>
+                      </td>
+                      <td>
+                        <Badge
+                          variant={c.closedAt > 0n ? "secondary" : "outline"}
                         >
-                          <Info />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          aria-label={t("Close {id}", { id: c.id })}
-                          disabled={!enabled || c.closedAt > 0n}
-                          onClick={() =>
-                            void action.run(() => session.closeConnection(c.id))
-                          }
-                        >
-                          <X />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                          {t(c.closedAt > 0n ? "Closed" : "Active")}
+                        </Badge>
+                      </td>
+                      <td className="connection-time">
+                        {started ? (
+                          <time dateTime={started.toISOString()}>
+                            {startTimeFormat.format(started)}
+                          </time>
+                        ) : (
+                          "—"
+                        )}
+                      </td>
+                      <td className="connection-upload">
+                        {bytes(c.uplinkTotal)}
+                      </td>
+                      <td className="connection-download">
+                        {bytes(c.downlinkTotal)}
+                      </td>
+                      <td>
+                        <div className="button-row">
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={t("Details for {id}", { id: c.id })}
+                            onClick={() => setDetail(c)}
+                          >
+                            <Info />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            aria-label={t("Close {id}", { id: c.id })}
+                            disabled={!enabled || c.closedAt > 0n}
+                            onClick={() =>
+                              void action.run(() =>
+                                session.closeConnection(c.id),
+                              )
+                            }
+                          >
+                            <X />
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
