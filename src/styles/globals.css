@@ -1794,18 +1794,9 @@ h3 {
   .proxy-layout-controls .layout-control {
     gap: 4px;
   }
-  .proxy-layout-controls [data-slot="toggle-group"] {
-    gap: 4px;
-  }
   .proxy-layout-controls [role="radio"] {
     width: 30px;
     min-width: 30px;
-  }
-  .proxy-toolbar .toolbar-actions {
-    gap: 4px;
-  }
-  .proxy-toolbar .toolbar-actions button {
-    width: 28px;
   }
   .topbar {
     min-height: 56px;
