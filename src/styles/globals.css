@@ -1052,6 +1052,15 @@ h3 {
   padding: 11px 12px;
   background: var(--muted);
 }
+.connection-table th.connection-sort {
+  padding: 3px 4px;
+}
+.connection-sort button {
+  text-align: start;
+}
+.connection-time {
+  white-space: nowrap;
+}
 .connection-table td {
   padding: 15px 12px;
   border-bottom: 1px solid var(--border);
@@ -1482,18 +1491,38 @@ h3 {
     min-width: 0;
   }
   .connection-table thead {
+    display: block;
+    margin-bottom: 12px;
+  }
+  .connection-table thead tr {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 4px;
+  }
+  .connection-table thead th:not(.connection-sort) {
     position: absolute;
     clip-path: inset(50%);
     width: 1px;
     height: 1px;
+    padding: 0;
     overflow: hidden;
+  }
+  .connection-table th.connection-sort {
+    padding: 0;
+    border-radius: 6px;
+  }
+  .connection-sort button {
+    width: 100%;
+    height: 100%;
+    min-height: 36px;
+    padding-inline: 3px;
   }
   .connection-table tbody {
     display: flex;
     flex-direction: column;
     gap: 12px;
   }
-  .connection-table tr {
+  .connection-table tbody tr {
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 8px;
@@ -1509,15 +1538,20 @@ h3 {
     grid-column: 1/-1;
     max-width: none;
   }
-  .connection-table td:nth-child(5)::before {
+  .connection-time {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  .connection-upload::before {
     content: "↑ ";
     color: var(--muted-foreground);
   }
-  .connection-table td:nth-child(6)::before {
+  .connection-download::before {
     content: "↓ ";
     color: var(--muted-foreground);
   }
   .connection-table td:last-child {
+    grid-column: 1/-1;
     justify-self: end;
   }
   .connection-table td:last-child button {
@@ -1760,9 +1794,18 @@ h3 {
   .proxy-layout-controls .layout-control {
     gap: 4px;
   }
+  .proxy-layout-controls [data-slot="toggle-group"] {
+    gap: 4px;
+  }
   .proxy-layout-controls [role="radio"] {
     width: 30px;
     min-width: 30px;
+  }
+  .proxy-toolbar .toolbar-actions {
+    gap: 4px;
+  }
+  .proxy-toolbar .toolbar-actions button {
+    width: 28px;
   }
   .topbar {
     min-height: 56px;

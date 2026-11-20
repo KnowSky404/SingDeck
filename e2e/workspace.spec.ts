@@ -593,10 +593,22 @@ test("group cards and node cards are independent and settings stay read-only", a
   ).toBe(true);
   const rows = page.locator(".proxy-items .proxy-row");
   await expect(rows).toHaveCount(0);
+  const expandAll = page.getByRole("button", { name: "Expand all groups" });
+  const collapseAll = page.getByRole("button", { name: "Collapse all groups" });
+  await expandAll.click();
+  await expect(rows).toHaveCount(7);
+  await page.getByRole("button", { name: "Collapse Primary route" }).click();
+  await expect(rows).toHaveCount(2);
+  await collapseAll.click();
+  await expect(rows).toHaveCount(0);
   const search = page.getByRole("textbox", { name: "Search outbounds" });
   await search.fill("London");
   await expect(rows).toHaveCount(1);
   await expect(rows).toContainText("London 01");
+  await collapseAll.click();
+  await expect(rows).toHaveCount(0);
+  await expandAll.click();
+  await expect(rows).toHaveCount(1);
   await page
     .getByRole("button", { name: "Collapse Auto route", exact: true })
     .click();
@@ -718,8 +730,27 @@ test("INFO threshold hides debug and trace while retaining warnings and errors",
   await expect(
     page.locator(".log-line").filter({ hasText: "DEBUG[16737]" }),
   ).toHaveCount(0);
+  const source = page.getByRole("combobox", { name: "Log source" });
+  await source.click();
+  await page.getByRole("option", { name: "DNS", exact: true }).click();
+  await expect(
+    page
+      .getByText("dns: exchanged query for cdn.example.org", { exact: true })
+      .first(),
+  ).toBeVisible();
+  await expect(
+    page.locator(".log-message").filter({ hasNotText: /^dns:/ }),
+  ).toHaveCount(0);
+  await source.click();
+  await page.getByRole("option", { name: "Router", exact: true }).click();
+  await expect(page.getByText("Nothing to show yet")).toBeVisible();
   await page.getByRole("combobox", { name: "Log level", exact: true }).click();
   await page.getByRole("option", { name: "All levels", exact: true }).click();
+  await expect(page.locator(".log-message").first()).toContainText(
+    "router: pre-match",
+  );
+  await source.click();
+  await page.getByRole("option", { name: "All sources", exact: true }).click();
   await expect(
     page.getByText("demo trace: route lookup", { exact: true }),
   ).toBeVisible();
@@ -734,6 +765,49 @@ test("connection state filter retains closed records and disables close actions 
     page.getByRole("combobox", { name: "Status filter", exact: true }),
   ).toHaveText("Active");
   await expect(page.locator(".connection-table tbody tr")).toHaveCount(28);
+  const first = page.locator(".connection-table tbody tr").first();
+  const sortByTime = page.getByRole("button", {
+    name: "Start time",
+    exact: true,
+  });
+  await expect(sortByTime.locator("..")).toHaveAttribute(
+    "aria-sort",
+    "descending",
+  );
+  await expect(
+    first.getByRole("button", { name: "Details for mock-1" }),
+  ).toBeVisible();
+  await expect(first.locator("time")).toHaveAttribute(
+    "datetime",
+    /T\d{2}:\d{2}:\d{2}.*Z$/,
+  );
+  await sortByTime.click();
+  await expect(sortByTime.locator("..")).toHaveAttribute(
+    "aria-sort",
+    "ascending",
+  );
+  await expect(
+    first.getByRole("button", { name: "Details for mock-28" }),
+  ).toBeVisible();
+  for (const name of ["Upload", "Download"]) {
+    const button = page.getByRole("button", { name, exact: true });
+    await button.click();
+    await expect(button.locator("..")).toHaveAttribute(
+      "aria-sort",
+      "descending",
+    );
+    await expect(
+      first.getByRole("button", { name: "Details for mock-28" }),
+    ).toBeVisible();
+    await button.click();
+    await expect(button.locator("..")).toHaveAttribute(
+      "aria-sort",
+      "ascending",
+    );
+    await expect(
+      first.getByRole("button", { name: "Details for mock-1" }),
+    ).toBeVisible();
+  }
   await page.getByRole("button", { name: "Close mock-1", exact: true }).click();
   await expect(page.locator(".connection-table tbody tr")).toHaveCount(27);
   await page
