@@ -205,6 +205,44 @@ describe("session lifecycle", () => {
     expect(s.getSnapshot().phase).toBe("error");
     expect(s.getSnapshot().error).not.toContain("secret");
   });
+  it("reports a subscription rejecting authentication while status remains available", async () => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    const s = session(undefined, {
+      ...client,
+      async *subscribeGroups() {
+        yield create(GroupsSchema);
+        throw new ConnectError("Authentication rejected", Code.Unauthenticated);
+      },
+    });
+    s.connect();
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(s.getSnapshot()).toMatchObject({
+      phase: "connected",
+      authenticationFailed: true,
+    });
+  });
+  it("reports authentication rejected by an action while status stays connected", async () => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    const s = session(undefined, {
+      ...client,
+      closeConnection: vi
+        .fn()
+        .mockRejectedValue(
+          new ConnectError("Authentication rejected", Code.Unauthenticated),
+        ),
+    });
+    s.connect();
+    await vi.advanceTimersByTimeAsync(500);
+    await expect(s.closeConnection("active")).rejects.toMatchObject({
+      code: Code.Unauthenticated,
+    });
+    expect(s.getSnapshot()).toMatchObject({
+      phase: "connected",
+      authenticationFailed: true,
+    });
+  });
   it("ignores late responses from a canceled handshake", async () => {
     vi.useFakeTimers();
     let release!: (v: ReturnType<typeof create<typeof VersionSchema>>) => void;

@@ -256,14 +256,23 @@ const zh: Record<string, string> = {
   "Follow a stream of runtime logs": "查看实时运行日志",
   "Explore demo": "体验演示",
   "Demo never connects to your local instance.": "演示模式不会连接你的实例。",
-  "Your browser connects directly to your instance. Tokens stay in memory.":
-    "浏览器直接连接你的实例，密钥仅保存在内存中。",
+  "Your browser connects directly to your instance.":
+    "浏览器直接连接你的实例。",
   "Bearer token": "访问密钥",
-  "Held in memory only": "仅保存在内存中",
   "Listener origin or reverse-proxy API prefix. Do not include /dashboard/.":
     "填写 API 监听地址或反向代理前缀，不要包含 /dashboard/。",
-  "Never stored in localStorage, URLs or build artifacts. Re-enter after a reload.":
-    "不会写入本地存储、网址或构建文件，刷新后需重新输入。",
+  "Remember this device": "记住此设备",
+  "Reconnect automatically. Only enable on trusted devices and websites. Pages on this site can access the saved token.":
+    "下次打开时会自动重连。请仅在信任的设备和网站上启用。此网站的页面可访问保存的密钥。",
+  "Saving this connection…": "正在保存此连接…",
+  "Could not restore the saved connection. Enter your Bearer token and reconnect.":
+    "无法恢复已保存的连接，请输入访问密钥后重新连接。",
+  "Could not remember this connection. Check your browser’s site data settings.":
+    "无法记住此连接，请检查浏览器的网站数据设置。",
+  "Automatic reconnect may still be enabled. Retry forgetting the connection or clear this site’s data.":
+    "自动重连可能仍然开启。请重试清除连接，或在浏览器中清除此网站的数据。",
+  "Could not forget the saved connection. Clear this site’s data in your browser.":
+    "无法清除已保存的连接，请在浏览器中清除此网站的数据。",
   "Local instances can use http://127.0.0.1:9090. Allow this site’s local-network permission and API CORS origin. Use HTTPS for remote instances.":
     "本机可使用 http://127.0.0.1:9090，请允许浏览器本地网络权限并配置 API CORS 来源。远程实例须使用 HTTPS。",
   "Test connection": "测试连接",
@@ -271,6 +280,8 @@ const zh: Record<string, string> = {
   Connect: "连接",
   "Connecting…": "连接中…",
   "Cancel connection": "取消连接",
+  "Disconnecting…": "正在断开连接…",
+  "Forget saved connection": "清除已保存的连接",
   "Connection verified: sing-box {version} · API {api}.":
     "连接验证成功：sing-box {version} · API {api}。",
   "Enter a complete HTTP or HTTPS API endpoint.":
@@ -305,10 +316,7 @@ const zh: Record<string, string> = {
   "Page not found": "页面不存在",
   "Choose a page from the navigation to continue.": "请从导航中选择页面。",
   "This view could not be displayed": "无法显示该页面",
-  "Reload this page to recover. Your credentials have not been persisted.":
-    "请刷新页面恢复，访问密钥未写入持久存储。",
-  "Authentication failed. Check the token in Settings.":
-    "身份验证失败，请退出连接并在入口页检查密钥。",
+  "Reload this page to recover.": "请刷新页面恢复。",
   "Connection interrupted. Check the endpoint, TLS certificate, CORS and browser local-network permissions.":
     "连接中断，请检查地址、TLS 证书、CORS 和浏览器本地网络权限。",
 };

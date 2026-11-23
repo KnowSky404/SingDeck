@@ -65,8 +65,11 @@ export class InstanceSession {
     signal.throwIfAborted();
     assertCompatible(version);
     const [started, level] = await Promise.allSettled([
-      this.client.getStartedAt({}, { signal }),
-      this.client.getDefaultLogLevel({}, { signal }),
+      this.runUnary((options) => this.client.getStartedAt({}, options), signal),
+      this.runUnary(
+        (options) => this.client.getDefaultLogLevel({}, options),
+        signal,
+      ),
     ]);
     return {
       version,
@@ -100,7 +103,15 @@ export class InstanceSession {
           !canRetry(error) ||
           error instanceof CompatibilityError
         ) {
-          this.update({ phase: "error", error: message }, true);
+          this.update(
+            {
+              phase: "error",
+              error: message,
+              authenticationFailed:
+                ConnectError.from(error).code === Code.Unauthenticated,
+            },
+            true,
+          );
           return;
         }
         this.update({ phase: "reconnecting", error: message }, true);
@@ -260,6 +271,9 @@ export class InstanceSession {
         this.update(
           {
             streamErrors: { ...this.pending.streamErrors, [channel]: message },
+            authenticationFailed:
+              this.pending.authenticationFailed ||
+              ConnectError.from(error).code === Code.Unauthenticated,
             ...(channel === "status"
               ? { phase: retry ? "reconnecting" : "error", error: message }
               : {}),
@@ -283,11 +297,29 @@ export class InstanceSession {
   get signal() {
     return this.controller?.signal;
   }
+  private async runUnary<T>(
+    request: (options: { signal?: AbortSignal }) => Promise<T>,
+    signal = this.signal,
+  ) {
+    try {
+      return await request({ signal });
+    } catch (error) {
+      if (
+        signal &&
+        !signal.aborted &&
+        ConnectError.from(error).code === Code.Unauthenticated
+      )
+        this.update({ authenticationFailed: true }, true);
+      throw error;
+    }
+  }
   selectOutbound = async (groupTag: string, outboundTag: string) => {
     const signal = this.signal;
     if (!signal || signal.aborted)
       throw new ConnectError("Disconnected", Code.Canceled);
-    await this.client.selectOutbound({ groupTag, outboundTag }, { signal });
+    await this.runUnary((options) =>
+      this.client.selectOutbound({ groupTag, outboundTag }, options),
+    );
     await new Promise<void>((resolve, reject) => {
       const cleanup = () => {
         clearTimeout(timer);
@@ -323,9 +355,9 @@ export class InstanceSession {
     });
   };
   urlTest = (outboundTag: string) =>
-    this.client.uRLTest({ outboundTag }, { signal: this.signal });
+    this.runUnary((options) => this.client.uRLTest({ outboundTag }, options));
   closeConnection = (id: string) =>
-    this.client.closeConnection({ id }, { signal: this.signal });
+    this.runUnary((options) => this.client.closeConnection({ id }, options));
   closeAllConnections = () =>
-    this.client.closeAllConnections({}, { signal: this.signal });
+    this.runUnary((options) => this.client.closeAllConnections({}, options));
 }

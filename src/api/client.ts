@@ -46,7 +46,7 @@ export function validateEndpoint(value: string): string {
       "Remote instances require HTTPS. Use a loopback SSH tunnel for HTTP.",
     );
   }
-  return url.href.replace(/\/$/, "");
+  return url.href.replace(/\/+$/, "");
 }
 
 export function createNativeClient(

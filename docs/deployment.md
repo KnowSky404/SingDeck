@@ -44,7 +44,7 @@ The official [native API dashboard options](https://sing-box.sagernet.org/config
 ```
 
 - `dashboard.path` 最初应不存在或为空，且运行 sing-box 的用户有写入权限。相对路径基于 sing-box 的工作目录，建议按自己的系统改成绝对路径。
-- 重启 sing-box 后会异步下载；下载完成再打开 `http://127.0.0.1:9090/dashboard/`，入口会识别 API 地址。填写相同的 `secret` 即可连接，刷新后需重新输入密钥。
+- 重启 sing-box 后会异步下载；下载完成再打开 `http://127.0.0.1:9090/dashboard/`，入口会识别 API 地址。填写相同的 `secret` 即可连接。勾选「记住此设备」后，同一浏览器下次打开会自动重连。
 - `latest/download/singdeck.zip` 跟随最新稳定版本；`update_interval` 控制后台更新检查。首发下载需能访问 GitHub 及其发布资产域名，失败会在核心日志中显示。
 - 如需固定本版，将 URL 改为 `https://github.com/KnowSky404/SingDeck/releases/download/v0.6.0/singdeck-v0.6.0.zip`。固定 URL 不会自动跳到后续版本。
 - 已手动放入文件且没有 sing-box 管理标记的目录，会被当作用户提供的面板，自动更新不会启用。切换到自动下载时使用新的空目录，保留旧目录作备份；不要删除私人配置，也不要手工伪造 `.etag`。
@@ -68,7 +68,7 @@ The repository publishes to [https://knowsky404.github.io/SingDeck/](https://kno
 
 `.github/workflows/pages.yml` runs when a release is published, or when explicitly dispatched. It calls the full reusable CI workflow, then deploys the exact verified `dist/` artifact to Pages after all checks pass. Stable releases update Pages; prereleases only receive their tested archive. The workflow also attaches `singdeck-<tag>.zip`, the stable filename `singdeck.zip`, and `SHA256SUMS` to each release. The stable filename supports `/releases/latest/download/singdeck.zip` for core-managed updates. A published tag must match `package.json` and point to a commit already merged into `main`. Branch/PR CI continues to run independently; pushes to `main` do not publish Pages before a release. Repository Settings → Pages must use **GitHub Actions** as the source. The `github-pages` environment must allow release tags (`v*`) as well as the main branch; otherwise a valid tagged release is rejected before deployment. Relative assets and hash routes work under `/SingDeck/` without changing the built-in `/dashboard/` deployment.
 
-For a real connection from this preview, use your own trusted HTTPS API and allow the exact CORS origin `https://knowsky404.github.io` (without `/SingDeck/`). Plain HTTP APIs may be blocked by mixed-content policy; private-network endpoints also depend on browser permissions. Tokens remain in browser memory.
+For a real connection from this preview, use your own trusted HTTPS API and allow the exact CORS origin `https://knowsky404.github.io` (without `/SingDeck/`). Plain HTTP APIs may be blocked by mixed-content policy; private-network endpoints also depend on browser permissions. Tokens stay in browser memory by default. On a trusted device, choose **Remember this device** to reconnect automatically in the same browser profile. This requires HTTPS or loopback hosting and browser site storage. Disconnect from the workspace to forget the saved connection.
 
 ## Old dashboard after switching or updating / 切换或更新后仍显示旧面板
 
@@ -89,7 +89,7 @@ If force reload does not help, compare a private window and the server response.
 | Connected, missing groups | The instance may have no visible group outbounds |
 | Missing traffic/connections | Tracking capability unavailable; UI marks it explicitly |
 | Graph stops behind reverse proxy | Disable buffering and increase streaming timeout |
-| Reload loses token | Expected: credentials are memory only; re-enter them |
+| Reload asks for the token | Re-enter it and select **Remember this device**. Check browser site-data settings if the option was already enabled. |
 | API version unsupported | Only API 4 and stable core ≥1.14.0 are accepted; verify new versions before upgrading the gate |
 
 Local HTTP SDK/browser tests prove baseline transport, CORS, streaming and built-in hosting. They do **not** establish external VPS TLS/PNA correctness. Verify those policies in your target browser and network before using remote management. See [verification](verification.md).

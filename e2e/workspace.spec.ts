@@ -417,7 +417,7 @@ test("responsive layout, dark/light/system themes, routes and console health", a
   expect(errors).toEqual([]);
 });
 
-test("native failures remain native and credentials never enter persistent storage", async ({
+test("a failed native connection is not remembered and stays in native mode", async ({
   page,
 }) => {
   await page.goto("/#/settings");
@@ -427,18 +427,13 @@ test("native failures remain native and credentials never enter persistent stora
   await page
     .getByLabel("Bearer token", { exact: true })
     .fill("e2e-private-credential");
+  await page.getByRole("switch", { name: "Remember this device" }).click();
   await page.getByRole("button", { name: "Connect", exact: true }).click();
   await expect(
     page.getByText("Connection failed", { exact: true }),
   ).toBeVisible({ timeout: 15000 });
   await expect(page.getByRole("navigation")).toHaveCount(0);
   await expect(page.getByText("Mock mode", { exact: true })).toHaveCount(0);
-  await page
-    .getByRole("button", { name: "Cancel connection", exact: true })
-    .click();
-  await expect(
-    page.getByRole("textbox", { name: "API endpoint", exact: true }),
-  ).toBeEnabled();
   const persisted = await page.evaluate(() =>
     JSON.stringify({
       local: { ...localStorage },
@@ -448,6 +443,29 @@ test("native failures remain native and credentials never enter persistent stora
   expect(persisted).not.toContain("e2e-private-credential");
   expect(page.url()).not.toContain("e2e-private-credential");
   await page.reload();
+  await expect(
+    page.getByRole("button", { name: "Connect", exact: true }),
+  ).toBeEnabled();
+  const storedTokens = await page.evaluate(async () => {
+    const name = "singdeck.remembered-connection";
+    if (!(await indexedDB.databases()).some((db) => db.name === name)) return 0;
+    return new Promise<number>((resolve, reject) => {
+      const open = indexedDB.open(name, 1);
+      open.onerror = () => reject(open.error);
+      open.onsuccess = () => {
+        const db = open.result;
+        const transaction = db.transaction("connections", "readonly");
+        const count = transaction.objectStore("connections").count();
+        transaction.oncomplete = () => {
+          db.close();
+          resolve(count.result);
+        };
+        transaction.onabort = () => reject(transaction.error);
+      };
+    });
+  });
+  expect(storedTokens).toBe(0);
+  await expect(page.getByRole("navigation")).toHaveCount(0);
   await expect(page.getByLabel("Bearer token", { exact: true })).toHaveValue(
     "",
   );

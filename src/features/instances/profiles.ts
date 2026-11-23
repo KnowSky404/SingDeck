@@ -92,7 +92,7 @@ export function loadProfiles(): Profile[] {
           },
         });
       } catch {
-        /* Invalid saved endpoints are ignored; no credentials are read from storage. */
+        /* Ignore invalid endpoints in saved profile metadata. */
       }
     }
     return profiles.length ? profiles : [defaultProfile];
