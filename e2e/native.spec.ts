@@ -658,6 +658,44 @@ test("browser uses the official native service through CORS and built-in dashboa
       await reopened.evaluate((key) => localStorage.getItem(key), markerKey),
     ).toBe(replacement);
     await canceling.close();
+
+    await reopened.evaluate((key) => localStorage.removeItem(key), markerKey);
+    const optedOut = await context.newPage();
+    await optedOut.goto(logsUrl);
+    await optedOut.evaluate(() => {
+      const timeout = AbortSignal.timeout.bind(AbortSignal);
+      AbortSignal.timeout = (delay) => timeout(delay === 3000 ? 60_000 : delay);
+    });
+    const pendingClaim = await holdConnectionLock(reopened, markerKey);
+    const claimQueued = () =>
+      optedOut.evaluate(async (key) => {
+        const { pending } = await navigator.locks.query();
+        return pending?.some((lock) => lock.name === key) ?? false;
+      }, markerKey);
+    await optedOut.route(versionRpc, () => {});
+    await optedOut.getByLabel("Bearer token", { exact: true }).fill(secret);
+    await optedOut
+      .getByRole("button", { name: "Connect", exact: true })
+      .click();
+    const cancelOptOut = optedOut.getByRole("button", {
+      name: "Cancel connection",
+    });
+    await expect(cancelOptOut).toBeVisible();
+    await expect.poll(claimQueued).toBe(true);
+    await reopened.evaluate(
+      ([key, value]) => localStorage.setItem(key, value),
+      [markerKey, replacement],
+    );
+    await cancelOptOut.click();
+    await expect.poll(claimQueued).toBe(false);
+    await pendingClaim.evaluate((release) => release());
+    await pendingClaim.dispose();
+    expect(
+      await optedOut.evaluate(
+        (key) => navigator.locks.request(key, () => localStorage.getItem(key)),
+        markerKey,
+      ),
+    ).toBe(replacement);
   } finally {
     for (const tab of context.pages()) {
       await tab
