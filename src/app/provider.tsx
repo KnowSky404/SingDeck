@@ -68,6 +68,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const restoreAttempt = useRef<{ scope: AbortController; committed: boolean }>(
     null,
   );
+  const connectionClaim = useRef<AbortController>(null);
   const savedConnection = useRef<{
     id: string;
     profile: Profile;
@@ -323,7 +324,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       /* The Settings save path reports storage failure; live connection remains usable. */
     }
   }, [snapshot.phase, snapshot.version, profile]);
-  function stopRestore() {
+  function stopPreparingConnection() {
+    connectionClaim.current?.abort();
     restoreAttempt.current?.scope.abort();
     setRestoringSelection(null);
   }
@@ -331,7 +333,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const previousSelection = getRememberedSelection() ?? undefined;
     const previousId = previousSelection?.id;
     if (previousId && !remember) markConnectionRevoked(previousId);
-    stopRestore();
+    stopPreparingConnection();
     setRestoredSelection(previousSelection);
     savedConnection.current?.pending?.controller.abort();
     savedConnection.current = null;
@@ -364,28 +366,31 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         });
     };
     const controller = new AbortController();
-    const claim = claimRememberedConnection(
-      id,
-      id ? controller.signal : undefined,
-    ).then(
-      (needsCleanup) => {
-        setRestoredSelection((current) =>
-          current?.id === previousId ? undefined : current,
-        );
-        if (needsCleanup) finishCleanup();
-        return true;
-      },
-      () => {
-        const needsCleanup = hasUnfinishedRevocation();
-        if (needsCleanup) finishCleanup();
-        if (controller.signal.aborted) return false;
-        if (needsCleanup === undefined) setStorageError(storageUnknown);
-        else if (getRememberedSelection()) setStorageError(revokeError);
-        else if (id) setStorageError(rememberError);
-        else if (previousId || needsCleanup) setStorageError(forgetError);
-        return false;
-      },
-    );
+    connectionClaim.current = controller;
+    const claim = claimRememberedConnection(id, controller.signal)
+      .then(
+        (needsCleanup) => {
+          setRestoredSelection((current) =>
+            current?.id === previousId ? undefined : current,
+          );
+          if (needsCleanup) finishCleanup();
+          return true;
+        },
+        () => {
+          const needsCleanup = hasUnfinishedRevocation();
+          if (needsCleanup) finishCleanup();
+          if (controller.signal.aborted) return false;
+          if (needsCleanup === undefined) setStorageError(storageUnknown);
+          else if (getRememberedSelection()) setStorageError(revokeError);
+          else if (id) setStorageError(rememberError);
+          else if (previousId || needsCleanup) setStorageError(forgetError);
+          return false;
+        },
+      )
+      .finally(() => {
+        if (connectionClaim.current === controller)
+          connectionClaim.current = null;
+      });
     if (id) {
       savedConnection.current = {
         id,
@@ -400,7 +405,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setShouldConnect(true);
   }
   function selectProfile(id: string) {
-    stopRestore();
+    stopPreparingConnection();
     savedConnection.current?.pending?.controller.abort();
     savedConnection.current = null;
     setRemembering(false);
@@ -424,7 +429,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     const pendingRevoked =
       !saved?.id || saved.id === id || markConnectionRevoked(saved.id);
     if (id) setDisconnecting(true);
-    stopRestore();
+    stopPreparingConnection();
     saved?.pending?.controller.abort();
     if (profile.mode === "native") setRestoredSelection(undefined);
     savedConnection.current = null;
