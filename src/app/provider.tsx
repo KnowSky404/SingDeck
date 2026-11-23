@@ -1,6 +1,7 @@
 import {
   useState,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useSyncExternalStore,
@@ -20,11 +21,13 @@ import {
   claimRememberedConnection,
   finishForgettingConnection,
   getRememberedSelection,
+  markRejectedConnection,
   queueConnectionRevocation,
   rememberConnection,
   restoreConnection,
   revokeConfirmedRestore,
   revokeRememberedConnection,
+  type RememberedSelection,
 } from "@/features/instances/remembered-connection";
 import { WorkspaceContext } from "./context";
 import { loadLanguage, translate, type Language } from "@/lib/i18n";
@@ -47,7 +50,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     getRememberedSelection,
   );
   const restoringId = restoringSelection?.id;
-  const [restoredId, setRestoredId] = useState<string>();
+  const [restoredSelection, setRestoredSelection] =
+    useState<RememberedSelection>();
+  const restoredId = restoredSelection?.id;
   const [disconnecting, setDisconnecting] = useState(false);
   const [remembering, setRemembering] = useState(false);
   const restoreAttempt = useRef<{ scope: AbortController; committed: boolean }>(
@@ -118,14 +123,21 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       .then((saved) => {
         if (!saved || scope.signal.aborted) return;
         savedConnection.current = { id: saved.id, profile: saved.profile };
-        setRestoredId(saved.id);
+        setRestoredSelection({ id: saved.id, confirmed: true });
         setActiveId(saved.profile.id);
         setTokens({ [saved.profile.id]: saved.token });
         setShouldConnect(true);
       })
       .catch(() => {
         if (scope.signal.aborted) return;
-        setRestoredId(restoringSelection.id);
+        const latest = loadProfiles();
+        setRestoringSelection(null);
+        setProfiles(latest);
+        setActiveId(latest[0].id);
+        setRestoredSelection({
+          id: restoringSelection.id,
+          confirmed: restoringSelection.confirmed || attempt.committed,
+        });
         setStorageError(restoreError);
       })
       .finally(() => {
@@ -133,22 +145,25 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       });
     return () => scope.abort();
   }, [profiles, restoringSelection]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const saved = savedConnection.current;
     if (!saved || saved.profile !== profile) return;
     if (snapshot.authenticationFailed) {
       saved.pending?.controller.abort();
+      const rejected = markRejectedConnection(saved.id);
       void revokeRememberedConnection(saved.id)
         .catch(() => {
-          if (savedConnection.current === saved) {
-            setRestoredId((current) => current ?? saved.id);
+          if (!rejected && savedConnection.current === saved) {
+            setRestoredSelection(
+              (current) => current ?? { id: saved.id, confirmed: true },
+            );
             setStorageError(revokeError);
           }
           return queueConnectionRevocation(saved.id);
         })
         .then(() => {
-          setRestoredId((current) =>
-            current === saved.id ? undefined : current,
+          setRestoredSelection((current) =>
+            current?.id === saved.id ? undefined : current,
           );
           if (savedConnection.current === saved) {
             setStorageError((error) =>
@@ -160,7 +175,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           });
         })
         .catch(() => {
-          if (savedConnection.current === saved) setStorageError(revokeError);
+          if (savedConnection.current === saved)
+            setStorageError(rejected ? forgetError : revokeError);
         });
       return;
     }
@@ -234,9 +250,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setRestoringSelection(null);
   }
   function saveProfile(profile: Profile, token: string, remember: boolean) {
-    const previousId = getRememberedSelection()?.id;
+    const previousSelection = getRememberedSelection() ?? undefined;
+    const previousId = previousSelection?.id;
     stopRestore();
-    setRestoredId(previousId);
+    setRestoredSelection(previousSelection);
     savedConnection.current?.pending?.controller.abort();
     savedConnection.current = null;
     setRemembering(false);
@@ -255,8 +272,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     }
     const claim = claimRememberedConnection(id).then(
       () => {
-        setRestoredId((current) =>
-          current === previousId ? undefined : current,
+        setRestoredSelection((current) =>
+          current?.id === previousId ? undefined : current,
         );
         void finishForgettingConnection().catch(() =>
           setStorageError(forgetError),
@@ -291,19 +308,21 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setActiveId(id);
     setShouldConnect(id === "demo");
   }
-  function disconnect() {
+  function disconnect(forget = false) {
     if (disconnecting) return;
     const saved = savedConnection.current;
     const savedId = restoredId ?? saved?.id;
     const id = profile.mode === "native" ? (savedId ?? restoringId) : undefined;
-    const checkingUnconfirmedRestore =
-      !savedId &&
-      !restoringSelection?.confirmed &&
-      !restoreAttempt.current?.committed;
+    const confirmed =
+      forget ||
+      saved?.id === id ||
+      (restoredId === id && restoredSelection?.confirmed) ||
+      (restoringId === id &&
+        (restoringSelection?.confirmed || restoreAttempt.current?.committed));
     if (id) setDisconnecting(true);
     stopRestore();
     saved?.pending?.controller.abort();
-    if (profile.mode === "native") setRestoredId(undefined);
+    if (profile.mode === "native") setRestoredSelection(undefined);
     savedConnection.current = null;
     setRemembering(false);
     session.disconnect();
@@ -312,9 +331,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     setActiveId(profiles[0].id);
     if (!id) return;
 
-    const revocation = checkingUnconfirmedRestore
-      ? revokeConfirmedRestore(id)
-      : revokeRememberedConnection(id, saved?.id);
+    const revocation = confirmed
+      ? revokeRememberedConnection(id, saved?.id)
+      : revokeConfirmedRestore(id, saved?.id);
     void revocation
       .then(() => {
         setStorageError((error) =>
@@ -329,7 +348,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         );
       })
       .catch(() => {
-        setRestoredId(id);
+        setRestoredSelection({ id, confirmed: !!confirmed });
         setStorageError(revokeError);
       })
       .finally(() => setDisconnecting(false));
@@ -361,7 +380,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           if (shouldConnect) session.connect();
           else setShouldConnect(true);
         },
-        disconnect,
+        disconnect: () => disconnect(),
+        forgetSavedConnection: () => disconnect(true),
       }}
     >
       {children}

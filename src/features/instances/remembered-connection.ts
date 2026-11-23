@@ -1,5 +1,10 @@
 import { loadProfiles, type Profile } from "./profiles";
 
+export interface RememberedSelection {
+  id: string;
+  confirmed: boolean;
+}
+
 interface RememberedConnection {
   id: string;
   profileId: string;
@@ -10,6 +15,7 @@ interface RememberedConnection {
 }
 
 const marker = "singdeck.remembered-connection";
+const rejectedPrefix = `${marker}.rejected.`;
 const storeName = "connections";
 const slot = "active";
 
@@ -31,7 +37,7 @@ export function canRememberConnection() {
 
 export function getRememberedSelection() {
   try {
-    return canRememberConnection() ? currentSelection() : null;
+    return canRememberConnection() ? restorableSelection() : null;
   } catch {
     return null;
   }
@@ -40,15 +46,32 @@ export function getRememberedSelection() {
 export async function claimRememberedConnection(id?: string) {
   if (!canRememberConnection()) return;
   await withConnectionLock(() => {
+    revokeConnection(currentSelection()?.id);
     if (id) localStorage.setItem(marker, "?" + id);
-    else revokeConnection(currentSelection()?.id);
   });
 }
 
-function currentSelection() {
+function currentSelection(): RememberedSelection | null {
   const value = localStorage.getItem(marker);
   if (!value || (value[0] !== "+" && value[0] !== "?")) return null;
   return { id: value.slice(1), confirmed: value[0] === "+" };
+}
+
+function restorableSelection() {
+  const selection = currentSelection();
+  return selection && !localStorage.getItem(rejectedPrefix + selection.id)
+    ? selection
+    : null;
+}
+
+export function markRejectedConnection(id: string) {
+  try {
+    if (currentSelection()?.id === id)
+      localStorage.setItem(rejectedPrefix + id, "1");
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function confirmConnection(id: string) {
@@ -59,28 +82,57 @@ function confirmConnection(id: string) {
   }
 }
 
-function openStorage() {
+function openStorage(signal?: AbortSignal) {
   return new Promise<IDBDatabase>((resolve, reject) => {
+    signal?.throwIfAborted();
     const request = indexedDB.open(marker, 1);
-    request.onupgradeneeded = () => request.result.createObjectStore(storeName);
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    const abort = () => reject(signal?.reason);
+    signal?.addEventListener("abort", abort, { once: true });
+    request.onupgradeneeded = () => {
+      if (signal?.aborted) request.transaction?.abort();
+      else request.result.createObjectStore(storeName);
+    };
+    request.onsuccess = () => {
+      signal?.removeEventListener("abort", abort);
+      if (signal?.aborted) request.result.close();
+      else resolve(request.result);
+    };
+    request.onerror = () => {
+      signal?.removeEventListener("abort", abort);
+      reject(request.error);
+    };
   });
 }
 
 async function accessStorage<T>(
   mode: IDBTransactionMode,
   operation: (store: IDBObjectStore) => IDBRequest<T> | undefined,
-  locked = false,
+  { locked, signal }: { locked?: boolean; signal?: AbortSignal } = {},
 ) {
-  const db = await openStorage();
+  const db = await openStorage(signal);
   try {
     return await new Promise<T | undefined>((resolve, reject) => {
       const start = () => {
+        signal?.throwIfAborted();
         const transaction = db.transaction(storeName, mode);
         const request = operation(transaction.objectStore(storeName));
-        transaction.oncomplete = () => resolve(request?.result);
-        transaction.onabort = () => reject(transaction.error);
+        const abort = () => {
+          reject(signal?.reason);
+          try {
+            transaction.abort();
+          } catch {
+            // The transaction can already have finished when cancellation arrives.
+          }
+        };
+        signal?.addEventListener("abort", abort, { once: true });
+        transaction.oncomplete = () => {
+          signal?.removeEventListener("abort", abort);
+          resolve(request?.result);
+        };
+        transaction.onabort = () => {
+          signal?.removeEventListener("abort", abort);
+          reject(transaction.error);
+        };
       };
       // Schedule the write under the lock without holding it during IndexedDB I/O.
       if (locked) void withConnectionLock(start).catch(reject);
@@ -88,6 +140,26 @@ async function accessStorage<T>(
     });
   } finally {
     db.close();
+  }
+}
+
+async function readStoredConnection(signal?: AbortSignal) {
+  const deadline = AbortSignal.timeout(3000);
+  const scope = new AbortController();
+  const cancel = () => scope.abort(signal?.reason);
+  const timeOut = () => scope.abort(deadline.reason);
+  signal?.throwIfAborted();
+  signal?.addEventListener("abort", cancel, { once: true });
+  deadline.addEventListener("abort", timeOut, { once: true });
+  try {
+    return await accessStorage<RememberedConnection>(
+      "readonly",
+      (store) => store.get(slot),
+      { signal: scope.signal },
+    );
+  } finally {
+    signal?.removeEventListener("abort", cancel);
+    deadline.removeEventListener("abort", timeOut);
   }
 }
 
@@ -99,18 +171,16 @@ function binding(id: string, profile: Profile) {
 
 export async function restoreConnection(
   profiles: Profile[],
-  { id, confirmed }: { id: string; confirmed: boolean },
+  { id, confirmed }: RememberedSelection,
   signal: AbortSignal,
   onCredential: () => void,
 ) {
-  if (!(await withConnectionLock(() => currentSelection()?.id === id))) return;
-  const saved: RememberedConnection | undefined = await accessStorage(
-    "readonly",
-    (store) => store.get(slot),
-  );
+  if (!(await withConnectionLock(() => restorableSelection()?.id === id)))
+    return;
+  const saved = await readStoredConnection(signal);
   // An opted-in connection may still be awaiting verification and have no credential.
   if (saved?.id !== id) {
-    if (confirmed && currentSelection()?.id === id)
+    if (confirmed && restorableSelection()?.id === id)
       throw new Error("Remembered credential unavailable.");
     return;
   }
@@ -118,7 +188,7 @@ export async function restoreConnection(
   onCredential();
   const profile = profiles.find((profile) => profile.id === saved.profileId);
   if (!profile || profile.endpoint !== saved.endpoint) {
-    if (await withConnectionLock(() => currentSelection()?.id === id))
+    if (await withConnectionLock(() => restorableSelection()?.id === id))
       throw new Error("Remembered profile or endpoint unavailable.");
     return;
   }
@@ -129,7 +199,10 @@ export async function restoreConnection(
   );
   return withConnectionLock(() => {
     signal.throwIfAborted();
-    if (currentSelection()?.id !== id) return;
+    if (restorableSelection()?.id !== id) return;
+    const latest = loadProfiles().find((saved) => saved.id === profile.id);
+    if (latest?.endpoint !== profile.endpoint)
+      throw new Error("Remembered endpoint changed during restore.");
     confirmConnection(id);
     return { id, profile, token: new TextDecoder().decode(plaintext) };
   });
@@ -141,7 +214,7 @@ export async function rememberConnection(
   token: string,
   signal: AbortSignal,
 ) {
-  if (currentSelection()?.id !== id) return;
+  if (restorableSelection()?.id !== id) return;
   const key = await crypto.subtle.generateKey(
     { name: "AES-GCM", length: 256 },
     false,
@@ -168,17 +241,18 @@ export async function rememberConnection(
       const latest = loadProfiles().find((saved) => saved.id === profile.id);
       if (
         signal.aborted ||
-        currentSelection()?.id !== id ||
+        restorableSelection()?.id !== id ||
         latest?.endpoint !== profile.endpoint
       )
         return;
       return store.put(saved, slot);
     },
-    true,
+    { locked: true },
   );
   if (written === undefined) return;
   await withConnectionLock(() => {
-    if (!signal.aborted && currentSelection()?.id === id) confirmConnection(id);
+    if (!signal.aborted && restorableSelection()?.id === id)
+      confirmConnection(id);
   }).catch(() => {
     // The credential has committed and can be restored even if confirmation times out.
   });
@@ -186,9 +260,11 @@ export async function rememberConnection(
 
 function revokeConnection(id?: string) {
   if (!id) return;
-  if (currentSelection()?.id !== id) return;
-  // A same-size marker revokes reconnect immediately and survives an interrupted delete.
-  localStorage.setItem(marker, "-" + id);
+  if (currentSelection()?.id === id) {
+    // A same-size marker revokes reconnect immediately and survives an interrupted delete.
+    localStorage.setItem(marker, "-" + id);
+  }
+  localStorage.removeItem(rejectedPrefix + id);
 }
 
 export function revokeRememberedConnection(id: string, pendingId?: string) {
@@ -198,23 +274,13 @@ export function revokeRememberedConnection(id: string, pendingId?: string) {
   });
 }
 
-export function revokeConfirmedRestore(id: string) {
+export function revokeConfirmedRestore(id: string, pendingId?: string) {
   return withConnectionLock(async () => {
+    if (pendingId && pendingId !== id) revokeConnection(pendingId);
     const selection = currentSelection();
     if (selection?.id !== id) return;
-    if (!selection.confirmed) {
-      const deadline = AbortSignal.timeout(3000);
-      const saved: RememberedConnection | undefined = await Promise.race([
-        accessStorage("readonly", (store) => store.get(slot)),
-        new Promise<never>((_, reject) => {
-          deadline.addEventListener("abort", () => reject(deadline.reason), {
-            once: true,
-          });
-        }),
-      ]);
-      deadline.throwIfAborted();
-      if (saved?.id !== id) return;
-    }
+    if (!selection.confirmed && (await readStoredConnection())?.id !== id)
+      return;
     revokeConnection(id);
   });
 }
@@ -231,15 +297,20 @@ export async function finishForgettingConnection() {
     return;
   }
   if (!selection || !canRememberConnection()) return;
+  const current = currentSelection();
+  if (current && !restorableSelection()) {
+    await revokeRememberedConnection(current.id);
+    selection = localStorage.getItem(marker);
+  }
   await accessStorage("readwrite", (store) => {
     const request = store.get(slot);
     request.onsuccess = () => {
-      if (request.result && request.result.id !== currentSelection()?.id)
+      if (request.result && request.result.id !== restorableSelection()?.id)
         store.delete(slot);
     };
     return request;
   });
-  if (selection.startsWith("-")) {
+  if (selection?.startsWith("-")) {
     await withConnectionLock(() => {
       if (localStorage.getItem(marker) === selection)
         localStorage.removeItem(marker);

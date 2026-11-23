@@ -24,6 +24,11 @@ export function ConnectionForm() {
   const [endpoint, setEndpoint] = useState(native.endpoint),
     [token, setToken] = useState(""),
     [remember, setRemember] = useState(false);
+  const [profileEndpoint, setProfileEndpoint] = useState(native.endpoint);
+  if (profileEndpoint !== native.endpoint) {
+    setProfileEndpoint(native.endpoint);
+    setEndpoint(native.endpoint);
+  }
   const [authenticationFailed, setAuthenticationFailed] = useState(false);
   const rejected = !!workspace.snapshot.authenticationFailed;
   if (authenticationFailed !== rejected) {
@@ -184,7 +189,11 @@ export function ConnectionForm() {
           </Button>
         </div>
         {(busy || workspace.restoredConnection) && (
-          <Button type="button" variant="ghost" onClick={cancel}>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={busy ? cancel : workspace.forgetSavedConnection}
+          >
             {t(busy ? "Cancel connection" : "Forget saved connection")}
           </Button>
         )}
