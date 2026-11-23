@@ -136,15 +136,28 @@ test("browser uses the official native service through CORS and built-in dashboa
     await expect(remember).not.toBeChecked();
 
     const refuseConfirmation = () => {
+      const marker = "singdeck.remembered-connection";
+      const tracked = (key: string) =>
+        key === marker || key.startsWith(marker + ".");
+      const used = () =>
+        Object.keys(localStorage)
+          .filter(tracked)
+          .reduce(
+            (size, key) =>
+              size + key.length + (localStorage.getItem(key)?.length ?? 0),
+            0,
+          );
+      const capacity = used();
       const setItem = Storage.prototype.setItem;
       Storage.prototype.setItem = function (key, value) {
-        const marker = "singdeck.remembered-connection";
         const previous = localStorage.getItem(key);
+        const growth =
+          previous === null
+            ? key.length + value.length
+            : value.length - previous.length;
         if (
-          (key === marker &&
-            (value.startsWith("+") ||
-              value.length > (previous?.length ?? 0))) ||
-          (key.startsWith(marker + ".") && previous === null)
+          (key === marker && value.startsWith("+")) ||
+          (tracked(key) && used() + growth > capacity)
         ) {
           throw new DOMException(
             "Confirmation unavailable",
@@ -260,6 +273,30 @@ test("browser uses the official native service through CORS and built-in dashboa
       endpointChange.getByRole("button", { name: "Forget saved connection" }),
     ).toBeVisible();
     await endpointChange.close();
+    await page.evaluate(
+      ([key, original]) => localStorage.setItem(key, original),
+      [profilesKey, originalProfiles],
+    );
+
+    const missingProfile = await context.newPage();
+    await missingProfile.addInitScript(
+      (key) => localStorage.removeItem(key),
+      profilesKey,
+    );
+    let restoredWithoutProfile = false;
+    await missingProfile.route(
+      "**/daemon.StartedService/GetVersion",
+      (route) => {
+        restoredWithoutProfile = true;
+        return route.abort();
+      },
+    );
+    await missingProfile.goto(logsUrl);
+    await expect(
+      missingProfile.getByText(/^Could not restore the saved connection/),
+    ).toBeVisible();
+    expect(restoredWithoutProfile).toBe(false);
+    await missingProfile.close();
     await page.evaluate(
       ([key, original]) => localStorage.setItem(key, original),
       [profilesKey, originalProfiles],
@@ -422,6 +459,9 @@ test("browser uses the official native service through CORS and built-in dashboa
     const forget = reopened.getByRole("button", {
       name: "Forget saved connection",
     });
+    await expect(
+      reopened.getByRole("button", { name: "Connect", exact: true }),
+    ).toBeEnabled();
     await expect(forget).toBeVisible();
     await reopened.unroute(versionRpc);
     await reopened.route(versionRpc, () => {});
@@ -470,6 +510,12 @@ test("browser uses the official native service through CORS and built-in dashboa
       (key) => localStorage.getItem(key)!.slice(1),
       markerKey,
     );
+    expect(
+      await reopened.evaluate(
+        (key) => localStorage.getItem(key),
+        `${markerKey}.revoked.${rejectedId}`,
+      ),
+    ).toBe("0");
     const lockPeer = await context.newPage();
     await lockPeer.goto(
       "http://127.0.0.1:19190/dashboard/third-party-licenses.txt",

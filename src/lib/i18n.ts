@@ -298,6 +298,8 @@ const zh: Record<string, string> = {
     "远程实例须使用 HTTPS，HTTP 请通过回环 SSH 隧道访问。",
   "Invalid profile.": "配置无效。",
   "Settings not persisted": "设置未保存",
+  "Browser storage could not be checked. A previously saved connection may still reconnect. Clear this site’s data to remove it.":
+    "无法检查浏览器存储。先前保存的连接可能仍会自动重连。清除此网站的数据可移除该连接。",
   "Browser storage is unavailable. Settings are kept only until this page closes.":
     "浏览器存储不可用，设置仅保留到页面关闭。",
   "Connection notice": "连接提示",

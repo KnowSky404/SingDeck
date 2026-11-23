@@ -50,11 +50,16 @@ export const mockProfile: Profile = {
 };
 
 export function loadProfiles(): Profile[] {
+  const profiles = loadStoredProfiles();
+  return profiles.length ? profiles : [defaultProfile];
+}
+
+export function loadStoredProfiles(): Profile[] {
   try {
     const saved: unknown = JSON.parse(
       localStorage.getItem("singdeck.profiles.v1") ?? "[]",
     );
-    if (!Array.isArray(saved)) return [defaultProfile];
+    if (!Array.isArray(saved)) return [];
     const profiles: Profile[] = [];
     for (const item of saved.slice(0, 20)) {
       if (!item || typeof item !== "object") continue;
@@ -95,9 +100,9 @@ export function loadProfiles(): Profile[] {
         /* Ignore invalid endpoints in saved profile metadata. */
       }
     }
-    return profiles.length ? profiles : [defaultProfile];
+    return profiles;
   } catch {
-    return [defaultProfile];
+    return [];
   }
 }
 

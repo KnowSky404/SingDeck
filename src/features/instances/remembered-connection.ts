@@ -1,4 +1,4 @@
-import { loadProfiles, type Profile } from "./profiles";
+import { loadStoredProfiles, type Profile } from "./profiles";
 
 export interface RememberedSelection {
   id: string;
@@ -43,15 +43,29 @@ export function getRememberedSelection() {
   }
 }
 
-export async function claimRememberedConnection(id?: string) {
+export async function claimRememberedConnection(
+  id?: string,
+  signal?: AbortSignal,
+) {
   if (!canRememberConnection()) return false;
-  return withConnectionLock(() => {
-    const hadSelection = !!localStorage.getItem(marker);
-    revokeConnection(currentSelection()?.id);
-    // Keep replacement cleanup in the existing marker so it fits at browser quota.
-    if (id) localStorage.setItem(marker, (hadSelection ? "~" : "?") + id);
-    return hadSelection;
-  });
+  return withStorageDeadline(signal, (scope) =>
+    withConnectionLock(() => {
+      scope.throwIfAborted();
+      const previous = localStorage.getItem(marker);
+      revokeConnection(previous?.slice(1));
+      if (id) {
+        // Reserve revocation space before storing a credential.
+        localStorage.setItem(revokedPrefix + id, "0");
+        try {
+          localStorage.setItem(marker, (previous ? "~" : "?") + id);
+        } catch (error) {
+          localStorage.removeItem(revokedPrefix + id);
+          throw error;
+        }
+      }
+      return !!previous;
+    }, scope),
+  );
 }
 
 function currentSelection(): RememberedSelection | null {
@@ -62,7 +76,7 @@ function currentSelection(): RememberedSelection | null {
 
 function restorableSelection() {
   const selection = currentSelection();
-  return selection && !localStorage.getItem(revokedPrefix + selection.id)
+  return selection && localStorage.getItem(revokedPrefix + selection.id) !== "1"
     ? selection
     : null;
 }
@@ -215,12 +229,39 @@ export async function restoreConnection(
   return withConnectionLock(() => {
     signal.throwIfAborted();
     if (restorableSelection()?.id !== id) return;
-    const latest = loadProfiles().find((saved) => saved.id === profile.id);
+    const latest = loadStoredProfiles().find(
+      (saved) => saved.id === profile.id,
+    );
     if (latest?.endpoint !== profile.endpoint)
       throw new Error("Remembered endpoint changed during restore.");
     confirmConnection(id);
     return { id, profile, token: new TextDecoder().decode(plaintext) };
   });
+}
+
+export function startRememberedConnection(
+  id: string,
+  profile: Profile,
+  start: () => void,
+  signal: AbortSignal,
+) {
+  return withStorageDeadline(signal, (scope) =>
+    withConnectionLock(async () => {
+      const stored = await readStoredConnection(scope);
+      scope.throwIfAborted();
+      const latest = loadStoredProfiles().find(
+        (saved) => saved.id === profile.id,
+      );
+      if (
+        stored?.id !== id ||
+        latest?.endpoint !== profile.endpoint ||
+        restorableSelection()?.id !== id
+      )
+        return false;
+      start();
+      return true;
+    }, scope),
+  );
 }
 
 export async function rememberConnection(
@@ -254,7 +295,9 @@ export async function rememberConnection(
     accessStorage(
       "readwrite",
       (store) => {
-        const latest = loadProfiles().find((saved) => saved.id === profile.id);
+        const latest = loadStoredProfiles().find(
+          (saved) => saved.id === profile.id,
+        );
         if (
           scope.aborted ||
           restorableSelection()?.id !== id ||
@@ -305,7 +348,28 @@ export function revokeConfirmedRestore(id: string, pendingId?: string) {
 }
 
 export function queueConnectionRevocation(id: string) {
-  return navigator.locks.request(marker, () => revokeConnection(id));
+  return navigator.locks.request(marker, async () => {
+    try {
+      revokeConnection(id);
+    } catch {
+      await withStorageDeadline(undefined, (signal) =>
+        accessStorage(
+          "readwrite",
+          (store) => {
+            const request = store.get(slot);
+            request.onsuccess = () => {
+              if (request.result?.id === id) store.delete(slot);
+            };
+            return request;
+          },
+          { signal },
+        ),
+      );
+      if (localStorage.getItem(marker)?.slice(1) === id)
+        localStorage.removeItem(marker);
+      localStorage.removeItem(revokedPrefix + id);
+    }
+  });
 }
 
 export function hasUnfinishedRevocation() {
@@ -317,7 +381,7 @@ export function hasUnfinishedRevocation() {
       (!!currentSelection() && !restorableSelection())
     );
   } catch {
-    return false;
+    return undefined;
   }
 }
 
