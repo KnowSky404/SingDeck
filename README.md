@@ -2,7 +2,11 @@
 
 [简体中文](README.zh-CN.md)
 
-A web dashboard for **sing-box 1.14.0+ / native Service API 4**. Connect directly to your instance, or [try the demo](https://knowsky404.github.io/SingDeck/).
+A web dashboard for **sing-box 1.14.0+ / native Service API 4**. Connect directly to your instance.
+
+**[Try the online demo](https://knowsky404.github.io/SingDeck/)** · Choose **Explore demo** to try the dashboard without any setup.
+
+![SingDeck demo overview showing live traffic, active connections, and service status](docs/screenshots/overview-en.png)
 
 - Live traffic, proxy groups, connections and ANSI-colored logs.
 - Independent group/node card layouts; connection status and outbound filters.

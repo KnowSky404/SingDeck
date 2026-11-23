@@ -2,7 +2,11 @@
 
 [English](README.md)
 
-面向 **sing-box 1.14.0+ / 原生 Service API 4** 的 Web 面板。直连你的实例，或[在线体验演示](https://knowsky404.github.io/SingDeck/)。
+面向 **sing-box 1.14.0+ / 原生 Service API 4** 的 Web 面板，可直连你的实例。
+
+**[在线体验](https://knowsky404.github.io/SingDeck/)** · 点击「体验演示」即可试用，无需配置。
+
+![SingDeck 演示概览，显示实时流量、活跃连接和服务状态](docs/screenshots/overview-zh-CN.png)
 
 - 实时流量、代理组、连接和 ANSI 彩色日志。
 - 代理组／节点独立卡片布局，连接状态和出站筛选。
