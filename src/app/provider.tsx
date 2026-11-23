@@ -21,6 +21,7 @@ import {
   claimRememberedConnection,
   finishForgettingConnection,
   getRememberedSelection,
+  hasUnfinishedRevocation,
   markConnectionRevoked,
   queueConnectionRevocation,
   rememberConnection,
@@ -116,7 +117,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return session.disconnect;
   }, [session, shouldConnect]);
   useEffect(() => {
-    void finishForgettingConnection().catch(() => setStorageError(forgetError));
+    const revoked = hasUnfinishedRevocation();
+    void finishForgettingConnection().catch(() => {
+      if (revoked && hasUnfinishedRevocation())
+        setStorageError((error) => error ?? forgetError);
+    });
   }, []);
   useEffect(() => {
     if (!restoringSelection) return;
@@ -186,7 +191,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           if (savedConnection.current === saved)
             setStorageError(recoveryNotice());
           return finishForgettingConnection().catch(() => {
-            if (savedConnection.current === saved) setStorageError(forgetError);
+            if (savedConnection.current === saved && hasUnfinishedRevocation())
+              setStorageError(forgetError);
           });
         })
         .catch(() => {
@@ -206,12 +212,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           return rememberConnection(saved.id, profile, token, signal);
       })
       .then((remembered) => {
-        if (
-          remembered === false &&
-          savedConnection.current === saved &&
-          !signal.aborted
-        )
-          setStorageError(rememberChanged);
+        if (savedConnection.current !== saved || signal.aborted) return;
+        if (remembered === false) setStorageError(rememberChanged);
+        if (remembered === true && !hasUnfinishedRevocation()) {
+          setStorageError((error) =>
+            error === forgetError ? undefined : error,
+          );
+        }
       })
       .catch(() => {
         if (savedConnection.current === saved && !signal.aborted)
@@ -294,13 +301,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       );
     }
     const claim = claimRememberedConnection(id).then(
-      () => {
+      (needsCleanup) => {
         setRestoredSelection((current) =>
           current?.id === previousId ? undefined : current,
         );
-        void finishForgettingConnection().catch(() =>
-          setStorageError(forgetError),
-        );
+        if (needsCleanup) {
+          void finishForgettingConnection().catch(() => {
+            if (hasUnfinishedRevocation())
+              setStorageError((error) => error ?? forgetError);
+          });
+        }
         return true;
       },
       () => {
@@ -362,6 +372,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       : revokeConfirmedRestore(id, saved?.id);
     void revocation
       .then(() => {
+        const selection = getRememberedSelection();
+        if (!confirmed && selection?.id === id) setRestoredSelection(selection);
         setStorageError((error) =>
           error === restoreError ||
           error === authRememberError ||
@@ -371,9 +383,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             ? undefined
             : error,
         );
-        void finishForgettingConnection().catch(() =>
-          setStorageError(forgetError),
-        );
+        void finishForgettingConnection().catch(() => {
+          if (hasUnfinishedRevocation()) setStorageError(forgetError);
+        });
       })
       .catch(() => {
         setRestoredSelection({ id, confirmed: !!confirmed });

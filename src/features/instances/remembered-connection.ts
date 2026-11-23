@@ -44,16 +44,19 @@ export function getRememberedSelection() {
 }
 
 export async function claimRememberedConnection(id?: string) {
-  if (!canRememberConnection()) return;
-  await withConnectionLock(() => {
+  if (!canRememberConnection()) return false;
+  return withConnectionLock(() => {
+    const hadSelection = !!localStorage.getItem(marker);
     revokeConnection(currentSelection()?.id);
-    if (id) localStorage.setItem(marker, "?" + id);
+    // Keep replacement cleanup in the existing marker so it fits at browser quota.
+    if (id) localStorage.setItem(marker, (hadSelection ? "~" : "?") + id);
+    return hadSelection;
   });
 }
 
 function currentSelection(): RememberedSelection | null {
   const value = localStorage.getItem(marker);
-  if (!value || (value[0] !== "+" && value[0] !== "?")) return null;
+  if (!value || !/[+?~]/.test(value[0])) return null;
   return { id: value.slice(1), confirmed: value[0] === "+" };
 }
 
@@ -76,6 +79,8 @@ export function markConnectionRevoked(id: string) {
 
 function confirmConnection(id: string) {
   try {
+    if (localStorage.getItem(marker) === "~" + id)
+      localStorage.setItem(marker, "?" + id);
     localStorage.setItem(marker, "+" + id);
   } catch {
     // A matching IndexedDB record can still be restored with its pending selection.
@@ -303,6 +308,19 @@ export function queueConnectionRevocation(id: string) {
   return navigator.locks.request(marker, () => revokeConnection(id));
 }
 
+export function hasUnfinishedRevocation() {
+  try {
+    const selection = localStorage.getItem(marker);
+    return (
+      selection?.startsWith("~") ||
+      selection?.startsWith("-") ||
+      (!!currentSelection() && !restorableSelection())
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function finishForgettingConnection() {
   let selection: string | null;
   try {
@@ -316,18 +334,26 @@ export async function finishForgettingConnection() {
     await revokeRememberedConnection(current.id);
     selection = localStorage.getItem(marker);
   }
-  await accessStorage("readwrite", (store) => {
-    const request = store.get(slot);
-    request.onsuccess = () => {
-      if (request.result && request.result.id !== restorableSelection()?.id)
-        store.delete(slot);
-    };
-    return request;
-  });
-  if (selection?.startsWith("-")) {
+  await withStorageDeadline(undefined, (signal) =>
+    accessStorage(
+      "readwrite",
+      (store) => {
+        const request = store.get(slot);
+        request.onsuccess = () => {
+          if (request.result && request.result.id !== restorableSelection()?.id)
+            store.delete(slot);
+        };
+        return request;
+      },
+      { signal },
+    ),
+  );
+  if (selection?.startsWith("-") || selection?.startsWith("~")) {
+    const handled = selection;
     await withConnectionLock(() => {
-      if (localStorage.getItem(marker) === selection)
-        localStorage.removeItem(marker);
+      if (localStorage.getItem(marker) !== handled) return;
+      if (handled.startsWith("-")) localStorage.removeItem(marker);
+      else localStorage.setItem(marker, "?" + handled.slice(1));
     });
   }
 }

@@ -138,17 +138,36 @@ test("browser uses the official native service through CORS and built-in dashboa
     const refuseConfirmation = () => {
       const setItem = Storage.prototype.setItem;
       Storage.prototype.setItem = function (key, value) {
-        if (key === "singdeck.remembered-connection" && value.startsWith("+"))
+        const marker = "singdeck.remembered-connection";
+        const previous = localStorage.getItem(key);
+        if (
+          (key === marker &&
+            (value.startsWith("+") ||
+              value.length > (previous?.length ?? 0))) ||
+          (key.startsWith(marker + ".") && previous === null)
+        ) {
           throw new DOMException(
             "Confirmation unavailable",
             "QuotaExceededError",
           );
+        }
         setItem.call(this, key, value);
       };
     };
     await page.evaluate(refuseConfirmation);
     await page.addInitScript(refuseConfirmation);
     await page.evaluate(() => {
+      const open = indexedDB.open.bind(indexedDB);
+      let pauseCleanup = true;
+      indexedDB.open = (name, version) => {
+        const request = open(name, version);
+        if (pauseCleanup) {
+          pauseCleanup = false;
+          Object.defineProperty(request, "onsuccess", { set() {} });
+        }
+        return request;
+      };
+
       let deadline: AbortController | undefined;
       const timeout = AbortSignal.timeout.bind(AbortSignal);
       AbortSignal.timeout = (milliseconds) => {
@@ -164,6 +183,8 @@ test("browser uses the official native service through CORS and built-in dashboa
       };
       const put = IDBObjectStore.prototype.put;
       IDBObjectStore.prototype.put = function (value, key) {
+        document.documentElement.dataset.selectionBeforeWrite =
+          localStorage.getItem("singdeck.remembered-connection")?.[0];
         const request = put.call(this, value, key);
         const writeDeadline = deadline;
         this.transaction.addEventListener(
@@ -187,6 +208,10 @@ test("browser uses the official native service through CORS and built-in dashboa
     await expect(
       page.getByText("Settings not persisted", { exact: true }),
     ).toHaveCount(0);
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-selection-before-write",
+      "~",
+    );
     expect(
       await page.evaluate(
         () => localStorage.getItem("singdeck.remembered-connection")?.[0],
@@ -305,7 +330,7 @@ test("browser uses the official native service through CORS and built-in dashboa
         (key) => localStorage.getItem(key)?.[0] ?? "",
         markerKey,
       ),
-    ).not.toMatch(/[+?]/);
+    ).not.toMatch(/[+?~]/);
     await delayed.reload();
     await expect(connect).toBeEnabled();
     await delayed.close();
@@ -326,8 +351,11 @@ test("browser uses the official native service through CORS and built-in dashboa
     await expect(reopened.getByText("Saving this connection…")).toHaveCount(0);
 
     await reopened.evaluate(() => {
-      indexedDB.open = () => {
-        throw new DOMException("Cleanup interrupted", "AbortError");
+      const open = indexedDB.open.bind(indexedDB);
+      indexedDB.open = (name, version) => {
+        const request = open(name, version);
+        Object.defineProperty(request, "onsuccess", { set() {} });
+        return request;
       };
     });
     const unlock = await holdConnectionLock(reopened, markerKey);
@@ -350,6 +378,9 @@ test("browser uses the official native service through CORS and built-in dashboa
       .click();
     const tokenInput = reopened.getByLabel("Bearer token", { exact: true });
     await expect(tokenInput).toBeVisible();
+    await expect(
+      reopened.getByText(/^Could not forget the saved connection/),
+    ).toBeVisible();
     await reopened.reload();
     await expect(tokenInput).toHaveValue("");
     await expect
@@ -509,6 +540,9 @@ test("browser uses the official native service through CORS and built-in dashboa
     await expect(
       newer.getByRole("button", { name: "Connect", exact: true }),
     ).toBeEnabled();
+    await expect(
+      newer.getByRole("button", { name: "Forget saved connection" }),
+    ).toBeVisible();
     expect(
       await newer.evaluate((key) => localStorage.getItem(key)?.[0], markerKey),
     ).toBe("?");
@@ -524,7 +558,7 @@ test("browser uses the official native service through CORS and built-in dashboa
         (key) => localStorage.getItem(key)?.[0] ?? "",
         markerKey,
       ),
-    ).not.toMatch(/[+?]/);
+    ).not.toMatch(/[+?~]/);
     await newer.getByLabel("Bearer token", { exact: true }).fill(secret);
     await newer.getByRole("button", { name: "Connect", exact: true }).click();
     await expect(
