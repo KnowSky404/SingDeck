@@ -114,6 +114,27 @@ test("browser uses the official native service through CORS and built-in dashboa
     );
     const remember = page.getByRole("switch", { name: "Remember this device" });
     await expect(remember).not.toBeChecked();
+    await page.evaluate(() => {
+      const open = indexedDB.open.bind(indexedDB);
+      indexedDB.open = (name, version) => {
+        const request = open(name, version);
+        Object.defineProperty(request, "onsuccess", { set() {} });
+        return request;
+      };
+    });
+    await remember.click();
+    await page.getByLabel("Bearer token", { exact: true }).fill(secret);
+    await page.getByRole("button", { name: "Connect", exact: true }).click();
+    await expect(
+      page.getByRole("heading", { name: "Logs", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByText(/^Could not remember this connection/),
+    ).toBeVisible();
+    await page.reload();
+    await expect(remember).toBeEnabled();
+    await expect(remember).not.toBeChecked();
+
     const refuseConfirmation = () => {
       const setItem = Storage.prototype.setItem;
       Storage.prototype.setItem = function (key, value) {
@@ -127,6 +148,32 @@ test("browser uses the official native service through CORS and built-in dashboa
     };
     await page.evaluate(refuseConfirmation);
     await page.addInitScript(refuseConfirmation);
+    await page.evaluate(() => {
+      let deadline: AbortController | undefined;
+      const timeout = AbortSignal.timeout.bind(AbortSignal);
+      AbortSignal.timeout = (milliseconds) => {
+        const controller = new AbortController();
+        const original = timeout(milliseconds);
+        original.addEventListener(
+          "abort",
+          () => controller.abort(original.reason),
+          { once: true },
+        );
+        deadline = controller;
+        return controller.signal;
+      };
+      const put = IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.put = function (value, key) {
+        const request = put.call(this, value, key);
+        const writeDeadline = deadline;
+        this.transaction.addEventListener(
+          "complete",
+          () => writeDeadline?.abort(),
+          { once: true },
+        );
+        return request;
+      };
+    });
     await page
       .getByLabel("API endpoint", { exact: true })
       .fill("http://127.0.0.1:19190///");
@@ -294,7 +341,7 @@ test("browser uses the official native service through CORS and built-in dashboa
       reopened.getByText("Disconnecting…", { exact: true }),
     ).toBeVisible();
     await expect(
-      reopened.getByText(/^Automatic reconnect may still be enabled/),
+      reopened.getByText(/^Could not forget the saved connection/),
     ).toBeVisible();
     await unlock.evaluate((release) => release());
     await unlock.dispose();
@@ -417,7 +464,7 @@ test("browser uses the official native service through CORS and built-in dashboa
     expect(
       await reopened.evaluate(
         (key) => localStorage.getItem(key),
-        `${markerKey}.rejected.${rejectedId}`,
+        `${markerKey}.revoked.${rejectedId}`,
       ),
     ).toBe("1");
     await releaseRejection();
@@ -489,6 +536,9 @@ test("browser uses the official native service through CORS and built-in dashboa
       reopened.getByRole("heading", { name: "Logs", exact: true }),
     ).toBeVisible();
     await expect(reopened.getByText("Saving this connection…")).toHaveCount(0);
+    await expect(
+      reopened.getByText(/^The saved connection changed/),
+    ).toBeVisible();
     await reopened.unroute(versionRpc);
     await reopened.reload();
     await expect(

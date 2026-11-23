@@ -269,6 +269,12 @@ const zh: Record<string, string> = {
     "无法恢复已保存的连接，请输入访问密钥后重新连接。",
   "Could not remember this connection. Check your browser’s site data settings.":
     "无法记住此连接，请检查浏览器的网站数据设置。",
+  "The instance rejected the token, so automatic reconnect was disabled. Enter a valid token on the connection page. If the workspace is open, choose Disconnect first.":
+    "实例拒绝了访问密钥，自动重连已关闭。请在连接页输入有效的访问密钥。若仍在工作区，请先选择「断开连接」。",
+  "The instance rejected the token. Enter a valid token on the connection page. If the workspace is open, choose Disconnect first.":
+    "实例拒绝了访问密钥。请在连接页输入有效的访问密钥。若仍在工作区，请先选择「断开连接」。",
+  "The saved connection changed before this connection could be remembered. Enable Remember this device on the connection page to retry. If the workspace is open, choose Disconnect first.":
+    "此连接保存前，已保存的连接发生了变化。请在连接页勾选「记住此设备」后重试。若仍在工作区，请先选择「断开连接」。",
   "Automatic reconnect may still be enabled. Retry forgetting the connection or clear this site’s data.":
     "自动重连可能仍然开启。请重试清除连接，或在浏览器中清除此网站的数据。",
   "Could not forget the saved connection. Clear this site’s data in your browser.":
