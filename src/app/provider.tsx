@@ -28,6 +28,7 @@ import {
   restoreConnection,
   revokeConfirmedRestore,
   revokeRememberedConnection,
+  startRememberedConnection,
   type RememberedSelection,
 } from "@/features/instances/remembered-connection";
 import { WorkspaceContext } from "./context";
@@ -47,12 +48,14 @@ const revokeError =
   "Automatic reconnect may still be enabled. Retry forgetting the connection or clear this site’s data.";
 const forgetError =
   "Could not forget the saved connection. Clear this site’s data in your browser.";
+const storageUnknown =
+  "Browser storage could not be checked. A previously saved connection may still reconnect. Clear this site’s data to remove it.";
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [profiles, setProfiles] = useState(loadProfiles);
   const [activeId, setActiveId] = useState(profiles[0].id);
   const [tokens, setTokens] = useState<Record<string, string>>({});
-  const [shouldConnect, setShouldConnect] = useState(false);
+  const [shouldConnect, setShouldConnect] = useState<boolean | string>(false);
   const [restoringSelection, setRestoringSelection] = useState(
     getRememberedSelection,
   );
@@ -68,6 +71,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const savedConnection = useRef<{
     id: string;
     profile: Profile;
+    restored?: boolean;
     pending?: {
       claim: Promise<boolean>;
       controller: AbortController;
@@ -113,8 +117,46 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   );
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot);
   useEffect(() => {
-    if (shouldConnect) session.connect();
-    return session.disconnect;
+    if (!shouldConnect) return session.disconnect;
+    if (shouldConnect === true) {
+      session.connect();
+      return session.disconnect;
+    }
+    const saved = savedConnection.current;
+    if (saved?.id !== shouldConnect) return session.disconnect;
+
+    const scope = new AbortController();
+    const cancelRestore = () => {
+      if (scope.signal.aborted || savedConnection.current !== saved) return;
+      savedConnection.current = null;
+      setRestoringSelection(null);
+      setShouldConnect(false);
+      setTokens({});
+      const latest = loadProfiles();
+      setProfiles(latest);
+      setActiveId(latest[0].id);
+      const selection = getRememberedSelection();
+      setRestoredSelection(selection?.id === saved.id ? selection : undefined);
+      setStorageError(restoreError);
+    };
+    void startRememberedConnection(
+      saved.id,
+      saved.profile,
+      () => {
+        if (savedConnection.current === saved) {
+          saved.restored = false;
+          session.connect();
+          setRestoringSelection(null);
+        }
+      },
+      scope.signal,
+    ).then((started) => {
+      if (!started) cancelRestore();
+    }, cancelRestore);
+    return () => {
+      scope.abort();
+      session.disconnect();
+    };
   }, [session, shouldConnect]);
   useEffect(() => {
     const revoked = hasUnfinishedRevocation();
@@ -127,6 +169,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (!restoringSelection) return;
     const scope = new AbortController();
     const attempt = { scope, committed: false };
+    let starting = false;
     restoreAttempt.current = attempt;
     void restoreConnection(profiles, restoringSelection, scope.signal, () => {
       attempt.committed = true;
@@ -139,11 +182,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
             setRestoredSelection(selection);
           return;
         }
-        savedConnection.current = { id: saved.id, profile: saved.profile };
+        starting = true;
+        savedConnection.current = {
+          id: saved.id,
+          profile: saved.profile,
+          restored: true,
+        };
         setRestoredSelection({ id: saved.id, confirmed: true });
         setActiveId(saved.profile.id);
         setTokens({ [saved.profile.id]: saved.token });
-        setShouldConnect(true);
+        setShouldConnect(saved.id);
       })
       .catch(() => {
         if (scope.signal.aborted) return;
@@ -158,7 +206,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setStorageError(restoreError);
       })
       .finally(() => {
-        if (!scope.signal.aborted) setRestoringSelection(null);
+        if (!scope.signal.aborted && !starting) setRestoringSelection(null);
       });
     return () => scope.abort();
   }, [profiles, restoringSelection]);
@@ -282,6 +330,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   function saveProfile(profile: Profile, token: string, remember: boolean) {
     const previousSelection = getRememberedSelection() ?? undefined;
     const previousId = previousSelection?.id;
+    if (previousId && !remember) markConnectionRevoked(previousId);
     stopRestore();
     setRestoredSelection(previousSelection);
     savedConnection.current?.pending?.controller.abort();
@@ -300,21 +349,40 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         "Browser storage is unavailable. Settings are kept only until this page closes.",
       );
     }
-    const claim = claimRememberedConnection(id).then(
+    const finishCleanup = () => {
+      void finishForgettingConnection()
+        .then(() => {
+          if (previousId && getRememberedSelection()?.id !== previousId) {
+            setRestoredSelection((current) =>
+              current?.id === previousId ? undefined : current,
+            );
+          }
+        })
+        .catch(() => {
+          if (hasUnfinishedRevocation())
+            setStorageError((error) => error ?? forgetError);
+        });
+    };
+    const controller = new AbortController();
+    const claim = claimRememberedConnection(
+      id,
+      id ? controller.signal : undefined,
+    ).then(
       (needsCleanup) => {
         setRestoredSelection((current) =>
           current?.id === previousId ? undefined : current,
         );
-        if (needsCleanup) {
-          void finishForgettingConnection().catch(() => {
-            if (hasUnfinishedRevocation())
-              setStorageError((error) => error ?? forgetError);
-          });
-        }
+        if (needsCleanup) finishCleanup();
         return true;
       },
       () => {
-        setStorageError(previousId || !id ? revokeError : rememberError);
+        const needsCleanup = hasUnfinishedRevocation();
+        if (needsCleanup) finishCleanup();
+        if (controller.signal.aborted) return false;
+        if (needsCleanup === undefined) setStorageError(storageUnknown);
+        else if (getRememberedSelection()) setStorageError(revokeError);
+        else if (id) setStorageError(rememberError);
+        else if (previousId || needsCleanup) setStorageError(forgetError);
         return false;
       },
     );
@@ -322,7 +390,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       savedConnection.current = {
         id,
         profile,
-        pending: { claim, controller: new AbortController(), started: false },
+        pending: { claim, controller, started: false },
       };
       setRemembering(true);
     }
@@ -417,6 +485,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           !snapshot.authenticationFailed,
         storageError,
         connect: () => {
+          const saved = savedConnection.current;
+          if (
+            typeof shouldConnect === "string" &&
+            (saved?.id !== shouldConnect || saved.restored)
+          )
+            return;
           if (shouldConnect) session.connect();
           else setShouldConnect(true);
         },
