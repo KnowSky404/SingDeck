@@ -122,7 +122,7 @@ describe("real gRPC-Web adapter", () => {
     expect(validateEndpoint("http://127.0.0.1:9090/")).toBe(
       "http://127.0.0.1:9090",
     );
-    expect(validateEndpoint("https://host/prefix/")).toBe(
+    expect(validateEndpoint("https://host/prefix///")).toBe(
       "https://host/prefix",
     );
   });

@@ -14,7 +14,7 @@ import { ConnectionForm } from "@/features/instances/connection-form";
 import { WorkspaceControls } from "@/components/workspace-controls";
 
 export default function EntryPage() {
-  const { t, selectProfile, snapshot } = useWorkspace();
+  const { t, profile, selectProfile, snapshot, restoring } = useWorkspace();
   return (
     <div className="entry-screen">
       <header className="entry-header">
@@ -37,7 +37,7 @@ export default function EntryPage() {
               "Enter the native Service API address and your Bearer token.",
             )}
           >
-            <ConnectionForm />
+            <ConnectionForm key={profile.id} />
           </Panel>
           <Panel
             title={t("Take a look around")}
@@ -62,7 +62,7 @@ export default function EntryPage() {
               </li>
             </ul>
             <Button
-              disabled={snapshot.phase === "connecting"}
+              disabled={restoring || snapshot.phase === "connecting"}
               onClick={() => {
                 location.hash = "/";
                 selectProfile("demo");
@@ -78,9 +78,7 @@ export default function EntryPage() {
           </Panel>
         </div>
         <p className="entry-footer">
-          {t(
-            "Your browser connects directly to your instance. Tokens stay in memory.",
-          )}
+          {t("Your browser connects directly to your instance.")}
         </p>
       </main>
     </div>

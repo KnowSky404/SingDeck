@@ -15,10 +15,14 @@ export interface Workspace {
   setLanguage: (language: Language) => void;
   t: Translate;
   selectProfile: (id: string) => void;
-  saveProfile: (profile: Profile, token: string) => void;
+  saveProfile: (profile: Profile, token: string, remember: boolean) => void;
   connect: () => void;
   disconnect: () => void;
   token: string;
+  restoring: boolean;
+  disconnecting: boolean;
+  restoredConnection: boolean;
+  remembering: boolean;
   storageError?: string;
 }
 export const WorkspaceContext = createContext<Workspace | null>(null);

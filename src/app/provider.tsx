@@ -2,6 +2,7 @@ import {
   useState,
   useEffect,
   useMemo,
+  useRef,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
@@ -15,14 +16,52 @@ import {
   type Profile,
   type Theme,
 } from "@/features/instances/profiles";
+import {
+  claimRememberedConnection,
+  finishForgettingConnection,
+  getRememberedSelection,
+  queueConnectionRevocation,
+  rememberConnection,
+  restoreConnection,
+  revokeConfirmedRestore,
+  revokeRememberedConnection,
+} from "@/features/instances/remembered-connection";
 import { WorkspaceContext } from "./context";
 import { loadLanguage, translate, type Language } from "@/lib/i18n";
+
+const rememberError =
+  "Could not remember this connection. Check your browser’s site data settings.";
+const restoreError =
+  "Could not restore the saved connection. Enter your Bearer token and reconnect.";
+const revokeError =
+  "Automatic reconnect may still be enabled. Retry forgetting the connection or clear this site’s data.";
+const forgetError =
+  "Could not forget the saved connection. Clear this site’s data in your browser.";
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [profiles, setProfiles] = useState(loadProfiles);
   const [activeId, setActiveId] = useState(profiles[0].id);
   const [tokens, setTokens] = useState<Record<string, string>>({});
   const [shouldConnect, setShouldConnect] = useState(false);
+  const [restoringSelection, setRestoringSelection] = useState(
+    getRememberedSelection,
+  );
+  const restoringId = restoringSelection?.id;
+  const [restoredId, setRestoredId] = useState<string>();
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [remembering, setRemembering] = useState(false);
+  const restoreAttempt = useRef<{ scope: AbortController; committed: boolean }>(
+    null,
+  );
+  const savedConnection = useRef<{
+    id: string;
+    profile: Profile;
+    pending?: {
+      claim: Promise<boolean>;
+      controller: AbortController;
+      started: boolean;
+    };
+  }>(null);
   const [storageError, setStorageError] = useState<string>();
   const [language, setLanguage] = useState<Language>(loadLanguage);
   const t = useMemo(() => translate(language), [language]);
@@ -66,6 +105,85 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return session.disconnect;
   }, [session, shouldConnect]);
   useEffect(() => {
+    void finishForgettingConnection().catch(() => setStorageError(forgetError));
+  }, []);
+  useEffect(() => {
+    if (!restoringSelection) return;
+    const scope = new AbortController();
+    const attempt = { scope, committed: false };
+    restoreAttempt.current = attempt;
+    void restoreConnection(profiles, restoringSelection, scope.signal, () => {
+      attempt.committed = true;
+    })
+      .then((saved) => {
+        if (!saved || scope.signal.aborted) return;
+        savedConnection.current = { id: saved.id, profile: saved.profile };
+        setRestoredId(saved.id);
+        setActiveId(saved.profile.id);
+        setTokens({ [saved.profile.id]: saved.token });
+        setShouldConnect(true);
+      })
+      .catch(() => {
+        if (scope.signal.aborted) return;
+        setRestoredId(restoringSelection.id);
+        setStorageError(restoreError);
+      })
+      .finally(() => {
+        if (!scope.signal.aborted) setRestoringSelection(null);
+      });
+    return () => scope.abort();
+  }, [profiles, restoringSelection]);
+  useEffect(() => {
+    const saved = savedConnection.current;
+    if (!saved || saved.profile !== profile) return;
+    if (snapshot.authenticationFailed) {
+      saved.pending?.controller.abort();
+      void revokeRememberedConnection(saved.id)
+        .catch(() => {
+          if (savedConnection.current === saved) {
+            setRestoredId((current) => current ?? saved.id);
+            setStorageError(revokeError);
+          }
+          return queueConnectionRevocation(saved.id);
+        })
+        .then(() => {
+          setRestoredId((current) =>
+            current === saved.id ? undefined : current,
+          );
+          if (savedConnection.current === saved) {
+            setStorageError((error) =>
+              error === revokeError ? undefined : error,
+            );
+          }
+          return finishForgettingConnection().catch(() => {
+            if (savedConnection.current === saved) setStorageError(forgetError);
+          });
+        })
+        .catch(() => {
+          if (savedConnection.current === saved) setStorageError(revokeError);
+        });
+      return;
+    }
+    const pending = saved.pending;
+    if (snapshot.phase !== "connected" || !pending || pending.started) return;
+    const { signal } = pending.controller;
+    if (signal.aborted) return;
+    pending.started = true;
+    void pending.claim
+      .then((claimed) => {
+        if (claimed)
+          return rememberConnection(saved.id, profile, token, signal);
+      })
+      .catch(() => {
+        if (savedConnection.current === saved && !signal.aborted)
+          setStorageError(rememberError);
+      })
+      .finally(() => {
+        saved.pending = undefined;
+        if (savedConnection.current === saved) setRemembering(false);
+      });
+  }, [profile, snapshot.authenticationFailed, snapshot.phase, token]);
+  useEffect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)");
     const apply = () => {
       document.documentElement.classList.toggle(
@@ -89,8 +207,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (snapshot.phase !== "connected" || !version || profile.mode !== "native")
       return;
     try {
+      const saved = loadProfiles();
+      if (
+        !saved.some(
+          (p) => p.id === profile.id && p.endpoint === profile.endpoint,
+        )
+      )
+        return;
       saveProfiles(
-        profiles.map((p) =>
+        saved.map((p) =>
           p.id === profile.id
             ? {
                 ...p,
@@ -103,29 +228,111 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     } catch {
       /* The Settings save path reports storage failure; live connection remains usable. */
     }
-  }, [snapshot.phase, snapshot.version, profile, profiles]);
-  function saveProfile(profile: Profile, token: string) {
+  }, [snapshot.phase, snapshot.version, profile]);
+  function stopRestore() {
+    restoreAttempt.current?.scope.abort();
+    setRestoringSelection(null);
+  }
+  function saveProfile(profile: Profile, token: string, remember: boolean) {
+    const previousId = getRememberedSelection()?.id;
+    stopRestore();
+    setRestoredId(previousId);
+    savedConnection.current?.pending?.controller.abort();
+    savedConnection.current = null;
+    setRemembering(false);
     const next = profiles.some((p) => p.id === profile.id)
       ? profiles.map((p) => (p.id === profile.id ? profile : p))
       : [...profiles, profile];
+    let id: string | undefined;
     try {
       saveProfiles(next);
       setStorageError(undefined);
+      if (remember) id = crypto.randomUUID();
     } catch {
       setStorageError(
         "Browser storage is unavailable. Settings are kept only until this page closes.",
       );
     }
+    const claim = claimRememberedConnection(id).then(
+      () => {
+        setRestoredId((current) =>
+          current === previousId ? undefined : current,
+        );
+        void finishForgettingConnection().catch(() =>
+          setStorageError(forgetError),
+        );
+        return true;
+      },
+      () => {
+        setStorageError(previousId || !id ? revokeError : rememberError);
+        return false;
+      },
+    );
+    if (id) {
+      savedConnection.current = {
+        id,
+        profile,
+        pending: { claim, controller: new AbortController(), started: false },
+      };
+      setRemembering(true);
+    }
     setProfiles(next);
-    setTokens((previous) => ({ ...previous, [profile.id]: token }));
+    setTokens({ [profile.id]: token });
     setActiveId(profile.id);
     setShouldConnect(true);
   }
   function selectProfile(id: string) {
+    stopRestore();
+    savedConnection.current?.pending?.controller.abort();
+    savedConnection.current = null;
+    setRemembering(false);
     session.disconnect();
     mockControl.reset();
     setActiveId(id);
     setShouldConnect(id === "demo");
+  }
+  function disconnect() {
+    if (disconnecting) return;
+    const saved = savedConnection.current;
+    const savedId = restoredId ?? saved?.id;
+    const id = profile.mode === "native" ? (savedId ?? restoringId) : undefined;
+    const checkingUnconfirmedRestore =
+      !savedId &&
+      !restoringSelection?.confirmed &&
+      !restoreAttempt.current?.committed;
+    if (id) setDisconnecting(true);
+    stopRestore();
+    saved?.pending?.controller.abort();
+    if (profile.mode === "native") setRestoredId(undefined);
+    savedConnection.current = null;
+    setRemembering(false);
+    session.disconnect();
+    setShouldConnect(false);
+    setTokens({});
+    setActiveId(profiles[0].id);
+    if (!id) return;
+
+    const revocation = checkingUnconfirmedRestore
+      ? revokeConfirmedRestore(id)
+      : revokeRememberedConnection(id, saved?.id);
+    void revocation
+      .then(() => {
+        setStorageError((error) =>
+          error === restoreError ||
+          error === revokeError ||
+          error === forgetError
+            ? undefined
+            : error,
+        );
+        void finishForgettingConnection().catch(() =>
+          setStorageError(forgetError),
+        );
+      })
+      .catch(() => {
+        setRestoredId(id);
+        setStorageError(revokeError);
+      })
+      .finally(() => setDisconnecting(false));
   }
   return (
     <WorkspaceContext
@@ -142,17 +349,19 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         saveProfile,
         selectProfile,
         token,
+        restoring: !!restoringId,
+        restoredConnection: !!restoredId,
+        disconnecting,
+        remembering:
+          remembering &&
+          snapshot.loaded.status === true &&
+          !snapshot.authenticationFailed,
         storageError,
         connect: () => {
           if (shouldConnect) session.connect();
           else setShouldConnect(true);
         },
-        disconnect: () => {
-          session.disconnect();
-          setShouldConnect(false);
-          setTokens({});
-          setActiveId(profiles[0].id);
-        },
+        disconnect,
       }}
     >
       {children}

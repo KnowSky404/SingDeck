@@ -132,7 +132,15 @@ function Navigation({
   );
 }
 export default function App() {
-  const { profile, session, snapshot, t } = useWorkspace();
+  const {
+    profile,
+    session,
+    snapshot,
+    remembering,
+    disconnecting,
+    storageError,
+    t,
+  } = useWorkspace();
   const path = useSyncExternalStore(subscribeHash, currentPath);
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -154,6 +162,13 @@ export default function App() {
   const partial = Object.entries(snapshot.streamErrors).filter(
     ([channel, error]) => channel !== "status" && error,
   );
+  if (disconnecting) {
+    return (
+      <main className="entry-main">
+        <p role="status">{t("Disconnecting…")}</p>
+      </main>
+    );
+  }
   if (!snapshot.loaded.status) return <EntryPage />;
   return (
     <div className={cn("app-shell", collapsed && "sidebar-collapsed")}>
@@ -231,6 +246,16 @@ export default function App() {
               }
             >
               {t(snapshot.error)}
+            </Notice>
+          )}
+          {remembering && (
+            <p className="footnote" role="status">
+              {t("Saving this connection…")}
+            </p>
+          )}
+          {storageError && (
+            <Notice title={t("Settings not persisted")}>
+              {t(storageError)}
             </Notice>
           )}
           {partial.length > 0 && path === "/" && (
@@ -318,7 +343,7 @@ class AppErrorBoundary extends Component<
     return this.state.failed ? (
       <EmptyState
         title="This view could not be displayed"
-        description="Reload this page to recover. Your credentials have not been persisted."
+        description="Reload this page to recover."
       />
     ) : (
       this.props.children

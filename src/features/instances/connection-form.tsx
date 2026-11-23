@@ -3,13 +3,16 @@ import { LoaderCircle, ShieldCheck } from "lucide-react";
 import { createNativeClient, validateEndpoint } from "@/api/client";
 import { assertCompatible, CompatibilityError } from "@/api/state";
 import { describeError } from "@/api/errors";
+import { canRememberConnection } from "./remembered-connection";
 import { useWorkspace } from "@/app/context";
 import { Notice } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   Field,
   FieldDescription,
+  FieldContent,
   FieldGroup,
   FieldLabel,
 } from "@/components/ui/field";
@@ -19,9 +22,14 @@ export function ConnectionForm() {
   const { profile, profiles, saveProfile, t } = workspace;
   const native = profile.mode === "native" ? profile : profiles[0];
   const [endpoint, setEndpoint] = useState(native.endpoint),
-    [token, setToken] = useState(
-      profile.mode === "native" ? workspace.token : "",
-    );
+    [token, setToken] = useState(""),
+    [remember, setRemember] = useState(false);
+  const [authenticationFailed, setAuthenticationFailed] = useState(false);
+  const rejected = !!workspace.snapshot.authenticationFailed;
+  if (authenticationFailed !== rejected) {
+    setAuthenticationFailed(rejected);
+    if (rejected) setToken("");
+  }
   const [testing, setTesting] = useState(false),
     [message, setMessage] = useState<string | { version: string; api: number }>(
       "",
@@ -33,6 +41,9 @@ export function ConnectionForm() {
     request.current?.abort();
     setTesting(false);
     setMessage("");
+    if (testing) return;
+    setToken("");
+    setRemember(false);
     workspace.disconnect();
   }
   function validate() {
@@ -50,6 +61,7 @@ export function ConnectionForm() {
           tls: clean.startsWith("https:"),
         },
         token,
+        remember,
       );
     } catch (error) {
       setInvalid(true);
@@ -91,6 +103,7 @@ export function ConnectionForm() {
   }
   const busy =
     testing ||
+    workspace.restoring ||
     ["connecting", "reconnecting"].includes(workspace.snapshot.phase);
   return (
     <form onSubmit={save}>
@@ -118,19 +131,34 @@ export function ConnectionForm() {
           <Input
             id="token"
             type="password"
-            value={token}
+            value={busy ? "" : token}
             autoComplete="off"
             spellCheck={false}
             onChange={(e) => setToken(e.target.value)}
             disabled={busy}
-            placeholder={t("Held in memory only")}
           />
-          <FieldDescription>
-            {t(
-              "Never stored in localStorage, URLs or build artifacts. Re-enter after a reload.",
-            )}
-          </FieldDescription>
         </Field>
+        {canRememberConnection() && (
+          <Field orientation="horizontal">
+            <Switch
+              id="remember-connection"
+              checked={remember}
+              onCheckedChange={setRemember}
+              disabled={busy}
+              aria-describedby="remember-connection-description"
+            />
+            <FieldContent>
+              <FieldLabel htmlFor="remember-connection">
+                {t("Remember this device")}
+              </FieldLabel>
+              <FieldDescription id="remember-connection-description">
+                {t(
+                  "Reconnect automatically. Only enable on trusted devices and websites. Pages on this site can access the saved token.",
+                )}
+              </FieldDescription>
+            </FieldContent>
+          </Field>
+        )}
         <div className="security-note">
           <ShieldCheck />
           <p>
@@ -155,9 +183,9 @@ export function ConnectionForm() {
             {t(busy ? "Connecting…" : "Connect")}
           </Button>
         </div>
-        {busy && (
+        {(busy || workspace.restoredConnection) && (
           <Button type="button" variant="ghost" onClick={cancel}>
-            {t("Cancel connection")}
+            {t(busy ? "Cancel connection" : "Forget saved connection")}
           </Button>
         )}
         {workspace.snapshot.error && (

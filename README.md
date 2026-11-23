@@ -6,7 +6,7 @@ A web dashboard for **sing-box 1.14.0+ / native Service API 4**. Connect directl
 
 - Live traffic, proxy groups, connections and ANSI-colored logs.
 - Independent group/node card layouts; connection status and outbound filters.
-- English/简体中文 and light/dark/system themes. API tokens stay in memory.
+- English/简体中文 and light/dark/system themes. On a trusted device, choose **Remember this device** to reconnect when you reopen SingDeck in the same browser.
 
 ## Run locally
 

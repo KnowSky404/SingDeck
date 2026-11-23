@@ -31,6 +31,7 @@ export type Channel = "service" | "status" | "groups" | "logs" | "connections";
 export interface Snapshot {
   phase: "disconnected" | "connecting" | "connected" | "reconnecting" | "error";
   error?: string;
+  authenticationFailed?: boolean;
   version?: Version;
   service?: ServiceStatus;
   status?: Status;
