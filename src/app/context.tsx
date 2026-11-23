@@ -18,6 +18,7 @@ export interface Workspace {
   saveProfile: (profile: Profile, token: string, remember: boolean) => void;
   connect: () => void;
   disconnect: () => void;
+  forgetSavedConnection: () => void;
   token: string;
   restoring: boolean;
   disconnecting: boolean;

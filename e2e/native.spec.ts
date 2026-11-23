@@ -1,9 +1,22 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+
+function holdConnectionLock(page: Page, key: string) {
+  return page.evaluateHandle(
+    (key) =>
+      new Promise<() => void>((acquired) => {
+        void navigator.locks.request(
+          key,
+          () => new Promise<void>((release) => acquired(release)),
+        );
+      }),
+    key,
+  );
+}
 
 test.use({ trace: "off" });
 
@@ -144,23 +157,37 @@ test("browser uses the official native service through CORS and built-in dashboa
 
     const logsUrl = "http://127.0.0.1:19190/dashboard/#/logs";
     const profilesKey = "singdeck.profiles.v1";
-    const originalProfiles = await page.evaluate((key) => {
-      const original = localStorage.getItem(key)!;
-      const profiles = JSON.parse(original);
-      const duplicate = { ...profiles[0], endpoint: "http://127.0.0.1:19999" };
-      localStorage.setItem(key, JSON.stringify([duplicate, ...profiles]));
-      return original;
-    }, profilesKey);
-    await page.reload();
-    await expect(
-      page.getByRole("button", { name: "Connect", exact: true }),
-    ).toBeEnabled();
-    await expect(page.getByLabel("Bearer token", { exact: true })).toHaveValue(
-      "",
+    const originalProfiles = await page.evaluate(
+      (key) => localStorage.getItem(key)!,
+      profilesKey,
     );
+    const endpointChange = await context.newPage();
+    await endpointChange.addInitScript((key) => {
+      const decrypt = crypto.subtle.decrypt.bind(crypto.subtle);
+      crypto.subtle.decrypt = (...args) => {
+        const profiles = JSON.parse(localStorage.getItem(key)!);
+        const duplicate = {
+          ...profiles[0],
+          endpoint: "http://127.0.0.1:19999",
+        };
+        localStorage.setItem(key, JSON.stringify([duplicate, ...profiles]));
+        return decrypt(...args);
+      };
+    }, profilesKey);
+    await endpointChange.goto(logsUrl);
     await expect(
-      page.getByRole("button", { name: "Forget saved connection" }),
+      endpointChange.getByRole("button", { name: "Connect", exact: true }),
+    ).toBeEnabled();
+    await expect(
+      endpointChange.getByLabel("API endpoint", { exact: true }),
+    ).toHaveValue("http://127.0.0.1:19999");
+    await expect(
+      endpointChange.getByLabel("Bearer token", { exact: true }),
+    ).toHaveValue("");
+    await expect(
+      endpointChange.getByRole("button", { name: "Forget saved connection" }),
     ).toBeVisible();
+    await endpointChange.close();
     await page.evaluate(
       ([key, original]) => localStorage.setItem(key, original),
       [profilesKey, originalProfiles],
@@ -256,16 +283,7 @@ test("browser uses the official native service through CORS and built-in dashboa
         throw new DOMException("Cleanup interrupted", "AbortError");
       };
     });
-    const unlock = await reopened.evaluateHandle(
-      (key) =>
-        new Promise<() => void>((acquired) => {
-          void navigator.locks.request(
-            key,
-            () => new Promise<void>((release) => acquired(release)),
-          );
-        }),
-      markerKey,
-    );
+    const unlock = await holdConnectionLock(reopened, markerKey);
     await reopened
       .getByRole("button", { name: "Current connection", exact: true })
       .click();
@@ -370,7 +388,23 @@ test("browser uses the official native service through CORS and built-in dashboa
       reopened.getByRole("heading", { name: "Logs", exact: true }),
     ).toBeVisible();
     await expect(reopened.getByText("Saving this connection…")).toHaveCount(0);
-    await reopened.route(versionRpc, (route) => route.fulfill({ status: 401 }));
+    const rejectedId = await reopened.evaluate(
+      (key) => localStorage.getItem(key)!.slice(1),
+      markerKey,
+    );
+    const lockPeer = await context.newPage();
+    await lockPeer.goto(
+      "http://127.0.0.1:19190/dashboard/third-party-licenses.txt",
+    );
+    let releaseRejection!: () => Promise<void>;
+    await reopened.route(versionRpc, async (route) => {
+      const lock = await holdConnectionLock(lockPeer, markerKey);
+      releaseRejection = async () => {
+        await lock.evaluate((release) => release());
+        await lock.dispose();
+      };
+      await route.fulfill({ status: 401 });
+    });
     await reopened.reload();
     await expect(reopened.getByText(/^Authentication failed/)).toBeVisible();
     await expect(tokenInput).toHaveValue("");
@@ -380,6 +414,14 @@ test("browser uses the official native service through CORS and built-in dashboa
       reopened.getByRole("button", { name: "Connect", exact: true }),
     ).toBeEnabled();
     await expect(reopened.getByRole("navigation")).toHaveCount(0);
+    expect(
+      await reopened.evaluate(
+        (key) => localStorage.getItem(key),
+        `${markerKey}.rejected.${rejectedId}`,
+      ),
+    ).toBe("1");
+    await releaseRejection();
+    await lockPeer.close();
 
     let resume!: () => void;
     const resumeOlderConnection = new Promise<void>((resolve) => {
@@ -406,10 +448,12 @@ test("browser uses the official native service through CORS and built-in dashboa
       .toBe("?");
     const newer = await context.newPage();
     await newer.addInitScript(() => {
+      let startupReads = 0;
       const open = indexedDB.open.bind(indexedDB);
       indexedDB.open = (name, version) => {
         const request = open(name, version);
-        Object.defineProperty(request, "onsuccess", { set() {} });
+        if (startupReads++ < 2)
+          Object.defineProperty(request, "onsuccess", { set() {} });
         return request;
       };
     });
@@ -421,6 +465,19 @@ test("browser uses the official native service through CORS and built-in dashboa
     expect(
       await newer.evaluate((key) => localStorage.getItem(key)?.[0], markerKey),
     ).toBe("?");
+    await newer.reload();
+    await newer
+      .getByRole("button", { name: "Forget saved connection" })
+      .click();
+    await expect(
+      newer.getByRole("button", { name: "Connect", exact: true }),
+    ).toBeEnabled();
+    expect(
+      await newer.evaluate(
+        (key) => localStorage.getItem(key)?.[0] ?? "",
+        markerKey,
+      ),
+    ).not.toMatch(/[+?]/);
     await newer.getByLabel("Bearer token", { exact: true }).fill(secret);
     await newer.getByRole("button", { name: "Connect", exact: true }).click();
     await expect(
