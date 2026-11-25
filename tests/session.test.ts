@@ -394,4 +394,49 @@ describe("session lifecycle", () => {
     ])).rejects.toMatchObject({ code: Code.PermissionDenied });
     expect(uRLTest).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    { history: 1n, refresh: false, calls: 2 },
+    { history: 1n, refresh: true, calls: 1 },
+    { history: 0n, refresh: false, calls: 1 },
+  ])(
+    "makes $calls automatic group requests with history $history and refresh $refresh",
+    async ({ history, refresh, calls }) => {
+      vi.useFakeTimers();
+      const client = createMockClient();
+      const uRLTest = vi.fn(client.uRLTest);
+      const groups = (urlTestDelay: number) =>
+        create(GroupsSchema, {
+          group: [
+            {
+              tag: "Auto route",
+              type: "urltest",
+              items: [{ tag: "London 01", urlTestTime: history, urlTestDelay }],
+            },
+          ],
+        });
+      const s = new InstanceSession(
+        {
+          ...client,
+          uRLTest,
+          async *subscribeGroups(_, options) {
+            yield groups(history ? 20 : 0);
+            if (refresh) {
+              await delay(1000, options!.signal!);
+              yield groups(21);
+            }
+            await delay(60_000, options!.signal!);
+          },
+        },
+        { ...mockProfile, mode: "native" },
+      );
+      sessions.push(s);
+      s.connect();
+      await vi.advanceTimersByTimeAsync(300);
+      const run = s.testLatencies([{ tags: ["Auto route"], windows: 1 }]);
+      await vi.advanceTimersByTimeAsync(32_000);
+      await run;
+      expect(uRLTest).toHaveBeenCalledTimes(calls);
+    },
+  );
 });

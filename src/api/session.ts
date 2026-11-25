@@ -1,5 +1,9 @@
 import { Code, ConnectError } from "@connectrpc/connect";
-import { ServiceStatus_Type } from "@/proto/daemon/started_service_pb";
+import {
+  ServiceStatus_Type,
+  type Group,
+  type GroupItem,
+} from "@/proto/daemon/started_service_pb";
 import type { SingBoxClient } from "./client";
 import { canRetry, delay, describeError } from "./errors";
 import {
@@ -28,6 +32,33 @@ function probeMayHaveStarted(error: unknown) {
     code === Code.Unknown ||
     code === Code.Internal
   );
+}
+
+function hasStaleProbeHistory(
+  group: Group,
+  before: ReadonlyMap<string, Group>,
+  after: ReadonlyMap<string, GroupItem>,
+) {
+  const pending = new Map(group.items.map((item) => [item.tag, item]));
+  let hadHistory = false;
+  for (const [tag, item] of pending) {
+    const nested = before.get(tag);
+    if (nested) {
+      for (const child of nested.items) {
+        if (!pending.has(child.tag)) pending.set(child.tag, child);
+      }
+    } else {
+      const current = after.get(tag);
+      if (!current) continue;
+      if (
+        current.urlTestTime !== item.urlTestTime ||
+        current.urlTestDelay !== item.urlTestDelay
+      )
+        return false;
+      hadHistory ||= item.urlTestTime !== 0n;
+    }
+  }
+  return hadHistory;
 }
 
 export class InstanceSession {
@@ -483,7 +514,8 @@ export class InstanceSession {
     cooldown: AbortSignal,
   ) {
     let failure: PromiseRejectedResult | undefined;
-    for (const { tags, windows } of waves) {
+    const native = this.profile.mode === "native";
+    const dispatch = async (tags: string[], windows: number) => {
       signal.throwIfAborted();
       const results = await Promise.allSettled(
         tags.map((tag) => this.urlTest(tag, signal)),
@@ -497,13 +529,40 @@ export class InstanceSession {
       failure ??= results.find((result) => result.status === "rejected");
       // Stream recovery cancels queued waves but the daemon still owns dispatched probes.
       if (
-        this.profile.mode === "native" &&
+        native &&
         results.some((result) =>
           result.status === "fulfilled" || probeMayHaveStarted(result.reason),
         )
       )
         await delay(probeWindowMs * windows, cooldown);
       if (blocked) throw blocked.reason;
+      return results;
+    };
+    for (const { tags, windows } of waves) {
+      const before = native ? this.pending.groups : undefined;
+      const results = await dispatch(tags, windows);
+      if (!before) continue;
+      const beforeByTag = new Map(before.map((group) => [group.tag, group]));
+      const currentGroups = this.pending.groups ?? [];
+      const currentAutomatic = new Set(
+        currentGroups
+          .filter((group) => group.type === "urltest")
+          .map((group) => group.tag),
+      );
+      const currentItems = new Map(
+        currentGroups.flatMap(({ items }) => items.map((item) => [item.tag, item])),
+      );
+      const retry = tags.filter((tag, index) => {
+        const group = beforeByTag.get(tag);
+        return (
+          results[index].status === "fulfilled" &&
+          group?.type === "urltest" &&
+          currentAutomatic.has(tag) &&
+          hasStaleProbeHistory(group, beforeByTag, currentItems)
+        );
+      });
+      // shortcut: retry unchanged existing history once until the API reports per-probe completion.
+      if (retry.length) await dispatch(retry, windows);
     }
     signal.throwIfAborted();
     if (failure) throw failure.reason;
