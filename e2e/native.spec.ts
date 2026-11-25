@@ -1,7 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 
@@ -28,25 +29,43 @@ test("browser uses the official native service through CORS and built-in dashboa
     !process.env.SING_BOX_BINARY || info.project.name !== "desktop",
     "Requires the official sing-box binary and a production build; desktop integration fixture.",
   );
-  test.setTimeout(90_000);
+  test.setTimeout(120_000);
   const directory = await mkdtemp(`${tmpdir()}/singdeck-browser-`);
   const secret = randomBytes(24).toString("hex");
-  const config = JSON.parse(
-    await readFile("examples/sing-box-1.14.0.json", "utf8"),
-  );
-  config.services[0].secret = secret;
-  config.services[0].listen_port = 19190;
-  config.services[0].dashboard.path = resolve("dist");
-  config.inbounds[0].listen_port = 19180;
-  await writeFile(`${directory}/config.json`, JSON.stringify(config), {
-    mode: 0o600,
+  const probe = createServer((_request, response) => {
+    response.writeHead(204).end();
   });
-  const child = spawn(
-    process.env.SING_BOX_BINARY!,
-    ["run", "-c", `${directory}/config.json`],
-    { stdio: "ignore" },
-  );
+  let child: ChildProcess | undefined;
   try {
+    await new Promise<void>((listening, reject) => {
+      probe.once("error", reject);
+      probe.listen(0, "127.0.0.1", listening);
+    });
+    const address = probe.address();
+    if (!address || typeof address === "string")
+      throw new Error("Missing probe fixture address");
+    const config = JSON.parse(
+      await readFile("examples/sing-box-1.14.0.json", "utf8"),
+    );
+    config.outbounds.push({
+      type: "urltest",
+      tag: "Auto route",
+      outbounds: ["direct", "direct-backup"],
+      url: `http://127.0.0.1:${address.port}/probe`,
+      interval: "10m",
+    });
+    config.services[0].secret = secret;
+    config.services[0].listen_port = 19190;
+    config.services[0].dashboard.path = resolve("dist");
+    config.inbounds[0].listen_port = 19180;
+    await writeFile(`${directory}/config.json`, JSON.stringify(config), {
+      mode: 0o600,
+    });
+    child = spawn(
+      process.env.SING_BOX_BINARY!,
+      ["run", "-c", `${directory}/config.json`],
+      { stdio: "ignore" },
+    );
     await expect
       .poll(async () => {
         try {
@@ -111,7 +130,7 @@ test("browser uses the official native service through CORS and built-in dashboa
       });
       document.dispatchEvent(new Event("visibilitychange"));
     });
-    await expect(testAll).toBeEnabled({ timeout: 25_000 });
+    await expect(testAll).toBeEnabled({ timeout: 40_000 });
     await expect(toast).toBeHidden();
     await overviewLink.click();
     await expect(overviewLink).toHaveAttribute("aria-current", "page");
@@ -151,7 +170,7 @@ test("browser uses the official native service through CORS and built-in dashboa
     const closeDetails = details.getByRole("button", { name: "Close", exact: true });
     await openDetails.click();
     await expect(details).toBeVisible();
-    await expect(testAll).toBeEnabled({ timeout: 25_000 });
+    await expect(testAll).toBeEnabled({ timeout: 40_000 });
     await expect(toast).toBeHidden();
     await closeDetails.click();
     await expect(toast).toBeVisible();
@@ -777,11 +796,14 @@ test("browser uses the official native service through CORS and built-in dashboa
         })
         .catch(() => {});
     }
-    if (child.exitCode === null) {
-      const exited = new Promise<void>((r) => child.once("exit", () => r()));
+    if (child?.pid !== undefined && child.exitCode === null) {
+      const daemon = child;
+      const exited = new Promise<void>((r) => daemon.once("exit", () => r()));
       child.kill();
       await exited;
     }
+    probe.closeAllConnections();
+    await new Promise<void>((closed) => probe.close(() => closed()));
     await rm(directory, { recursive: true, force: true });
   }
 });
