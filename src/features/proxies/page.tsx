@@ -477,7 +477,7 @@ export default function Proxies() {
             }
             onClick={() =>
               void session
-                .testLatencies(latencyTestWaves(groupsByTag))
+                .testLatencies(latencyTestWaves(groupsByTag), groups)
                 .catch(() => undefined)
             }
           >

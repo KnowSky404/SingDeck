@@ -401,6 +401,7 @@ describe("session lifecycle", () => {
     { history: 1n, update: "none", calls: 2 },
     { history: 1n, update: "latency", calls: 1 },
     { history: 1n, update: "members", calls: 1 },
+    { history: 1n, update: "mixed", calls: 1 },
     { history: 0n, update: "none", calls: 1 },
   ])(
     "makes $calls automatic group requests with history $history and update $update",
@@ -426,8 +427,8 @@ describe("session lifecycle", () => {
           ...client,
           uRLTest,
           async *subscribeGroups(_, options) {
-            yield groups(history ? 20 : 0);
-            if (update !== "none") {
+            yield groups(history ? 20 : 0, update === "mixed");
+            if (update === "latency" || update === "members") {
               await delay(1000, options!.signal!);
               yield groups(update === "latency" ? 21 : 20, update === "members");
             }
@@ -439,9 +440,14 @@ describe("session lifecycle", () => {
       sessions.push(s);
       s.connect();
       await vi.advanceTimersByTimeAsync(300);
-      const run = s.testLatencies([{ tags: ["Auto route"], windows: 1 }]);
+      const waves = [{ tags: ["Auto route"], windows: 1 }];
+      if (update === "members") waves.push({ tags: ["Auto route"], windows: 1 });
+      const run = s.testLatencies(waves);
+      const outcome = update === "members"
+        ? expect(run).rejects.toMatchObject({ code: Code.Canceled })
+        : run;
       await vi.advanceTimersByTimeAsync(32_000);
-      await run;
+      await outcome;
       expect(uRLTest).toHaveBeenCalledTimes(calls);
     },
   );
