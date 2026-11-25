@@ -409,7 +409,7 @@ nav a svg {
   z-index: 40;
 }
 .latency-toast {
-  --latency-toast-margin: clamp(4px, calc(var(--latency-viewport-width, 100vw) / 10 - 6px), 16px);
+  --latency-toast-margin: 16px;
   position: fixed;
   right: calc(
     var(--latency-viewport-right, 0px) + var(--latency-toast-margin) +
@@ -429,8 +429,7 @@ nav a svg {
   line-height: 1.5;
   overflow-wrap: anywhere;
 }
-.latency-toast:not([data-visible]),
-body:has(> [data-slot="dialog-content"]) .latency-toast-viewport {
+.latency-toast:not([data-visible]) {
   visibility: hidden;
 }
 main {

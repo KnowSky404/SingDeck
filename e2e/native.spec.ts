@@ -162,6 +162,7 @@ test("browser uses the official native service through CORS and built-in dashboa
     expect((await grid.boundingBox())!.y).toBe(gridTop);
     const desktop = page.viewportSize()!;
     await page.setViewportSize({ width: 390, height: 720 });
+    await page.locator("#main-content").focus();
     await expect(toast).toBeInViewport({ ratio: 1 });
     const navigation = (await page.locator(".mobile-bottom").boundingBox())!;
     const popup = (await toast.boundingBox())!;
@@ -234,7 +235,28 @@ test("browser uses the official native service through CORS and built-in dashboa
     await expect(toast).toBeHidden();
     await closeDetails.click();
     await expect(toast).toBeVisible();
+    await page.getByRole("button", { name: "Current connection", exact: true }).click();
+    await expect(page.getByRole("menu")).toBeVisible();
+    await expect(toast).toBeHidden();
+    await page.keyboard.press("Escape");
+    await expect(toast).toBeVisible();
     await page.setViewportSize({ width: 390, height: 720 });
+    await page
+      .getByRole("navigation", { name: "Mobile navigation" })
+      .getByRole("link", { name: "Settings", exact: true })
+      .focus();
+    const tooltip = page.locator('[data-slot="tooltip-content"]').filter({
+      hasText: "Instance and dashboard information.",
+    });
+    await expect(tooltip).toBeVisible();
+    await expect.poll(async () => {
+      const popup = (await toast.boundingBox())!;
+      const hint = (await tooltip.boundingBox())!;
+      return popup.y + popup.height <= hint.y || popup.x + popup.width <= hint.x;
+    }).toBe(true);
+    await expect(toast).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(tooltip).toBeHidden();
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
     const selectDirect = page.getByRole("button", { name: "Select direct", exact: true });
     const control = (await selectDirect.boundingBox())!;
