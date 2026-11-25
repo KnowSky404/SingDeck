@@ -19,6 +19,17 @@ function holdConnectionLock(page: Page, key: string) {
   );
 }
 
+function simulateVisualViewport(page: Page, height: number, offsetTop: number) {
+  return page.evaluate(({ height, offsetTop }) => {
+    const viewport = window.visualViewport!;
+    Object.defineProperties(viewport, {
+      height: { configurable: true, value: height },
+      offsetTop: { configurable: true, value: offsetTop },
+    });
+    viewport.dispatchEvent(new Event("resize"));
+  }, { height, offsetTop });
+}
+
 test.use({ trace: "off" });
 
 test("browser uses the official native service through CORS and built-in dashboard hosting", async ({
@@ -152,6 +163,23 @@ test("browser uses the official native service through CORS and built-in dashboa
     const navigation = (await page.locator(".mobile-bottom").boundingBox())!;
     const popup = (await toast.boundingBox())!;
     expect(popup.y + popup.height).toBeLessThan(navigation.y);
+    await simulateVisualViewport(page, 350, 95);
+    await expect(toast).toHaveCSS("bottom", "219px");
+    const raisedPopup = (await toast.boundingBox())!;
+    expect(raisedPopup.y).toBeGreaterThan(95);
+    expect(raisedPopup.y + raisedPopup.height).toBeLessThan(445);
+    await page.setViewportSize({ width: 844, height: 390 });
+    await simulateVisualViewport(page, 210, 42);
+    await expect(toast).toHaveCSS("bottom", "138px");
+    const landscapePopup = (await toast.boundingBox())!;
+    expect(landscapePopup.y).toBeGreaterThan(42);
+    expect(landscapePopup.y + landscapePopup.height).toBeLessThan(252);
+    await page.evaluate(() => {
+      const viewport = window.visualViewport!;
+      Reflect.deleteProperty(viewport, "height");
+      Reflect.deleteProperty(viewport, "offsetTop");
+      viewport.dispatchEvent(new Event("resize"));
+    });
     await page.setViewportSize(desktop);
     await testAll.focus();
     await expect(testAll).toBeFocused();

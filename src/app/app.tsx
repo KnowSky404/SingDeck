@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import {
@@ -99,7 +100,23 @@ const subscribeToastVisibility = (listener: () => void) => {
   };
 };
 const canDisplayToast = () =>
-  !document.hidden && !document.querySelector('body > [data-slot="dialog-content"]');
+  !document.hidden &&
+  !document.querySelector('body > [data-slot="dialog-content"]');
+const subscribeVisualViewport = (listener: () => void) => {
+  const viewport = window.visualViewport;
+  viewport?.addEventListener("resize", listener);
+  viewport?.addEventListener("scroll", listener);
+  return () => {
+    viewport?.removeEventListener("resize", listener);
+    viewport?.removeEventListener("scroll", listener);
+  };
+};
+const visualViewportBottomInset = () => {
+  const viewport = window.visualViewport;
+  return viewport
+    ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
+    : 0;
+};
 const phaseLabels = {
   disconnected: "Disconnected",
   connecting: "Connecting",
@@ -150,7 +167,14 @@ function LatencyToast({
   message: string;
   onProxies: boolean;
 }) {
-  const visible = useSyncExternalStore(subscribeToastVisibility, canDisplayToast);
+  const visible = useSyncExternalStore(
+    subscribeToastVisibility,
+    canDisplayToast,
+  );
+  const viewportInset = useSyncExternalStore(
+    subscribeVisualViewport,
+    visualViewportBottomInset,
+  );
   const [phase, setPhase] = useState<"pending" | "shown" | "closed">("pending");
   const remaining = useRef(4000);
   const canShow = onProxies && visible;
@@ -170,7 +194,12 @@ function LatencyToast({
     };
   }, [show, visible]);
   return show ? (
-    <div className="latency-toast shadow-md">{message}</div>
+    <div
+      className="latency-toast shadow-md"
+      style={{ "--latency-viewport-inset": `${viewportInset}px` } as CSSProperties}
+    >
+      {message}
+    </div>
   ) : null;
 }
 export default function App() {
