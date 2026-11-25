@@ -402,6 +402,28 @@ nav a svg {
 .mobile-bottom {
   display: none;
 }
+.latency-toast-viewport {
+  position: fixed;
+  pointer-events: none;
+  inset-inline-end: 16px;
+  bottom: 16px;
+  z-index: 40;
+  width: min(360px, calc(100vw - 32px));
+}
+.latency-toast {
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.app-shell:has(.latency-toast) main :focus-visible:not(.proxy-row *),
+.app-shell:has(.latency-toast) .proxy-row:has(:focus-visible) {
+  position: relative;
+  z-index: 41;
+}
 main {
   padding: 30px 32px 0;
   max-width: 1600px;
@@ -1427,6 +1449,15 @@ h3 {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
     gap: 3px;
+  }
+  .latency-toast-viewport {
+    bottom: calc(4.5rem + env(safe-area-inset-bottom));
+  }
+  html:has(.latency-toast) {
+    scroll-padding-bottom: calc(4.5rem + env(safe-area-inset-bottom));
+  }
+  .app-shell:has(.latency-toast) .mobile-bottom {
+    z-index: 42;
   }
   .mobile-bottom nav a {
     padding: 7px 2px;

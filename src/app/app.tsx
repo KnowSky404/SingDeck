@@ -3,6 +3,7 @@ import {
   Suspense,
   lazy,
   useEffect,
+  useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
@@ -88,6 +89,17 @@ const subscribeHash = (listener: () => void) => {
   return () => removeEventListener("hashchange", listener);
 };
 const currentPath = () => location.hash.slice(1) || "/";
+const subscribeToastVisibility = (listener: () => void) => {
+  const dialogs = new MutationObserver(listener);
+  dialogs.observe(document.body, { childList: true });
+  document.addEventListener("visibilitychange", listener);
+  return () => {
+    dialogs.disconnect();
+    document.removeEventListener("visibilitychange", listener);
+  };
+};
+const canDisplayToast = () =>
+  !document.hidden && !document.querySelector('body > [data-slot="dialog-content"]');
 const phaseLabels = {
   disconnected: "Disconnected",
   connecting: "Connecting",
@@ -130,6 +142,36 @@ function Navigation({
       </nav>
     </TooltipProvider>
   );
+}
+function LatencyToast({
+  message,
+  onProxies,
+}: {
+  message: string;
+  onProxies: boolean;
+}) {
+  const visible = useSyncExternalStore(subscribeToastVisibility, canDisplayToast);
+  const [phase, setPhase] = useState<"pending" | "shown" | "closed">("pending");
+  const remaining = useRef(4000);
+  const canShow = onProxies && visible;
+  if (phase === "pending" && canShow) setPhase("shown");
+  else if (phase === "shown" && !onProxies) setPhase("closed");
+  const show = onProxies && phase === "shown";
+  useEffect(() => {
+    if (!show || !visible) return;
+    const startedAt = performance.now();
+    const timer = window.setTimeout(() => setPhase("closed"), remaining.current);
+    return () => {
+      window.clearTimeout(timer);
+      remaining.current = Math.max(
+        0,
+        remaining.current - (performance.now() - startedAt),
+      );
+    };
+  }, [show, visible]);
+  return show ? (
+    <div className="latency-toast shadow-md">{message}</div>
+  ) : null;
 }
 export default function App() {
   const {
@@ -318,6 +360,16 @@ export default function App() {
       </div>
       <div className="mobile-bottom">
         <Navigation path={path} mobile />
+      </div>
+      <div className="latency-toast-viewport" role="status" aria-live="polite">
+        {snapshot.latencyTestSent && (
+          <LatencyToast
+            onProxies={path === "/proxies"}
+            message={t(
+              "Test requests sent. A fresh result for each node could not be confirmed.",
+            )}
+          />
+        )}
       </div>
       <Dialog open={menu} onOpenChange={setMenu}>
         <DialogContent closeLabel={t("Close")} className="navigation-dialog">

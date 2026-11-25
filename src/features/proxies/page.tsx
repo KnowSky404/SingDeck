@@ -511,11 +511,6 @@ export default function Proxies() {
       {snapshot.latencyTestError && (
         <Notice title={t("Test failed")}>{t(snapshot.latencyTestError)}</Notice>
       )}
-      {snapshot.latencyTestSent && (
-        <p className="quiet-empty" role="status">
-          {t("Test requests sent. A fresh result for each node could not be confirmed.")}
-        </p>
-      )}
       <ChannelState channel="groups" empty={snapshot.groups?.length === 0}>
         <div
           className={
