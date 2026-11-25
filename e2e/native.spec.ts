@@ -28,7 +28,7 @@ test("browser uses the official native service through CORS and built-in dashboa
     !process.env.SING_BOX_BINARY || info.project.name !== "desktop",
     "Requires the official sing-box binary and a production build; desktop integration fixture.",
   );
-  test.setTimeout(45_000);
+  test.setTimeout(90_000);
   const directory = await mkdtemp(`${tmpdir()}/singdeck-browser-`);
   const secret = randomBytes(24).toString("hex");
   const config = JSON.parse(
@@ -73,10 +73,13 @@ test("browser uses the official native service through CORS and built-in dashboa
       page.getByRole("status").filter({ hasText: /^Connected$/ }),
     ).toBeVisible();
     await expect(page.getByText("Mock mode", { exact: true })).toHaveCount(0);
-    await page
+    const overviewLink = page
+      .getByRole("link", { name: "Overview", exact: true })
+      .first();
+    const proxiesLink = page
       .getByRole("link", { name: "Proxies", exact: true })
-      .first()
-      .click();
+      .first();
+    await proxiesLink.click();
     await page
       .getByRole("button", { name: "Expand Primary route", exact: true })
       .click();
@@ -92,6 +95,68 @@ test("browser uses the official native service through CORS and built-in dashboa
         exact: true,
       }),
     ).toBeVisible();
+    const grid = page.locator(".proxy-group-grid");
+    const gridTop = (await grid.boundingBox())!.y;
+    const testAll = page.getByRole("button", {
+      name: "Test all groups",
+      exact: true,
+      includeHidden: true,
+    });
+    await testAll.click();
+    const toast = page.locator(".latency-toast");
+    await page.evaluate(() => {
+      Object.defineProperty(document, "hidden", {
+        configurable: true,
+        value: true,
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await expect(testAll).toBeEnabled({ timeout: 25_000 });
+    await expect(toast).toBeHidden();
+    await overviewLink.click();
+    await expect(overviewLink).toHaveAttribute("aria-current", "page");
+    await page.evaluate(() => {
+      Reflect.deleteProperty(document, "hidden");
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await expect(toast).toBeHidden();
+    await proxiesLink.click();
+    await expect(toast).toContainText("Test requests sent.", { timeout: 25_000 });
+    await expect(page.locator(".latency-toast-viewport")).toHaveCSS(
+      "position",
+      "fixed",
+    );
+    expect((await grid.boundingBox())!.y).toBe(gridTop);
+    const desktop = page.viewportSize()!;
+    await page.setViewportSize({ width: 390, height: 720 });
+    await expect(toast).toBeInViewport({ ratio: 1 });
+    const navigation = (await page.locator(".mobile-bottom").boundingBox())!;
+    const popup = (await toast.boundingBox())!;
+    expect(popup.y + popup.height).toBeLessThan(navigation.y);
+    await page.setViewportSize(desktop);
+    await testAll.focus();
+    await expect(testAll).toBeFocused();
+    await expect(toast).toBeHidden({ timeout: 6500 });
+    expect((await grid.boundingBox())!.y).toBe(gridTop);
+    await expect(testAll).toBeFocused();
+    await page
+      .getByRole("button", { name: "Expand Primary route", exact: true })
+      .click();
+    await testAll.click();
+    await backup
+      .getByRole("button", { name: "Node details for direct-backup", exact: true })
+      .click();
+    const details = page.getByRole("dialog", { name: "direct-backup" });
+    await expect(details).toBeVisible();
+    await expect(testAll).toBeEnabled({ timeout: 25_000 });
+    await expect(toast).toBeHidden();
+    await details.getByRole("button", { name: "Close", exact: true }).click();
+    await expect(toast).toBeVisible();
+    await overviewLink.click();
+    await expect(toast).toBeHidden({ timeout: 1000 });
+    await proxiesLink.click();
+    await expect(grid).toBeVisible();
+    await expect(toast).toBeHidden();
     await page.goto("http://127.0.0.1:19190/dashboard/#/settings");
     await expect(
       page.getByRole("heading", { name: "Connect your network.", exact: true }),
