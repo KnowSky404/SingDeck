@@ -9,6 +9,7 @@ import {
 import {
   ConnectionSchema,
   GroupItemSchema,
+  GroupSchema,
   ConnectionEventsSchema,
   ConnectionEventType,
   LogSchema,
@@ -16,7 +17,7 @@ import {
 } from "@/proto/daemon/started_service_pb";
 import { loadProfiles, saveProfiles } from "@/features/instances/profiles";
 
-import { latency } from "@/features/proxies/latency";
+import { latency, latencyTestWaves } from "@/features/proxies/latency";
 
 const batch = (
   events: Parameters<typeof create<typeof ConnectionEventsSchema>>[1],
@@ -34,6 +35,38 @@ describe("native state semantics", () => {
       latency(create(GroupItemSchema, { urlTestTime: 1n, urlTestDelay: -1 })),
     ).toBe("Invalid result");
   });
+
+  it("paces overlapping groups and runs configured tests after default tests", () => {
+    const group = (tag: string, type: string, items: string[]) =>
+      create(GroupSchema, { tag, type, items: items.map((tag) => ({ tag })) });
+    const groups = [
+      group("primary", "selector", ["shared", "auto", "primary-only"]),
+      group("auto", "urltest", ["shared", "auto-only"]),
+      group("second-auto", "urltest", ["shared", "second-only"]),
+      group("nested-parent", "urltest", ["nested-child"]),
+      group(
+        "nested-child",
+        "urltest",
+        Array.from({ length: 11 }, (_, index) => `nested-node-${index}`),
+      ),
+      group(
+        "disjoint",
+        "selector",
+        Array.from({ length: 10 }, (_, index) => `node-${index}`),
+      ),
+    ];
+    expect(
+      latencyTestWaves(new Map(groups.map((group) => [group.tag, group]))),
+    ).toEqual([
+      { tags: ["primary"], windows: 1 },
+      { tags: ["disjoint"], windows: 1 },
+      { tags: ["auto"], windows: 1 },
+      { tags: ["second-auto"], windows: 1 },
+      { tags: ["nested-parent"], windows: 2 },
+      { tags: ["nested-child"], windows: 2 },
+    ]);
+  });
+
 
   it("resets connection snapshots, accumulates deltas and retains confirmed closed history", () => {
     let rows = applyConnections(

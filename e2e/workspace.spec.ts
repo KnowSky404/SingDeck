@@ -619,10 +619,28 @@ test("group cards and node cards are independent and settings stay read-only", a
     name: "Collapse all groups",
     exact: true,
   });
+  const testAll = page.getByRole("button", {
+    name: "Test all groups",
+    exact: true,
+  });
+  await expect(testAll).toBeInViewport({ ratio: 1 });
+  const testBox = (await testAll.boundingBox())!;
+  const expandBox = (await expandAll.boundingBox())!;
+  expect(testBox.y).toBe(expandBox.y);
+  expect(testBox.x + testBox.width).toBeLessThan(expandBox.x);
+  await testAll.press("Enter");
+  await expect(testAll).toBeEnabled();
+  await expect(rows).toHaveCount(0);
   await expect(expandAll.locator(".lucide-chevrons-up-down")).toBeVisible();
   await expect(collapseAll).toHaveCount(0);
   await expandAll.click();
   await expect(rows).toHaveCount(7);
+  await expect(
+    rows.filter({ hasText: "Direct" }).locator(".proxy-latency"),
+  ).toHaveText("67 ms");
+  await expect(
+    rows.filter({ hasText: "London 01" }).locator(".proxy-latency"),
+  ).toHaveText("88 ms");
   await expect(collapseAll.locator(".lucide-chevrons-down-up")).toBeVisible();
   await expect(expandAll).toHaveCount(0);
   await page.getByRole("button", { name: "Collapse Primary route" }).click();

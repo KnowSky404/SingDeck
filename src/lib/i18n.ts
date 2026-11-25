@@ -145,6 +145,7 @@ const zh: Record<string, string> = {
   "Expand {name}": "展开 {name}",
   "Expand all groups": "展开全部代理组",
   "Collapse all groups": "收起全部代理组",
+  "Test all groups": "一键测速",
   "Test group": "测试组",
   "Test {name}": "测试 {name}",
   "Test {name} in {group}": "测试 {group} 中的 {name}",
@@ -154,6 +155,8 @@ const zh: Record<string, string> = {
   "Confirming…": "确认中…",
   "Selection failed": "选择失败",
   "Test failed": "测试失败",
+  "Test requests sent. A fresh result for each node could not be confirmed.":
+    "测速请求已发送。各节点是否已返回新结果尚未确认。",
   "No outbounds match your filters.": "没有符合筛选条件的节点。",
   "No result": "无结果",
   "Invalid result": "无效结果",
