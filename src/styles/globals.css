@@ -419,6 +419,9 @@ nav a svg {
   font-size: 13px;
   line-height: 1.5;
 }
+body:has(> [data-slot="dialog-content"]) .latency-toast-viewport {
+  visibility: hidden;
+}
 .app-shell:has(.latency-toast) main :focus-visible:not(.proxy-row *),
 .app-shell:has(.latency-toast) .proxy-row:has(:focus-visible) {
   position: relative;
