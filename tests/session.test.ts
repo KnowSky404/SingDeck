@@ -10,6 +10,8 @@ import {
   GroupsSchema,
   VersionSchema,
   StatusSchema,
+  ServiceStatusSchema,
+  ServiceStatus_Type,
   LogSchema,
 } from "@/proto/daemon/started_service_pb";
 import { CONNECTION_LIMIT } from "@/api/state";
@@ -396,22 +398,26 @@ describe("session lifecycle", () => {
   });
 
   it.each([
-    { history: 1n, refresh: false, calls: 2 },
-    { history: 1n, refresh: true, calls: 1 },
-    { history: 0n, refresh: false, calls: 1 },
+    { history: 1n, update: "none", calls: 2 },
+    { history: 1n, update: "latency", calls: 1 },
+    { history: 1n, update: "members", calls: 1 },
+    { history: 0n, update: "none", calls: 1 },
   ])(
-    "makes $calls automatic group requests with history $history and refresh $refresh",
-    async ({ history, refresh, calls }) => {
+    "makes $calls automatic group requests with history $history and update $update",
+    async ({ history, update, calls }) => {
       vi.useFakeTimers();
       const client = createMockClient();
       const uRLTest = vi.fn(client.uRLTest);
-      const groups = (urlTestDelay: number) =>
+      const groups = (urlTestDelay: number, extra = false) =>
         create(GroupsSchema, {
           group: [
             {
               tag: "Auto route",
               type: "urltest",
-              items: [{ tag: "London 01", urlTestTime: history, urlTestDelay }],
+              items: [
+                { tag: "London 01", urlTestTime: history, urlTestDelay },
+                ...(extra ? [{ tag: "Tokyo 01" }] : []),
+              ],
             },
           ],
         });
@@ -421,9 +427,9 @@ describe("session lifecycle", () => {
           uRLTest,
           async *subscribeGroups(_, options) {
             yield groups(history ? 20 : 0);
-            if (refresh) {
+            if (update !== "none") {
               await delay(1000, options!.signal!);
-              yield groups(21);
+              yield groups(update === "latency" ? 21 : 20, update === "members");
             }
             await delay(60_000, options!.signal!);
           },
@@ -439,4 +445,45 @@ describe("session lifecycle", () => {
       expect(uRLTest).toHaveBeenCalledTimes(calls);
     },
   );
+
+  it("refreshes groups and cancels a manual probe after the service restarts", async () => {
+    vi.useFakeTimers();
+    let groupsStreams = 0;
+    const groups = (tag: string) => create(GroupsSchema, { group: [{ tag }] });
+    const client = createMockClient();
+    const s = session(undefined, {
+      ...client,
+      async *subscribeServiceStatus(_, options) {
+        const signal = options!.signal!;
+        yield create(ServiceStatusSchema, { status: ServiceStatus_Type.STARTED });
+        await delay(2000, signal);
+        yield create(ServiceStatusSchema, { status: ServiceStatus_Type.STOPPING });
+        await delay(100, signal);
+        yield create(ServiceStatusSchema, { status: ServiceStatus_Type.STARTED });
+        await delay(60_000, signal);
+      },
+      async *subscribeGroups(_, options) {
+        const signal = options!.signal!;
+        if (++groupsStreams === 1) {
+          yield groups("old");
+          await delay(1000, signal);
+        }
+        yield groups("fresh");
+        await delay(60_000, signal);
+      },
+      uRLTest: async (_, options) => {
+        await delay(10_000, options!.signal!);
+        return client.uRLTest({}, options);
+      },
+    });
+    s.connect();
+    await vi.advanceTimersByTimeAsync(300);
+    const canceled = expect(s.testLatency("old", 1)).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    await vi.advanceTimersByTimeAsync(2000);
+    await canceled;
+    expect(groupsStreams).toBe(2);
+    expect(s.getSnapshot().groups?.map(({ tag }) => tag)).toEqual(["fresh"]);
+  });
 });

@@ -34,29 +34,40 @@ function probeMayHaveStarted(error: unknown) {
   );
 }
 
-function hasStaleProbeHistory(
-  group: Group,
-  before: ReadonlyMap<string, Group>,
-  after: ReadonlyMap<string, GroupItem>,
-) {
+function probeMembers(group: Group, groups: ReadonlyMap<string, Group>) {
   const pending = new Map(group.items.map((item) => [item.tag, item]));
-  let hadHistory = false;
+  const members = new Map<string, GroupItem>();
   for (const [tag, item] of pending) {
-    const nested = before.get(tag);
+    const nested = groups.get(tag);
     if (nested) {
       for (const child of nested.items) {
         if (!pending.has(child.tag)) pending.set(child.tag, child);
       }
-    } else {
-      const current = after.get(tag);
-      if (!current) continue;
-      if (
-        current.urlTestTime !== item.urlTestTime ||
-        current.urlTestDelay !== item.urlTestDelay
-      )
-        return false;
-      hadHistory ||= item.urlTestTime !== 0n;
-    }
+    } else members.set(tag, item);
+  }
+  return members;
+}
+
+function hasStaleProbeHistory(
+  tag: string,
+  before: ReadonlyMap<string, Group>,
+  after: ReadonlyMap<string, Group>,
+) {
+  const previous = before.get(tag);
+  const current = after.get(tag);
+  if (previous?.type !== "urltest" || current?.type !== "urltest") return false;
+  const oldMembers = probeMembers(previous, before);
+  const newMembers = probeMembers(current, after);
+  if (oldMembers.size !== newMembers.size) return false;
+  let hadHistory = false;
+  for (const [member, item] of oldMembers) {
+    const latest = newMembers.get(member);
+    if (
+      latest?.urlTestTime !== item.urlTestTime ||
+      latest.urlTestDelay !== item.urlTestDelay
+    )
+      return false;
+    hadHistory ||= item.urlTestTime !== 0n;
   }
   return hadHistory;
 }
@@ -71,6 +82,7 @@ export class InstanceSession {
   private latencyTest?: { controller: AbortController; promise: Promise<void> };
   private manualLatencyTests = 0;
   private latencyCooldown = new AbortController();
+  private groupsScope?: AbortController;
 
   constructor(
     readonly client: SingBoxClient,
@@ -103,6 +115,9 @@ export class InstanceSession {
     this.update({ phase: "connecting" }, true);
     const scope = new AbortController();
     this.controller = scope;
+    scope.signal.addEventListener("abort", () => this.latencyCooldown.abort(), {
+      once: true,
+    });
     void this.start(scope.signal);
   };
   disconnect = () => {
@@ -150,7 +165,11 @@ export class InstanceSession {
         await Promise.all(
           (
             ["service", "status", "groups", "logs", "connections"] as Channel[]
-          ).map((channel) => this.stream(channel, signal)),
+          ).map((channel) =>
+            channel === "groups"
+              ? this.restartGroups(signal)
+              : this.stream(channel, signal),
+          ),
         );
         return;
       } catch (error) {
@@ -182,6 +201,19 @@ export class InstanceSession {
           return;
         }
       }
+    }
+  }
+  private async restartGroups(parentSignal: AbortSignal) {
+    this.groupsScope?.abort();
+    const scope = new AbortController();
+    this.groupsScope = scope;
+    const stop = () => scope.abort();
+    parentSignal.addEventListener("abort", stop, { once: true });
+    try {
+      await this.stream("groups", scope.signal);
+    } finally {
+      parentSignal.removeEventListener("abort", stop);
+      if (this.groupsScope === scope) this.groupsScope = undefined;
     }
   }
   private async stream(channel: Channel, parentSignal: AbortSignal) {
@@ -265,6 +297,17 @@ export class InstanceSession {
             if (parentSignal.aborted) return;
             received();
             if (service.status === ServiceStatus_Type.STARTED) {
+              const previous = this.pending.service?.status;
+              if (
+                previous !== undefined &&
+                previous !== ServiceStatus_Type.STARTED
+              ) {
+                this.update({
+                  groups: undefined,
+                  loaded: { ...this.pending.loaded, groups: false },
+                });
+                void this.restartGroups(parentSignal);
+              }
               this.update({ service });
             } else {
               this.resetLatencyTests();
@@ -446,10 +489,10 @@ export class InstanceSession {
     const signal = this.signal;
     if (!signal || signal.aborted || !this.canTestLatencies() || this.latencyTest)
       return Promise.reject(new ConnectError("Test unavailable", Code.Canceled));
+    const cooldown = this.latencyCooldown.signal;
     this.manualLatencyTests++;
     this.update({ testingManualLatency: true }, true);
-    const cooldown = this.latencyCooldown.signal;
-    const request = this.urlTest(tag, signal);
+    const request = this.urlTest(tag, cooldown);
     void request
       .then(() => true, probeMayHaveStarted)
       .then(async (started) => {
@@ -543,24 +586,14 @@ export class InstanceSession {
       const results = await dispatch(tags, windows);
       if (!before) continue;
       const beforeByTag = new Map(before.map((group) => [group.tag, group]));
-      const currentGroups = this.pending.groups ?? [];
-      const currentAutomatic = new Set(
-        currentGroups
-          .filter((group) => group.type === "urltest")
-          .map((group) => group.tag),
+      const currentByTag = new Map(
+        this.pending.groups?.map((group) => [group.tag, group]),
       );
-      const currentItems = new Map(
-        currentGroups.flatMap(({ items }) => items.map((item) => [item.tag, item])),
-      );
-      const retry = tags.filter((tag, index) => {
-        const group = beforeByTag.get(tag);
-        return (
+      const retry = tags.filter(
+        (tag, index) =>
           results[index].status === "fulfilled" &&
-          group?.type === "urltest" &&
-          currentAutomatic.has(tag) &&
-          hasStaleProbeHistory(group, beforeByTag, currentItems)
-        );
-      });
+          hasStaleProbeHistory(tag, beforeByTag, currentByTag),
+      );
       // shortcut: retry unchanged existing history once until the API reports per-probe completion.
       if (retry.length) await dispatch(retry, windows);
     }
