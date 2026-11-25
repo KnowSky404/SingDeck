@@ -143,14 +143,21 @@ test("browser uses the official native service through CORS and built-in dashboa
       .getByRole("button", { name: "Expand Primary route", exact: true })
       .click();
     await testAll.click();
-    await backup
-      .getByRole("button", { name: "Node details for direct-backup", exact: true })
-      .click();
+    const openDetails = backup.getByRole("button", {
+      name: "Node details for direct-backup",
+      exact: true,
+    });
     const details = page.getByRole("dialog", { name: "direct-backup" });
+    const closeDetails = details.getByRole("button", { name: "Close", exact: true });
+    await openDetails.click();
     await expect(details).toBeVisible();
     await expect(testAll).toBeEnabled({ timeout: 25_000 });
     await expect(toast).toBeHidden();
-    await details.getByRole("button", { name: "Close", exact: true }).click();
+    await closeDetails.click();
+    await expect(toast).toBeVisible();
+    await openDetails.click();
+    await expect(toast).toBeHidden();
+    await closeDetails.click();
     await expect(toast).toBeVisible();
     await overviewLink.click();
     await expect(toast).toBeHidden({ timeout: 1000 });
