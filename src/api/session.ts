@@ -59,17 +59,28 @@ function hasStaleProbeHistory(
   const oldMembers = probeMembers(previous, before);
   const newMembers = probeMembers(current, after);
   if (oldMembers.size !== newMembers.size) return false;
-  let hadHistory = false;
   for (const [member, item] of oldMembers) {
     const latest = newMembers.get(member);
     if (
+      item.urlTestTime === 0n ||
       latest?.urlTestTime !== item.urlTestTime ||
       latest.urlTestDelay !== item.urlTestDelay
     )
       return false;
-    hadHistory ||= item.urlTestTime !== 0n;
   }
-  return hadHistory;
+  return oldMembers.size > 0;
+}
+
+function sameGroupTopology(before: Group[], after: Group[]) {
+  if (before === after) return true;
+  if (before.length !== after.length) return false;
+  const current = new Map(after.map((group) => [group.tag, group]));
+  return before.every(({ tag, type, items }) => {
+    const group = current.get(tag);
+    if (group?.type !== type || group.items.length !== items.length) return false;
+    const typesByTag = new Map(group.items.map((item) => [item.tag, item.type]));
+    return items.every((item) => typesByTag.get(item.tag) === item.type);
+  });
 }
 
 export class InstanceSession {
@@ -295,12 +306,13 @@ export class InstanceSession {
             options,
           )) {
             if (parentSignal.aborted) return;
+            const recovering = Boolean(this.pending.streamErrors.service);
             received();
             if (service.status === ServiceStatus_Type.STARTED) {
               const previous = this.pending.service?.status;
               if (
-                previous !== undefined &&
-                previous !== ServiceStatus_Type.STARTED
+                recovering ||
+                (previous !== undefined && previous !== ServiceStatus_Type.STARTED)
               ) {
                 this.update({
                   groups: undefined,
@@ -507,7 +519,10 @@ export class InstanceSession {
       });
     return request;
   };
-  testLatencies = (waves: LatencyTestWave[]) => {
+  testLatencies = (
+    waves: LatencyTestWave[],
+    plannedGroups = this.snapshot.groups ?? [],
+  ) => {
     if (this.latencyTest) return this.latencyTest.promise;
     const sessionSignal = this.signal;
     if (!sessionSignal || sessionSignal.aborted)
@@ -519,6 +534,7 @@ export class InstanceSession {
     sessionSignal.addEventListener("abort", stop, { once: true });
     const promise = this.runLatencyTests(
       waves,
+      plannedGroups,
       controller.signal,
       this.latencyCooldown.signal,
     )
@@ -553,6 +569,7 @@ export class InstanceSession {
   };
   private async runLatencyTests(
     waves: LatencyTestWave[],
+    plannedGroups: Group[],
     signal: AbortSignal,
     cooldown: AbortSignal,
   ) {
@@ -560,6 +577,8 @@ export class InstanceSession {
     const native = this.profile.mode === "native";
     const dispatch = async (tags: string[], windows: number) => {
       signal.throwIfAborted();
+      if (!sameGroupTopology(plannedGroups, this.pending.groups ?? []))
+        throw new ConnectError("Proxy groups changed", Code.Canceled);
       const results = await Promise.allSettled(
         tags.map((tag) => this.urlTest(tag, signal)),
       );
