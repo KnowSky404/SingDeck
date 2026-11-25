@@ -403,14 +403,17 @@ nav a svg {
   display: none;
 }
 .latency-toast-viewport {
+  --latency-toast-bottom: 16px;
   position: fixed;
   pointer-events: none;
   inset-inline-end: 16px;
-  bottom: 16px;
+  bottom: var(--latency-toast-bottom);
   z-index: 40;
   width: min(360px, calc(100vw - 32px));
 }
 .latency-toast {
+  position: relative;
+  bottom: max(0px, calc(var(--latency-viewport-inset) + 16px - var(--latency-toast-bottom)));
   padding: 12px 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -1454,7 +1457,7 @@ h3 {
     gap: 3px;
   }
   .latency-toast-viewport {
-    bottom: calc(4.5rem + env(safe-area-inset-bottom));
+    --latency-toast-bottom: calc(4.5rem + env(safe-area-inset-bottom));
   }
   html:has(.latency-toast) {
     scroll-padding-bottom: calc(4.5rem + env(safe-area-inset-bottom));
