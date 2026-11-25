@@ -91,17 +91,17 @@ const subscribeHash = (listener: () => void) => {
 };
 const currentPath = () => location.hash.slice(1) || "/";
 const subscribeToastVisibility = (listener: () => void) => {
-  const dialogs = new MutationObserver(listener);
-  dialogs.observe(document.body, { childList: true });
+  const portals = new MutationObserver(listener);
+  portals.observe(document.body, { childList: true });
   document.addEventListener("visibilitychange", listener);
   return () => {
-    dialogs.disconnect();
+    portals.disconnect();
     document.removeEventListener("visibilitychange", listener);
   };
 };
 const canDisplayToast = () =>
   !document.hidden &&
-  !document.querySelector('body > [data-slot="dialog-content"]');
+  !document.body.querySelector('[data-slot="dialog-content"], [data-slot="dropdown-menu-content"]');
 const phaseLabels = {
   disconnected: "Disconnected",
   connecting: "Connecting",
@@ -165,7 +165,7 @@ function LatencyToast({
   else if (phase === "shown" && !onProxies) setPhase("closed");
   if (!onProxies && fitsViewport && window.visualViewport) setFitsViewport(false);
   const render = onProxies && phase !== "closed";
-  const show = onProxies && phase === "shown" && fitsViewport;
+  const show = onProxies && phase === "shown" && visible && fitsViewport;
   useLayoutEffect(() => {
     const toast = toastRef.current;
     const viewport = window.visualViewport;
@@ -174,28 +174,46 @@ function LatencyToast({
       const { clientWidth, clientHeight } = document.documentElement;
       const right = clientWidth - viewport.width - viewport.offsetLeft;
       const bottom = clientHeight - viewport.height - viewport.offsetTop;
+      const margin = Math.min(16, Math.max(4, viewport.width / 10 - 6));
+      const topEdge = Math.floor(viewport.offsetTop + margin);
+      const leftEdge = Math.floor(viewport.offsetLeft + margin);
+      const bottomEdge = Math.ceil(viewport.offsetTop + viewport.height - margin);
+      const rightEdge = Math.ceil(viewport.offsetLeft + viewport.width - margin);
       toast.style.setProperty("--latency-viewport-right", `${Math.max(0, right)}px`);
       toast.style.setProperty("--latency-viewport-bottom", `${Math.max(0, bottom)}px`);
       toast.style.setProperty("--latency-viewport-width", `${viewport.width}px`);
+      toast.style.setProperty("--latency-toast-margin", `${margin}px`);
       toast.style.removeProperty("--latency-focus-clearance");
       toast.style.removeProperty("--latency-focus-offset");
       let bounds = toast.getBoundingClientRect();
       const focused = document.activeElement;
-      if (focused?.matches("main :focus")) {
-        const control = focused.getBoundingClientRect();
-        const gap = 8;
-        if (
-          bounds.left < control.right + gap &&
-          bounds.right > control.left - gap &&
-          bounds.top < control.bottom + gap &&
-          bounds.bottom > control.top - gap
-        ) {
+      const obstructions = Array.from(
+        document.querySelectorAll("body > [data-radix-popper-content-wrapper]"),
+        (portal) => portal.getBoundingClientRect(),
+      );
+      if (focused?.closest(".app-shell") && !focused.matches("main")) {
+        obstructions.push(focused.getBoundingClientRect());
+      }
+      const gap = 8;
+      const overlaps = (control: DOMRect) =>
+        control.width > 0 &&
+        control.height > 0 &&
+        bounds.left < control.right + gap &&
+        bounds.right > control.left - gap &&
+        bounds.top < control.bottom + gap &&
+        bounds.bottom > control.top - gap;
+      let clearance = 0;
+      let offset = 0;
+      for (const control of obstructions) {
+        if (overlaps(control)) {
           const lift = bounds.bottom - control.top + gap;
           const shift = bounds.right - control.left + gap;
-          if (bounds.top - lift >= viewport.offsetTop) {
-            toast.style.setProperty("--latency-focus-clearance", `${lift}px`);
-          } else if (bounds.left - shift >= viewport.offsetLeft) {
-            toast.style.setProperty("--latency-focus-offset", `${shift}px`);
+          if (bounds.top - lift >= topEdge) {
+            clearance += lift;
+            toast.style.setProperty("--latency-focus-clearance", `${clearance}px`);
+          } else if (bounds.left - shift >= leftEdge) {
+            offset += shift;
+            toast.style.setProperty("--latency-focus-offset", `${offset}px`);
           } else {
             setFitsViewport(false);
             return;
@@ -204,10 +222,11 @@ function LatencyToast({
         }
       }
       setFitsViewport(
-        bounds.top >= viewport.offsetTop &&
-          bounds.left >= viewport.offsetLeft &&
-          bounds.bottom <= viewport.offsetTop + viewport.height &&
-          bounds.right <= viewport.offsetLeft + viewport.width,
+        bounds.top >= topEdge &&
+          bounds.left >= leftEdge &&
+          bounds.bottom <= bottomEdge &&
+          bounds.right <= rightEdge &&
+          !obstructions.some(overlaps),
       );
     };
     let frame = 0;
@@ -217,6 +236,18 @@ function LatencyToast({
     };
     const sizeChanges = new ResizeObserver(schedulePosition);
     sizeChanges.observe(toast);
+    const observePortals = () => {
+      portals.disconnect();
+      portals.observe(document.body, { childList: true });
+      for (const portal of document.querySelectorAll("body > [data-radix-popper-content-wrapper]")) {
+        portals.observe(portal, { attributes: true, attributeFilter: ["style"] });
+      }
+    };
+    const portals = new MutationObserver(() => {
+      observePortals();
+      schedulePosition();
+    });
+    observePortals();
     viewport.addEventListener("resize", schedulePosition);
     viewport.addEventListener("scroll", schedulePosition);
     window.addEventListener("scroll", schedulePosition);
@@ -225,6 +256,7 @@ function LatencyToast({
     return () => {
       cancelAnimationFrame(frame);
       sizeChanges.disconnect();
+      portals.disconnect();
       viewport.removeEventListener("resize", schedulePosition);
       viewport.removeEventListener("scroll", schedulePosition);
       window.removeEventListener("scroll", schedulePosition);
@@ -232,8 +264,8 @@ function LatencyToast({
       document.removeEventListener("focusout", schedulePosition);
     };
   }, [render]);
-  useEffect(() => {
-    if (!show || !visible) return;
+  useLayoutEffect(() => {
+    if (!show) return;
     const startedAt = performance.now();
     const timer = window.setTimeout(() => setPhase("closed"), remaining.current);
     return () => {
@@ -243,7 +275,7 @@ function LatencyToast({
         remaining.current - (performance.now() - startedAt),
       );
     };
-  }, [show, visible]);
+  }, [show]);
   return render ? (
     <div
       ref={toastRef}
