@@ -59,16 +59,17 @@ function hasStaleProbeHistory(
   const oldMembers = probeMembers(previous, before);
   const newMembers = probeMembers(current, after);
   if (oldMembers.size !== newMembers.size) return false;
+  let hadHistory = false;
   for (const [member, item] of oldMembers) {
     const latest = newMembers.get(member);
     if (
-      item.urlTestTime === 0n ||
       latest?.urlTestTime !== item.urlTestTime ||
       latest.urlTestDelay !== item.urlTestDelay
     )
       return false;
+    hadHistory ||= item.urlTestTime !== 0n;
   }
-  return oldMembers.size > 0;
+  return hadHistory;
 }
 
 function sameGroupTopology(before: Group[], after: Group[]) {
@@ -78,8 +79,10 @@ function sameGroupTopology(before: Group[], after: Group[]) {
   return before.every(({ tag, type, items }) => {
     const group = current.get(tag);
     if (group?.type !== type || group.items.length !== items.length) return false;
-    const typesByTag = new Map(group.items.map((item) => [item.tag, item.type]));
-    return items.every((item) => typesByTag.get(item.tag) === item.type);
+    return items.every(
+      (item, index) =>
+        group.items[index].tag === item.tag && group.items[index].type === item.type,
+    );
   });
 }
 

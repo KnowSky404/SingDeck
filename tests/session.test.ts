@@ -401,7 +401,8 @@ describe("session lifecycle", () => {
     { history: 1n, update: "none", calls: 2 },
     { history: 1n, update: "latency", calls: 1 },
     { history: 1n, update: "members", calls: 1 },
-    { history: 1n, update: "mixed", calls: 1 },
+    { history: 1n, update: "mixed", calls: 2 },
+    { history: 1n, update: "mixed-latency", calls: 1 },
     { history: 0n, update: "none", calls: 1 },
   ])(
     "makes $calls automatic group requests with history $history and update $update",
@@ -409,7 +410,7 @@ describe("session lifecycle", () => {
       vi.useFakeTimers();
       const client = createMockClient();
       const uRLTest = vi.fn(client.uRLTest);
-      const groups = (urlTestDelay: number, extra = false) =>
+      const groups = (urlTestDelay: number, extra?: string) =>
         create(GroupsSchema, {
           group: [
             {
@@ -417,7 +418,7 @@ describe("session lifecycle", () => {
               type: "urltest",
               items: [
                 { tag: "London 01", urlTestTime: history, urlTestDelay },
-                ...(extra ? [{ tag: "Tokyo 01" }] : []),
+                ...(extra ? [{ tag: extra }] : []),
               ],
             },
           ],
@@ -427,10 +428,17 @@ describe("session lifecycle", () => {
           ...client,
           uRLTest,
           async *subscribeGroups(_, options) {
-            yield groups(history ? 20 : 0, update === "mixed");
-            if (update === "latency" || update === "members") {
+            const mixed = update.startsWith("mixed");
+            yield groups(
+              history ? 20 : 0,
+              mixed ? "Tokyo 01" : update === "members" ? "London 01" : undefined,
+            );
+            if (update.endsWith("latency") || update === "members") {
               await delay(1000, options!.signal!);
-              yield groups(update === "latency" ? 21 : 20, update === "members");
+              yield groups(
+                update === "members" ? 20 : 21,
+                mixed || update === "members" ? "Tokyo 01" : undefined,
+              );
             }
             await delay(60_000, options!.signal!);
           },
