@@ -406,29 +406,32 @@ nav a svg {
   --latency-toast-bottom: 16px;
   position: fixed;
   pointer-events: none;
-  inset-inline-end: 16px;
-  bottom: var(--latency-toast-bottom);
   z-index: 40;
-  width: min(360px, calc(100vw - 32px));
 }
 .latency-toast {
-  position: relative;
-  bottom: max(0px, calc(var(--latency-viewport-inset) + 16px - var(--latency-toast-bottom)));
-  padding: 12px 16px;
+  --latency-toast-margin: clamp(4px, calc(var(--latency-viewport-width, 100vw) / 10 - 6px), 16px);
+  position: fixed;
+  right: calc(
+    var(--latency-viewport-right, 0px) + var(--latency-toast-margin) +
+    var(--latency-focus-offset, 0px)
+  );
+  bottom: calc(
+    max(var(--latency-toast-bottom), var(--latency-viewport-bottom, 0px) + var(--latency-toast-margin)) +
+    var(--latency-focus-clearance, 0px)
+  );
+  width: min(360px, calc(var(--latency-viewport-width, 100vw) - 2 * var(--latency-toast-margin)));
+  padding: min(12px, var(--latency-toast-margin)) var(--latency-toast-margin);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--popover);
   color: var(--popover-foreground);
   font-size: 13px;
   line-height: 1.5;
+  overflow-wrap: anywhere;
 }
+.latency-toast:not([data-visible]),
 body:has(> [data-slot="dialog-content"]) .latency-toast-viewport {
   visibility: hidden;
-}
-.app-shell:has(.latency-toast) main :focus-visible:not(.proxy-row *),
-.app-shell:has(.latency-toast) .proxy-row:has(:focus-visible) {
-  position: relative;
-  z-index: 41;
 }
 main {
   padding: 30px 32px 0;
@@ -1459,11 +1462,8 @@ h3 {
   .latency-toast-viewport {
     --latency-toast-bottom: calc(4.5rem + env(safe-area-inset-bottom));
   }
-  html:has(.latency-toast) {
+  html:has(.latency-toast[data-visible]) {
     scroll-padding-bottom: calc(4.5rem + env(safe-area-inset-bottom));
-  }
-  .app-shell:has(.latency-toast) .mobile-bottom {
-    z-index: 42;
   }
   .mobile-bottom nav a {
     padding: 7px 2px;

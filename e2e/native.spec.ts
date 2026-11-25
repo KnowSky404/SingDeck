@@ -19,15 +19,16 @@ function holdConnectionLock(page: Page, key: string) {
   );
 }
 
-function simulateVisualViewport(page: Page, height: number, offsetTop: number) {
-  return page.evaluate(({ height, offsetTop }) => {
+function simulateVisualViewport(
+  page: Page,
+  dimensions: { width: number; height: number; offsetTop: number; offsetLeft: number },
+) {
+  return page.evaluate((dimensions) => {
     const viewport = window.visualViewport!;
-    Object.defineProperties(viewport, {
-      height: { configurable: true, value: height },
-      offsetTop: { configurable: true, value: offsetTop },
-    });
+    for (const [property, value] of Object.entries(dimensions))
+      Object.defineProperty(viewport, property, { configurable: true, value });
     viewport.dispatchEvent(new Event("resize"));
-  }, { height, offsetTop });
+  }, dimensions);
 }
 
 test.use({ trace: "off" });
@@ -86,6 +87,7 @@ test("browser uses the official native service through CORS and built-in dashboa
         }
       })
       .toBe(true);
+    await page.clock.install();
     await page.goto("/#/settings");
     await expect(page.getByRole("navigation")).toHaveCount(0);
     await page
@@ -151,7 +153,8 @@ test("browser uses the official native service through CORS and built-in dashboa
     });
     await expect(toast).toBeHidden();
     await proxiesLink.click();
-    await expect(toast).toContainText("Test requests sent.", { timeout: 25_000 });
+    await expect(toast).toBeVisible();
+    await expect(toast).toContainText("Test requests sent.");
     await expect(page.locator(".latency-toast-viewport")).toHaveCSS(
       "position",
       "fixed",
@@ -163,20 +166,45 @@ test("browser uses the official native service through CORS and built-in dashboa
     const navigation = (await page.locator(".mobile-bottom").boundingBox())!;
     const popup = (await toast.boundingBox())!;
     expect(popup.y + popup.height).toBeLessThan(navigation.y);
-    await simulateVisualViewport(page, 350, 95);
-    await expect(toast).toHaveCSS("bottom", "219px");
+    await simulateVisualViewport(page, {
+      width: 98,
+      height: 180,
+      offsetLeft: 115,
+      offsetTop: 95,
+    });
+    await expect(toast).toHaveCSS("width", "90px");
+    await expect(toast).toBeVisible();
     const raisedPopup = (await toast.boundingBox())!;
+    expect(raisedPopup.x).toBeGreaterThan(115);
+    expect(raisedPopup.x + raisedPopup.width).toBeLessThan(213);
     expect(raisedPopup.y).toBeGreaterThan(95);
-    expect(raisedPopup.y + raisedPopup.height).toBeLessThan(445);
+    expect(raisedPopup.y + raisedPopup.height).toBeLessThan(275);
+    await page.setViewportSize({ width: 390, height: 640 });
+    await simulateVisualViewport(page, {
+      width: 98,
+      height: 160,
+      offsetLeft: 115,
+      offsetTop: 480,
+    });
+    await expect(toast).toBeHidden();
+    await page.clock.fastForward(5_000);
     await page.setViewportSize({ width: 844, height: 390 });
-    await simulateVisualViewport(page, 210, 42);
-    await expect(toast).toHaveCSS("bottom", "138px");
+    await simulateVisualViewport(page, {
+      width: 844,
+      height: 210,
+      offsetLeft: 0,
+      offsetTop: 42,
+    });
+    await expect(toast).toBeVisible();
+    await expect(toast).toHaveCSS("bottom", "154px");
     const landscapePopup = (await toast.boundingBox())!;
     expect(landscapePopup.y).toBeGreaterThan(42);
     expect(landscapePopup.y + landscapePopup.height).toBeLessThan(252);
     await page.evaluate(() => {
       const viewport = window.visualViewport!;
+      Reflect.deleteProperty(viewport, "width");
       Reflect.deleteProperty(viewport, "height");
+      Reflect.deleteProperty(viewport, "offsetLeft");
       Reflect.deleteProperty(viewport, "offsetTop");
       viewport.dispatchEvent(new Event("resize"));
     });
@@ -206,6 +234,25 @@ test("browser uses the official native service through CORS and built-in dashboa
     await expect(toast).toBeHidden();
     await closeDetails.click();
     await expect(toast).toBeVisible();
+    await page.setViewportSize({ width: 390, height: 720 });
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    const selectDirect = page.getByRole("button", { name: "Select direct", exact: true });
+    const control = (await selectDirect.boundingBox())!;
+    await page.setViewportSize({ width: 390, height: Math.ceil(control.y + control.height + 85) });
+    await expect.poll(async () => {
+      const popup = (await toast.boundingBox())!;
+      const button = (await selectDirect.boundingBox())!;
+      return popup.y < button.y + button.height && popup.y + popup.height > button.y;
+    }).toBe(true);
+    await page.keyboard.press("Tab");
+    await selectDirect.focus();
+    await expect.poll(async () => {
+      const popup = (await toast.boundingBox())!;
+      const button = (await selectDirect.boundingBox())!;
+      return popup.y + popup.height <= button.y;
+    }).toBe(true);
+    await expect(toast).toBeVisible();
+    await page.setViewportSize(desktop);
     await overviewLink.click();
     await expect(toast).toBeHidden({ timeout: 1000 });
     await proxiesLink.click();

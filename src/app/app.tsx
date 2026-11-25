@@ -3,10 +3,10 @@ import {
   Suspense,
   lazy,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   useSyncExternalStore,
-  type CSSProperties,
   type ReactNode,
 } from "react";
 import {
@@ -102,21 +102,6 @@ const subscribeToastVisibility = (listener: () => void) => {
 const canDisplayToast = () =>
   !document.hidden &&
   !document.querySelector('body > [data-slot="dialog-content"]');
-const subscribeVisualViewport = (listener: () => void) => {
-  const viewport = window.visualViewport;
-  viewport?.addEventListener("resize", listener);
-  viewport?.addEventListener("scroll", listener);
-  return () => {
-    viewport?.removeEventListener("resize", listener);
-    viewport?.removeEventListener("scroll", listener);
-  };
-};
-const visualViewportBottomInset = () => {
-  const viewport = window.visualViewport;
-  return viewport
-    ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
-    : 0;
-};
 const phaseLabels = {
   disconnected: "Disconnected",
   connecting: "Connecting",
@@ -171,16 +156,82 @@ function LatencyToast({
     subscribeToastVisibility,
     canDisplayToast,
   );
-  const viewportInset = useSyncExternalStore(
-    subscribeVisualViewport,
-    visualViewportBottomInset,
-  );
+  const toastRef = useRef<HTMLDivElement>(null);
   const [phase, setPhase] = useState<"pending" | "shown" | "closed">("pending");
+  const [fitsViewport, setFitsViewport] = useState(() => !window.visualViewport);
   const remaining = useRef(4000);
-  const canShow = onProxies && visible;
+  const canShow = onProxies && visible && fitsViewport;
   if (phase === "pending" && canShow) setPhase("shown");
   else if (phase === "shown" && !onProxies) setPhase("closed");
-  const show = onProxies && phase === "shown";
+  if (!onProxies && fitsViewport && window.visualViewport) setFitsViewport(false);
+  const render = onProxies && phase !== "closed";
+  const show = onProxies && phase === "shown" && fitsViewport;
+  useLayoutEffect(() => {
+    const toast = toastRef.current;
+    const viewport = window.visualViewport;
+    if (!toast || !viewport) return;
+    const updatePosition = () => {
+      const { clientWidth, clientHeight } = document.documentElement;
+      const right = clientWidth - viewport.width - viewport.offsetLeft;
+      const bottom = clientHeight - viewport.height - viewport.offsetTop;
+      toast.style.setProperty("--latency-viewport-right", `${Math.max(0, right)}px`);
+      toast.style.setProperty("--latency-viewport-bottom", `${Math.max(0, bottom)}px`);
+      toast.style.setProperty("--latency-viewport-width", `${viewport.width}px`);
+      toast.style.removeProperty("--latency-focus-clearance");
+      toast.style.removeProperty("--latency-focus-offset");
+      let bounds = toast.getBoundingClientRect();
+      const focused = document.activeElement;
+      if (focused?.matches("main :focus")) {
+        const control = focused.getBoundingClientRect();
+        const gap = 8;
+        if (
+          bounds.left < control.right + gap &&
+          bounds.right > control.left - gap &&
+          bounds.top < control.bottom + gap &&
+          bounds.bottom > control.top - gap
+        ) {
+          const lift = bounds.bottom - control.top + gap;
+          const shift = bounds.right - control.left + gap;
+          if (bounds.top - lift >= viewport.offsetTop) {
+            toast.style.setProperty("--latency-focus-clearance", `${lift}px`);
+          } else if (bounds.left - shift >= viewport.offsetLeft) {
+            toast.style.setProperty("--latency-focus-offset", `${shift}px`);
+          } else {
+            setFitsViewport(false);
+            return;
+          }
+          bounds = toast.getBoundingClientRect();
+        }
+      }
+      setFitsViewport(
+        bounds.top >= viewport.offsetTop &&
+          bounds.left >= viewport.offsetLeft &&
+          bounds.bottom <= viewport.offsetTop + viewport.height &&
+          bounds.right <= viewport.offsetLeft + viewport.width,
+      );
+    };
+    let frame = 0;
+    const schedulePosition = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(updatePosition);
+    };
+    const sizeChanges = new ResizeObserver(schedulePosition);
+    sizeChanges.observe(toast);
+    viewport.addEventListener("resize", schedulePosition);
+    viewport.addEventListener("scroll", schedulePosition);
+    window.addEventListener("scroll", schedulePosition);
+    document.addEventListener("focusin", schedulePosition);
+    document.addEventListener("focusout", schedulePosition);
+    return () => {
+      cancelAnimationFrame(frame);
+      sizeChanges.disconnect();
+      viewport.removeEventListener("resize", schedulePosition);
+      viewport.removeEventListener("scroll", schedulePosition);
+      window.removeEventListener("scroll", schedulePosition);
+      document.removeEventListener("focusin", schedulePosition);
+      document.removeEventListener("focusout", schedulePosition);
+    };
+  }, [render]);
   useEffect(() => {
     if (!show || !visible) return;
     const startedAt = performance.now();
@@ -193,10 +244,11 @@ function LatencyToast({
       );
     };
   }, [show, visible]);
-  return show ? (
+  return render ? (
     <div
+      ref={toastRef}
       className="latency-toast shadow-md"
-      style={{ "--latency-viewport-inset": `${viewportInset}px` } as CSSProperties}
+      data-visible={show || undefined}
     >
       {message}
     </div>
