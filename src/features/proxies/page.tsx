@@ -45,7 +45,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import { latency, latencyTone } from "./latency";
+import { latency, latencyTestWaves, latencyTone } from "./latency";
 
 function OutboundDetails({
   item,
@@ -147,6 +147,7 @@ function ProxyGroup({
   type,
   view,
   expanded,
+  enabled,
   onOpenChange,
 }: {
   group: Group;
@@ -155,17 +156,20 @@ function ProxyGroup({
   type: string;
   view: string;
   expanded: boolean;
+  enabled: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { snapshot, session, t } = useWorkspace();
+  const { session, snapshot, t } = useWorkspace();
   const selection = useAction(),
     testing = useAction();
+  const testingDisabled =
+    !enabled || Boolean(snapshot.testingLatencies) || testing.pending;
+  const test = (tag: string) =>
+    void testing.run(() =>
+      session.testLatency(tag, latencyTestWaves(groupsByTag, tag)[0].windows),
+    );
   const [target, setTarget] = useState("");
   const currentDescription = useId();
-  const enabled =
-    snapshot.phase === "connected" &&
-    snapshot.service?.status === ServiceStatus_Type.STARTED &&
-    !snapshot.streamErrors.groups;
   const items = group.items.filter(
     (item) =>
       item.tag.toLowerCase().includes(search) &&
@@ -227,10 +231,8 @@ function ProxyGroup({
                 size="icon"
                 title={t("Test group")}
                 aria-label={t("Test {name}", { name: group.tag })}
-                disabled={!enabled || testing.pending}
-                onClick={() =>
-                  void testing.run(() => session.urlTest(group.tag))
-                }
+                disabled={testingDisabled}
+                onClick={() => test(group.tag)}
               >
                 {testing.pending ? <LoaderCircle className="spin" /> : <Zap />}
               </Button>
@@ -328,10 +330,8 @@ function ProxyGroup({
                             name: item.tag,
                             group: group.tag,
                           })}
-                          disabled={!enabled || testing.pending}
-                          onClick={() =>
-                            void testing.run(() => session.urlTest(item.tag))
-                          }
+                          disabled={testingDisabled}
+                          onClick={() => test(item.tag)}
                         >
                           <Zap />
                         </Button>
@@ -353,7 +353,7 @@ function ProxyGroup({
   );
 }
 export default function Proxies() {
-  const { snapshot, t } = useWorkspace();
+  const { session, snapshot, t } = useWorkspace();
   const [search, setSearch] = useState(""),
     [type, setType] = useState("all"),
     [view, setView] = useState("list"),
@@ -370,6 +370,11 @@ export default function Proxies() {
   }
   const filtering = query !== "" || type !== "all";
   const groups = snapshot.groups ?? [];
+  const enabled =
+    snapshot.phase === "connected" &&
+    snapshot.service?.status === ServiceStatus_Type.STARTED &&
+    !snapshot.streamErrors.service &&
+    !snapshot.streamErrors.groups;
   const groupsByTag = new Map(groups.map((group) => [group.tag, group]));
   const types = [...new Set(groups.flatMap((g) => g.items.map((i) => i.type)))];
   const isExpanded = (tag: string) =>
@@ -379,6 +384,9 @@ export default function Proxies() {
   const bulkAction = t(
     allExpanded ? "Collapse all groups" : "Expand all groups",
   );
+  const testAllLabel = t("Test all groups");
+  const testing = Boolean(snapshot.testingLatencies);
+
   function setExpanded(tags: string[], open: boolean) {
     const update = (current: Set<string>) => {
       const exceptions = new Set(current);
@@ -454,27 +462,60 @@ export default function Proxies() {
             </ToggleGroup>
           </div>
         </div>
-        <Button
-          variant="outline"
-          size="icon"
-          className="toolbar-actions"
-          aria-label={bulkAction}
-          title={bulkAction}
-          disabled={!groups.length}
-          onClick={() =>
-            setExpanded(
-              groups.map(({ tag }) => tag),
-              !allExpanded,
-            )
-          }
-        >
-          {allExpanded ? (
-            <ChevronsDownUp aria-hidden="true" />
-          ) : (
-            <ChevronsUpDown aria-hidden="true" />
-          )}
-        </Button>
+        <div className="button-row toolbar-actions">
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label={testAllLabel}
+            aria-busy={testing}
+            title={testAllLabel}
+            disabled={
+              !enabled ||
+              !groups.length ||
+              Boolean(snapshot.testingManualLatency) ||
+              testing
+            }
+            onClick={() =>
+              void session
+                .testLatencies(latencyTestWaves(groupsByTag))
+                .catch(() => undefined)
+            }
+          >
+            {testing ? (
+              <LoaderCircle aria-hidden="true" className="spin" />
+            ) : (
+              <Zap aria-hidden="true" />
+            )}
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label={bulkAction}
+            title={bulkAction}
+            disabled={!groups.length}
+            onClick={() =>
+              setExpanded(
+                groups.map(({ tag }) => tag),
+                !allExpanded,
+              )
+            }
+          >
+            {allExpanded ? (
+              <ChevronsDownUp aria-hidden="true" />
+            ) : (
+              <ChevronsUpDown aria-hidden="true" />
+            )}
+          </Button>
+        </div>
       </div>
+      {snapshot.latencyTestError && (
+        <Notice title={t("Test failed")}>{t(snapshot.latencyTestError)}</Notice>
+      )}
+      {snapshot.latencyTestSent && (
+        <p className="quiet-empty" role="status">
+          {t("Test requests sent. A fresh result for each node could not be confirmed.")}
+        </p>
+      )}
       <ChannelState channel="groups" empty={snapshot.groups?.length === 0}>
         <div
           className={
@@ -490,6 +531,7 @@ export default function Proxies() {
               type={type}
               view={view}
               expanded={isExpanded(group.tag)}
+              enabled={enabled}
               onOpenChange={(open) => setExpanded([group.tag], open)}
             />
           ))}

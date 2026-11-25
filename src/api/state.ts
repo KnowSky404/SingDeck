@@ -38,6 +38,10 @@ export interface Snapshot {
   startedAt?: bigint;
   defaultLogLevel?: LogLevel;
   groups?: Group[];
+  testingLatencies?: boolean;
+  testingManualLatency?: boolean;
+  latencyTestError?: string;
+  latencyTestSent?: boolean;
   logs: LogEntry[];
   connections: ReadonlyMap<string, Connection>;
   connectionOverflow: boolean;

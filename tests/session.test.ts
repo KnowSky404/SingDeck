@@ -279,4 +279,119 @@ describe("session lifecycle", () => {
     await vi.advanceTimersByTimeAsync(9000);
     await failure;
   });
+
+  it("paces native latency batches and cancels queued probes on disconnect", async () => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    const uRLTest = vi.fn(client.uRLTest);
+    const s = new InstanceSession(
+      { ...client, uRLTest },
+      { ...mockProfile, mode: "native" },
+    );
+    sessions.push(s);
+    s.connect();
+    await vi.advanceTimersByTimeAsync(300);
+    const tags = Array.from({ length: 21 }, (_, index) => `node-${index}`);
+    const waves = [tags.slice(0, 10), tags.slice(10, 20), tags.slice(20)].map(
+      (tags) => ({ tags, windows: 1 }),
+    );
+    const running = s.testLatencies(waves);
+    const canceled = expect(running).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    expect(s.testLatencies(waves)).toBe(running);
+    expect(s.getSnapshot().testingLatencies).toBe(true);
+    await vi.advanceTimersByTimeAsync(15_499);
+    expect(uRLTest).toHaveBeenCalledTimes(10);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(uRLTest).toHaveBeenCalledTimes(20);
+    s.disconnect();
+    await canceled;
+    await vi.advanceTimersByTimeAsync(15_250);
+    expect(uRLTest).toHaveBeenCalledTimes(20);
+    expect(s.getSnapshot().testingLatencies).toBeUndefined();
+  });
+
+  it("keeps manual tests responsive while guarding bulk dispatch", async () => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    const uRLTest = vi.fn(client.uRLTest).mockRejectedValueOnce(
+      new ConnectError("Response unavailable", Code.Unavailable),
+    );
+    const s = new InstanceSession(
+      { ...client, uRLTest },
+      { ...mockProfile, mode: "native" },
+    );
+    sessions.push(s);
+    s.connect();
+    await vi.advanceTimersByTimeAsync(300);
+    await expect(s.testLatency("Direct", 1)).rejects.toMatchObject({
+      code: Code.Unavailable,
+    });
+    expect(s.getSnapshot().testingManualLatency).toBe(true);
+    await expect(s.testLatencies([{ tags: ["Primary route"], windows: 1 }]))
+      .rejects.toMatchObject({ code: Code.Canceled });
+    const second = s.testLatency("London 01", 1);
+    await vi.advanceTimersByTimeAsync(250);
+    await second;
+    await vi.advanceTimersByTimeAsync(15_250);
+    expect(s.getSnapshot().testingManualLatency).toBeUndefined();
+    uRLTest.mockRejectedValueOnce(new ConnectError("Missing group", Code.NotFound));
+    await expect(s.testLatency("Missing group", 10)).rejects.toMatchObject({
+      code: Code.NotFound,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(s.getSnapshot().testingManualLatency).toBeUndefined();
+  });
+
+  it("keeps the running wave's cooldown across group stream recovery", async () => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    const uRLTest = vi.fn(client.uRLTest);
+    let attempts = 0;
+    const s = new InstanceSession(
+      {
+        ...client,
+        uRLTest,
+        async *subscribeGroups(_, options) {
+          yield create(GroupsSchema);
+          if (++attempts === 1) {
+            await delay(1000, options!.signal!);
+            throw new ConnectError("Groups interrupted", Code.Unavailable);
+          }
+          await delay(30_000, options!.signal!);
+        },
+      },
+      { ...mockProfile, mode: "native" },
+    );
+    sessions.push(s);
+    s.connect();
+    await vi.advanceTimersByTimeAsync(300);
+    const canceled = expect(
+      s.testLatencies([
+        { tags: ["Primary route"], windows: 1 },
+        { tags: ["Auto route"], windows: 1 },
+      ]),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(s.getSnapshot().streamErrors.groups).toBeUndefined();
+    expect(s.getSnapshot().testingLatencies).toBe(true);
+    await vi.advanceTimersByTimeAsync(12_500);
+    await canceled;
+    expect(uRLTest).toHaveBeenCalledTimes(1);
+    expect(s.getSnapshot().testingLatencies).toBeUndefined();
+  });
+
+  it("stops queued latency probes when the instance denies access", async () => {
+    vi.useFakeTimers();
+    const uRLTest = vi.fn().mockRejectedValue(new ConnectError("Denied", Code.PermissionDenied));
+    const s = session(undefined, { ...createMockClient(), uRLTest });
+    s.connect();
+    await vi.advanceTimersByTimeAsync(300);
+    await expect(s.testLatencies([
+      { tags: ["Primary route"], windows: 1 },
+      { tags: ["Auto route"], windows: 1 },
+    ])).rejects.toMatchObject({ code: Code.PermissionDenied });
+    expect(uRLTest).toHaveBeenCalledTimes(1);
+  });
 });

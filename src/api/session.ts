@@ -1,4 +1,5 @@
 import { Code, ConnectError } from "@connectrpc/connect";
+import { ServiceStatus_Type } from "@/proto/daemon/started_service_pb";
 import type { SingBoxClient } from "./client";
 import { canRetry, delay, describeError } from "./errors";
 import {
@@ -13,6 +14,22 @@ import {
 } from "./state";
 import type { Profile } from "@/features/instances/profiles";
 
+const probeWindowMs = 15_250;
+type LatencyTestWave = {
+  tags: string[];
+  windows: number;
+};
+
+function probeMayHaveStarted(error: unknown) {
+  const { code } = ConnectError.from(error);
+  return (
+    canRetry(error) ||
+    code === Code.Canceled ||
+    code === Code.Unknown ||
+    code === Code.Internal
+  );
+}
+
 export class InstanceSession {
   private snapshot = initialSnapshot();
   private listeners = new Set<() => void>();
@@ -20,6 +37,9 @@ export class InstanceSession {
   private flushTimer?: ReturnType<typeof setTimeout>;
   private pending = initialSnapshot();
   private logSequence = { value: 0 };
+  private latencyTest?: { controller: AbortController; promise: Promise<void> };
+  private manualLatencyTests = 0;
+  private latencyCooldown = new AbortController();
 
   constructor(
     readonly client: SingBoxClient,
@@ -35,6 +55,8 @@ export class InstanceSession {
   };
   private update(patch: Partial<Snapshot>, immediate = false) {
     this.pending = { ...this.pending, ...patch };
+    if (this.latencyTest && !this.canTestLatencies())
+      this.latencyTest.controller.abort();
     if (immediate) this.flush();
     else this.flushTimer ??= setTimeout(() => this.flush(), 100);
   }
@@ -54,11 +76,19 @@ export class InstanceSession {
   };
   disconnect = () => {
     this.controller?.abort();
+    this.resetLatencyTests();
     clearTimeout(this.flushTimer);
     this.flushTimer = undefined;
     this.pending = initialSnapshot();
     this.update({}, true);
   };
+  private resetLatencyTests() {
+    this.latencyTest?.controller.abort();
+    this.latencyCooldown.abort();
+    this.latencyCooldown = new AbortController();
+    this.latencyTest = undefined;
+    this.manualLatencyTests = 0;
+  }
   clearLogs = () => this.update({ logs: [] }, true);
   private async readMetadata(signal: AbortSignal) {
     const version = await this.client.getVersion({}, { signal });
@@ -203,7 +233,20 @@ export class InstanceSession {
           )) {
             if (parentSignal.aborted) return;
             received();
-            this.update({ service });
+            if (service.status === ServiceStatus_Type.STARTED) {
+              this.update({ service });
+            } else {
+              this.resetLatencyTests();
+              this.update({
+                service,
+                groups: undefined,
+                loaded: { ...this.pending.loaded, groups: false },
+                testingLatencies: undefined,
+                testingManualLatency: undefined,
+                latencyTestSent: undefined,
+                latencyTestError: undefined,
+              }, true);
+            }
           }
         } else if (channel === "groups") {
           for await (const groups of this.client.subscribeGroups({}, options)) {
@@ -354,8 +397,117 @@ export class InstanceSession {
       }
     });
   };
-  urlTest = (outboundTag: string) =>
-    this.runUnary((options) => this.client.uRLTest({ outboundTag }, options));
+  urlTest = (outboundTag: string, signal = this.signal) =>
+    this.runUnary(
+      (options) => this.client.uRLTest({ outboundTag }, options),
+      signal,
+    );
+  private canTestLatencies() {
+    return (
+      this.pending.phase === "connected" &&
+      this.pending.service?.status === ServiceStatus_Type.STARTED &&
+      this.pending.groups !== undefined &&
+      !this.pending.streamErrors.service &&
+      !this.pending.streamErrors.groups
+    );
+  }
+  testLatency = (tag: string, windows: number) => {
+    const signal = this.signal;
+    if (!signal || signal.aborted || !this.canTestLatencies() || this.latencyTest)
+      return Promise.reject(new ConnectError("Test unavailable", Code.Canceled));
+    this.manualLatencyTests++;
+    this.update({ testingManualLatency: true }, true);
+    const cooldown = this.latencyCooldown.signal;
+    const request = this.urlTest(tag, signal);
+    void request
+      .then(() => true, probeMayHaveStarted)
+      .then(async (started) => {
+        if (started && this.profile.mode === "native")
+          await delay(probeWindowMs * windows, cooldown);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (cooldown.aborted) return;
+        if (--this.manualLatencyTests === 0)
+          this.update({ testingManualLatency: undefined }, true);
+      });
+    return request;
+  };
+  testLatencies = (waves: LatencyTestWave[]) => {
+    if (this.latencyTest) return this.latencyTest.promise;
+    const sessionSignal = this.signal;
+    if (!sessionSignal || sessionSignal.aborted)
+      return Promise.reject(new ConnectError("Disconnected", Code.Canceled));
+    if (!this.canTestLatencies() || this.manualLatencyTests)
+      return Promise.reject(new ConnectError("Service unavailable", Code.Canceled));
+    const controller = new AbortController();
+    const stop = () => controller.abort(sessionSignal.reason);
+    sessionSignal.addEventListener("abort", stop, { once: true });
+    const promise = this.runLatencyTests(
+      waves,
+      controller.signal,
+      this.latencyCooldown.signal,
+    )
+      .then(() => {
+        if (
+          this.latencyTest?.controller === controller &&
+          this.profile.mode === "native"
+        )
+          this.update({ latencyTestSent: true }, true);
+      })
+      .catch((error: unknown) => {
+        if (this.latencyTest?.controller === controller)
+          this.update({ latencyTestError: describeError(error) }, true);
+        throw error;
+      })
+      .finally(() => {
+        sessionSignal.removeEventListener("abort", stop);
+        if (this.latencyTest?.controller !== controller) return;
+        this.latencyTest = undefined;
+        this.update({ testingLatencies: undefined }, true);
+      });
+    this.latencyTest = { controller, promise };
+    this.update(
+      {
+        testingLatencies: true,
+        latencyTestError: undefined,
+        latencyTestSent: undefined,
+      },
+      true,
+    );
+    return promise;
+  };
+  private async runLatencyTests(
+    waves: LatencyTestWave[],
+    signal: AbortSignal,
+    cooldown: AbortSignal,
+  ) {
+    let failure: PromiseRejectedResult | undefined;
+    for (const { tags, windows } of waves) {
+      signal.throwIfAborted();
+      const results = await Promise.allSettled(
+        tags.map((tag) => this.urlTest(tag, signal)),
+      );
+      const blocked = results.find(
+        (result): result is PromiseRejectedResult =>
+          result.status === "rejected" &&
+          [Code.Unauthenticated, Code.PermissionDenied, Code.Unimplemented]
+            .includes(ConnectError.from(result.reason).code),
+      );
+      failure ??= results.find((result) => result.status === "rejected");
+      // Stream recovery cancels queued waves but the daemon still owns dispatched probes.
+      if (
+        this.profile.mode === "native" &&
+        results.some((result) =>
+          result.status === "fulfilled" || probeMayHaveStarted(result.reason),
+        )
+      )
+        await delay(probeWindowMs * windows, cooldown);
+      if (blocked) throw blocked.reason;
+    }
+    signal.throwIfAborted();
+    if (failure) throw failure.reason;
+  }
   closeConnection = (id: string) =>
     this.runUnary((options) => this.client.closeConnection({ id }, options));
   closeAllConnections = () =>
