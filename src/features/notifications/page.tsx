@@ -21,7 +21,7 @@ export default function Notifications({ desktop }: { desktop: ReturnType<typeof 
     (level === "all" || (entry.source === "local" ? localNotifications[entry.kind].level : "info") === level));
   const nativeStatus = snapshot.streamErrors.notifications ?? (snapshot.loaded.notifications
     ? "Native notifications received during this visit."
-    : "Waiting for the first native notification…");
+    : "Waiting for a native notification…");
 
   return (
     <>

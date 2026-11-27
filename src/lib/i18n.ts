@@ -69,7 +69,7 @@ const zh: Record<string, string> = {
   "Notification history": "通知历史",
   "Native capture runs while this page is open. The core has no history replay.": "此页面打开时采集核心通知。核心不会补发历史通知。",
   "Native notifications received during this visit.": "本次打开页面后已收到核心通知。",
-  "Waiting for the first native notification…": "正在等待第一条核心通知…",
+  "Waiting for a native notification…": "正在等待核心通知…",
   "Notification source": "通知来源",
   "Notification level": "通知级别",
   "Native Notification": "核心原生通知",

@@ -47,13 +47,23 @@ export function receiveLocalNotification(
   return receive(history, `local:${kind}`, { source: "local", kind }, receivedAt, sequence);
 }
 
+const credential = /\bbearer\s+\S|\b(?:authorization|(?:set[-_])?cookie|passwd|password|(?:client[-_ ]?)?secret|(?:x[-_])?api[-_ ]?key|(?:(?:access|refresh|id)[-_ ]?)?token)["']?\s*[:=]/iu;
+const url = /\/\/\S|\b(?:https?|file|mailto|data|javascript|vbscript|sing-box):\S/iu;
+
 function safeNativeText(value: string, redact: (value: string) => string, limit: number) {
   if (value.length > 8192) return "";
-  // Control characters and bidi overrides could obscure what a native message displays.
+  // Controls and formatting must not conceal credential and URL markers.
   const plain = plainLog(value).replace(/[\p{Cc}\p{Cf}]/gu, " ");
-  const decoded = new URLSearchParams(`text=${plain.replaceAll("+", "%2B").replaceAll("&", "%26")}`).get("text");
-  if (decoded && decoded !== plain && redact(decoded) !== decoded) return "[redacted]";
-  return redact(plain).replace(/\b[a-z][a-z\d+.-]*:\/\/\S+/giu, "[redacted]").trim().slice(0, limit);
+  let text = plain;
+  for (let depth = 0; depth <= 2; depth++) {
+    if (redact(text) !== text || credential.test(text) || url.test(text)) return "[redacted]";
+    if (depth === 2 || !text.includes("%")) break;
+    // Decode without treating literal plus signs and ampersands as form data.
+    const decoded = new URLSearchParams(`text=${text.replaceAll("+", "%2B").replaceAll("&", "%26")}`).get("text");
+    if (decoded === null || decoded === text) break;
+    text = decoded;
+  }
+  return plain.trim().slice(0, limit);
 }
 
 export function receiveNativeNotification(
@@ -61,7 +71,8 @@ export function receiveNativeNotification(
   redact: (value: string) => string,
 ) {
   const { value } = event.event;
-  if (!value?.identifier || value.identifier.length > 512) return history;
+  if (!value?.identifier || value.identifier.length > 512 ||
+    safeNativeText(value.identifier, redact, 512) === "[redacted]") return history;
   const id = `native:${JSON.stringify([value.typeID, value.identifier])}`;
   if (event.event.case === "cancel") {
     return history.map((entry) => entry.id === id && entry.source === "native" && !entry.canceled

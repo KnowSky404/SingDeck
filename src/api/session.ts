@@ -977,6 +977,10 @@ export class InstanceSession {
             });
           }
         } else if (channel === "notifications") {
+          if (attempt > 0) this.update({
+            loaded: { ...this.pending.loaded, notifications: false },
+            streamErrors: { ...this.pending.streamErrors, notifications: undefined },
+          });
           for await (const event of this.client.subscribeNotifications({}, options)) {
             if (parentSignal.aborted) return;
             if (!event.event.case) continue;

@@ -3,41 +3,57 @@ import type { InstanceSession } from "@/api/session";
 import { localNotifications, type NotificationEntry } from "@/api/notifications";
 import type { Translate } from "@/lib/i18n";
 
-export function useDesktopAlerts(session: InstanceSession, history: NotificationEntry[], t: Translate) {
-  const [enabledSession, setEnabledSession] = useState<InstanceSession>();
-  const [permission, setPermission] = useState<NotificationPermission>();
-  const observed = useRef(0);
-  const available = window.isSecureContext && typeof Notification === "function";
-  const enabled = available && enabledSession === session;
+export async function requestDesktopPermission(session: Pick<InstanceSession, "signal">) {
+  const scope = session.signal;
+  if (!scope || scope.aborted) return;
+  let permission: NotificationPermission;
+  try {
+    permission = await Notification.requestPermission();
+  } catch {
+    permission = "denied";
+  }
+  if (!scope.aborted && session.signal === scope) return { permission, scope };
+}
 
-  useEffect(() => {
-    if (!enabled) return;
-    const latest = history.find((entry) => entry.source === "local" && entry.sequence > observed.current);
-    if (!latest || latest.source !== "local") return;
-    observed.current = latest.sequence;
-    if (!document.hidden || Notification.permission !== "granted") return;
+export function deliverDesktopAlerts(history: NotificationEntry[], after: number, t: Translate) {
+  for (const entry of history) {
+    if (entry.sequence <= after) break;
+    if (entry.source !== "local") continue;
     try {
-      new Notification("SingDeck", { body: t(localNotifications[latest.kind].title), tag: `singdeck:${latest.kind}` });
+      new Notification("SingDeck", { body: t(localNotifications[entry.kind].title), tag: `singdeck:${entry.kind}` });
     } catch {
       // Some browsers expose permission but only support service worker notifications.
     }
-  }, [enabled, history, t]);
+  }
+}
+
+export function useDesktopAlerts(session: InstanceSession, history: NotificationEntry[], t: Translate) {
+  const [enabledScope, setEnabledScope] = useState<AbortSignal>();
+  const [permission, setPermission] = useState<NotificationPermission>();
+  const observed = useRef(0);
+  const available = window.isSecureContext && typeof Notification === "function";
+  const scope = session.signal;
+  const enabled = Boolean(available && scope && !scope.aborted && enabledScope === scope);
+
+  useEffect(() => {
+    if (!enabled || scope?.aborted) return;
+    const after = observed.current;
+    observed.current = Math.max(after, history[0]?.sequence ?? 0);
+    if (document.hidden && Notification.permission === "granted") deliverDesktopAlerts(history, after, t);
+  }, [enabled, scope, history, t]);
 
   async function toggle() {
     if (!available) return;
     if (enabled) {
-      setEnabledSession(undefined);
+      setEnabledScope(undefined);
       return;
     }
-    try {
-      const result = await Notification.requestPermission();
-      setPermission(result);
-      if (result === "granted" && !session.signal?.aborted) {
-        observed.current = session.getSnapshot().notifications[0]?.sequence ?? 0;
-        setEnabledSession(session);
-      }
-    } catch {
-      setPermission("denied");
+    const result = await requestDesktopPermission(session);
+    if (!result || result.scope.aborted || session.signal !== result.scope) return;
+    setPermission(result.permission);
+    if (result.permission === "granted") {
+      observed.current = session.getSnapshot().notifications[0]?.sequence ?? 0;
+      setEnabledScope(result.scope);
     }
   }
 
