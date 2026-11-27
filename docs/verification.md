@@ -87,6 +87,12 @@ At `1fd28e9`, a foreground Chromium 159.0.8154.6 context at 1280 × 720 with red
 
 Before switching windows, the browser observed 177 tasks of at least 50 ms, with a maximum of 113 ms. Chromium's coarse JS heap metric reported 23.4 MiB at each checkpoint. There were zero browser errors, failed requests or off-origin attempts. This single run measures foreground synthetic updates and chart bounds. Longer memory behavior, higher event rates and real-core performance remain separate checks.
 
+### Continuous-series marker rendering
+
+A follow-up compared `dfb3e14` and the chart marker change in alternating order, two runs per build. Source-mapped production builds used Chromium 159.0.8154.6, Playwright 1.65.1 and a 1280 × 720 foreground viewport on the shared two-CPU Linux host. Each fresh Demo context seeded the history with an accelerated clock, then resumed wall-clock speed for one-second updates and an 8.5-second CPU profile per window. Both builds showed the same four chart sizes and six series, and the status stream stayed Live. The measurements began with 300 points per series at five minutes and 60 at one minute.
+
+Median sampled Recharts time including callees went from 1,234 to 724 ms at five minutes and from 647 to 538 ms at one minute. Its marker traversal accounted for 395 and 83 ms of baseline self time, respectively. No marker traversal time was sampled after the change. The normal production builds added 38 gzip bytes across JavaScript and CSS, including 30 in the Runtime Monitor chunk. This comparison measures continuous Demo data. The browser regression separately checks the marker and split segments around a gap. Real-core throughput and long-run memory remain separate checks.
+
 ## Phase 5 — Outbound inventory capacity baseline
 
 Run `bun scripts/measure-outbound-capacity.ts` after the frozen install with the pinned Playwright Chromium available. The [script](../scripts/measure-outbound-capacity.ts) builds a disposable production-mode fixture, adds synthetic tags to the explicit demo inventory and blocks requests outside its loopback origin. The JSON report records application HEAD, worktree status, the measurement script hash and raw samples.
@@ -118,6 +124,12 @@ CI runs Chromium on desktop and with a mobile device profile. These local deskto
 - At `845ce6c`, Chromium 159.0.8154.6 loaded `/dashboard/#/runtime-monitor` from official sing-box 1.14.0 through a disposable OpenSSH 10.0p2 loopback forward. It inferred the forwarded origin, the core rejected an incorrect Bearer, and valid credentials reached API 4. Runtime reported the service and status streams as Live, and the displayed last-received timestamp advanced. Reload preserved the route and cleared the unremembered token. The browser reported zero page errors and zero requests outside the forwarded origin. The forwarded HTML matched the production candidate byte for byte. The SSH server required the disposable public key, preserved pre-authentication isolation and permitted only the API forward. The client pinned the temporary host key. Closing SSH closed the forwarded listener while the loopback core remained reachable. Temporary credentials, server and browser processes, and listeners were cleaned up.
 
 Firefox required an approved exception to the workspace execution sandbox to start its content processes. Firefox's own content sandbox and certificate validation remained enabled. The HTTPS test CA was trusted only in a disposable NSS profile. A fresh profile rejected both HTTPS origins with `SEC_ERROR_UNKNOWN_ISSUER`. Public-origin Private Network Access (PNA), real TLS deployments and physical mobile devices still need validation. [Browser security and deployment](api-compatibility.md#browser-security-and-deployment) · [Independent static hosting](deployment.md#b-independent-static-hosting)
+
+### Official sing-box 1.14.5 built-in dashboard
+
+At `dfb3e14`, Chromium 159.0.8154.6 opened the production build from the built-in `/dashboard/` of official sing-box 1.14.5 Linux amd64 (revision `a6844a780`). The 38 production files matched the merged build, and the core served the expected HTML byte for byte. The app inferred the loopback API origin, accepted the disposable Bearer on API 4, showed the Running service, and received two successive Runtime Monitor status frames. It displayed the configured selector and its selected and alternate nodes. Settings displayed the configured dynamic USB/IP service with zero devices and canceled that subscription on route exit.
+
+The five observed native gRPC-Web methods returned HTTP 200. The browser reported zero page errors and zero off-origin requests. This loopback smoke covers the listed paths on 1.14.5. The pinned integration baseline remains 1.14.0. [Official 1.14.5 release](https://github.com/SagerNet/sing-box/releases/tag/v1.14.5)
 
 ### Nginx streaming and reconnect
 
