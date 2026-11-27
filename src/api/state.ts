@@ -6,6 +6,7 @@ import {
   ConnectionSchema,
   ConnectionEventType,
   type Connection,
+  type ConnectionEvent,
   type ConnectionEvents,
   type Log,
   type LogLevel,
@@ -129,16 +130,23 @@ export function applyConnections(
   current: ReadonlyMap<string, Connection>,
   batch: ConnectionEvents,
 ): Map<string, Connection> {
-  const next = batch.reset ? new Map<string, Connection>() : new Map(current);
-  for (const e of batch.events) {
+  const draft = batch.reset ? new Map<string, Connection>() : new Map(current);
+  return applyConnectionEvents(draft, batch.events);
+}
+
+export function applyConnectionEvents(
+  draft: Map<string, Connection>,
+  events: readonly ConnectionEvent[],
+): Map<string, Connection> {
+  for (const e of events) {
     if (
       e.type === ConnectionEventType.CONNECTION_EVENT_CLOSED ||
       (e.connection && e.connection.closedAt > 0n)
     ) {
-      const row = e.connection ?? next.get(e.id);
+      const row = e.connection ?? draft.get(e.id);
       const closedAt = e.closedAt || row?.closedAt;
       if (row && closedAt && closedAt > 0n)
-        next.set(
+        draft.set(
           e.id,
           create(ConnectionSchema, {
             ...row,
@@ -147,16 +155,16 @@ export function applyConnections(
             downlink: 0n,
           }),
         );
-      else next.delete(e.id);
+      else draft.delete(e.id);
     } else if (
       e.type === ConnectionEventType.CONNECTION_EVENT_NEW &&
       e.connection
     )
-      next.set(e.id, e.connection);
+      draft.set(e.id, e.connection);
     else if (e.type === ConnectionEventType.CONNECTION_EVENT_UPDATE) {
-      const row = next.get(e.id);
+      const row = draft.get(e.id);
       if (row && row.closedAt === 0n)
-        next.set(
+        draft.set(
           e.id,
           create(ConnectionSchema, {
             ...row,
@@ -168,7 +176,7 @@ export function applyConnections(
         );
     }
   }
-  return next;
+  return draft;
 }
 
 export function assertCompatible(version: Version) {

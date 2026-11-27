@@ -467,6 +467,77 @@ describe("session lifecycle", () => {
     await expect(s.closeAllConnections().catch(describeError)).resolves.toBe("Wait for the connection list to refresh, then try again.");
     expect(closeAllConnections).not.toHaveBeenCalled();
   });
+  it("keeps published connection maps and rows immutable across a forced flush", async () => {
+    vi.useFakeTimers();
+    const closeAllConnections = vi.fn().mockResolvedValue(create(EmptySchema));
+    const newRow = (id: string) => ({
+      id, connection: create(ConnectionSchema, { id, outbound: "route", uplinkTotal: 10n }),
+    });
+    const updated = (id: string, uplinkDelta: bigint) =>
+      create(ConnectionEventsSchema, {
+        events: [{ id, type: ConnectionEventType.CONNECTION_EVENT_UPDATE, uplinkDelta }],
+      });
+    const closed = (id: string, closedAt: bigint) =>
+      create(ConnectionEventsSchema, {
+        events: [{ id, type: ConnectionEventType.CONNECTION_EVENT_CLOSED, closedAt }],
+      });
+    const s = session(undefined, {
+      ...createMockClient(),
+      closeAllConnections,
+      async *subscribeConnections(_, options) {
+        const signal = options!.signal!;
+        yield create(ConnectionEventsSchema, { reset: true, events: [newRow("first")] });
+        await delay(500, signal);
+        yield updated("first", 4n);
+        yield closed("first", 1n);
+        yield create(ConnectionEventsSchema, { events: [newRow("second")] });
+        await delay(20, signal);
+        yield updated("second", 7n);
+        yield closed("second", 2n);
+        await delay(60_000, signal);
+      },
+    });
+    s.connect();
+    await vi.advanceTimersByTimeAsync(300);
+    const firstSnapshot = s.getSnapshot();
+    const firstRow = firstSnapshot.connections.get("first");
+    expect(firstRow).toMatchObject({ closedAt: 0n, uplinkTotal: 10n });
+    expect(s.canInspectReportedOutbound("first", "route", firstSnapshot)).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(200);
+    expect(s.getSnapshot().connections).toBe(firstSnapshot.connections);
+    expect(firstSnapshot.connections.get("first")).toBe(firstRow);
+    expect(firstRow).toMatchObject({ closedAt: 0n, uplinkTotal: 10n });
+    expect(firstSnapshot.connections.has("second")).toBe(false);
+    expect(s.canInspectReportedOutbound("first", "route", firstSnapshot)).toBe(false);
+
+    s.clearLogs();
+    const flushed = s.getSnapshot();
+    const closedFirst = flushed.connections.get("first");
+    const secondRow = flushed.connections.get("second");
+    expect(flushed.connections).not.toBe(firstSnapshot.connections);
+    expect(closedFirst).toMatchObject({ closedAt: 1n, uplinkTotal: 14n });
+    expect(secondRow).toMatchObject({ closedAt: 0n, uplinkTotal: 10n });
+    expect(s.canInspectReportedOutbound("second", "route", flushed)).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(20);
+    expect(s.getSnapshot().connections).toBe(flushed.connections);
+    expect(flushed.connections.get("second")).toBe(secondRow);
+    expect(secondRow).toMatchObject({ closedAt: 0n, uplinkTotal: 10n });
+    expect(s.canInspectReportedOutbound("second", "route", flushed)).toBe(false);
+    await expect(s.closeAllConnections().catch(describeError)).resolves.toBe("No active connections remain.");
+    expect(closeAllConnections).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(100);
+    const final = s.getSnapshot().connections;
+    expect(final).not.toBe(flushed.connections);
+    expect(final.get("first")).toBe(closedFirst);
+    expect(final.get("second")).toMatchObject({ closedAt: 2n, uplinkTotal: 17n });
+    expect(firstSnapshot.connections.get("first")).toBe(firstRow);
+    expect(flushed.connections.get("second")).toBe(secondRow);
+    expect(firstRow).toMatchObject({ closedAt: 0n, uplinkTotal: 10n });
+    expect(secondRow).toMatchObject({ closedAt: 0n, uplinkTotal: 10n });
+  });
   it("closes only selected active IDs in order and reports partial acknowledgements", async () => {
     vi.useFakeTimers();
     const client = createMockClient();
