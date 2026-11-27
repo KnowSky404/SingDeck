@@ -105,9 +105,29 @@ CI runs Chromium on desktop and with a mobile device profile. These local deskto
 
 Firefox required an approved exception to the workspace execution sandbox to start its content processes. Firefox's own content sandbox and certificate validation remained enabled. The HTTPS test CA was trusted only in a disposable NSS profile. A fresh profile rejected both HTTPS origins with `SEC_ERROR_UNKNOWN_ISSUER`. Public-origin Private Network Access (PNA), real TLS deployments and physical mobile devices still need validation. [Browser security and deployment](api-compatibility.md#browser-security-and-deployment) · [Independent static hosting](deployment.md#b-independent-static-hosting)
 
+### Nginx streaming and reconnect
+
+At `88cf309`, Firefox 159.0 opened the production `/preview/` mount over TLS 1.3 through Debian Nginx 1.26.3 (`1.26.3-3+deb13u11`). Nginx forwarded same-origin requests to official sing-box 1.14.0 over loopback. The browser trusted a disposable CA only in its temporary profile and verified the server certificate. It authenticated against API 4 and received three successive runtime frames on one stream. Stopping the core interrupted the stream. After restart, the app ran another version check, returned to Connected and Live, and received two successive frames on a second HTTP 200 gRPC-Web subscription. The browser recorded zero page errors or off-origin requests.
+
+In a separate authenticated gRPC-Web probe against the same proxy and core, `proxy_buffering off` delivered four frames within 3.5 seconds. With response buffering enabled, the connection opened and stayed open without delivering headers or frames during that window. This comparison used one loopback Nginx configuration and a one-second status interval. [Nginx response buffering](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_buffering)
+
+### Published GitHub Pages baseline
+
+Chromium 159.0.8154.6 loaded the public `/SingDeck/` mount with browser certificate validation and TLS 1.3. The browser's 15 distinct HTML and asset responses matched the published `v0.8.1` ZIP byte for byte. Explicit Demo reached Connections, and reloading `/SingDeck/#/connections` kept the hash in the address bar while returning to the entry screen. Choosing Demo again opened Overview as configured in `v0.8.1`. No page errors, failed requests or off-origin requests were observed. The Pages deployment run succeeded for `v0.8.1` (`dfb16e8`), and the `v0.9.0-pre.1` run published the archive with the deploy job skipped. Public-origin access to a private native API remains a separate acceptance check. [Public dashboard](https://knowsky404.github.io/SingDeck/) · [Stable deployment](https://github.com/KnowSky404/SingDeck/actions/runs/45726481221) · [PRE archive run](https://github.com/KnowSky404/SingDeck/actions/runs/45956326830)
+
+### Clipboard permissions
+
+At `88cf309`, isolated Chromium 159.0.8154.6 contexts opened the production build over loopback. With clipboard permissions granted, **Copy domain** in the Demo Connection Inspector wrote the exact fixture value to the browser clipboard. A fresh context served `Permissions-Policy: clipboard-write=()`. Chromium reported the permission as denied, the inspector showed **Clipboard unavailable**, and the Connections JSON export still downloaded all 28 demo records. This check used the browser's Clipboard API and synthetic Demo data.
+
 ### Content Security Policy smoke
 
 At `f28375e`, Chromium 159.0.8154.6 loaded the production app from static `/preview/` with a test response header using `default-src 'none'`, same-origin scripts, styles, images and fonts, and `connect-src` limited to the exact loopback API origin. The app connected to official sing-box 1.14.0 on API 4, rendered the runtime charts and reported a Live status stream with no browser errors or policy violations. A separate loopback destination was blocked by `connect-src` before its listener received a request. This check covers the Runtime Monitor path with a host-managed header. [CSP connect-src](https://www.w3.org/TR/CSP3/#directive-connect-src)
+
+### Installability research
+
+At `88cf309`, Chromium 159.0.8154.6 ran a disposable manifest prototype alongside the unmodified production build on loopback. Relative `start_url` and `scope`, the default start URL as app ID, and local 192px and 512px icons yielded separate launch identities under `/dashboard/` and `/preview/`. The regular temporary profile reported `no-manifest` for the baseline and zero Chromium installability diagnostics for the prototype at `/preview/`. All four mount and variant combinations loaded scoped resources and preserved the Connections hash on reload. The prototype loaded under `manifest-src 'self'`. A `manifest-src 'none'` control blocked the manifest before a request. No Service Worker registrations or CacheStorage entries were observed. Browser install UI, OS installation and mobile behavior remain unverified. [Web App Manifest identity](https://www.w3.org/TR/appmanifest/#id-member) · [Chrome installation criteria](https://developer.chrome.com/blog/update-install-criteria)
+
+Runtime Monitor already offers 1, 3 and 5 minute windows for the current visit. Overview takes its window from profile preferences and has a fixed card layout. The existing hash route determines the initial page, with Overview as the default. Runtime history is bounded and held in the active session. Distinct manifest identities on one origin still share that origin's storage boundary. Persisted customization and retention controls depend on the instance preference and storage model. [Runtime Monitor](../src/features/dashboard/runtime-monitor.tsx) · [Overview](../src/features/dashboard/page.tsx) · [Architecture](architecture.md)
 
 ### Credential handling and dependency audit
 
