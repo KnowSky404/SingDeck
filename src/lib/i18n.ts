@@ -331,6 +331,8 @@ const zh: Record<string, string> = {
   "UID {id}": "UID {id}",
   "Upload in reported interval": "上报区间上传量",
   "Download in reported interval": "上报区间下载量",
+  "Browser-observed upload rate": "浏览器观测上传速率",
+  "Browser-observed download rate": "浏览器观测下载速率",
   "Process user name": "进程用户名",
   "Process path": "进程路径",
   "Package names": "软件包名称",

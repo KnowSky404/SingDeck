@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowRight, Copy } from "lucide-react";
 import { useWorkspace } from "@/app/context";
 import { hasCurrentConnections } from "@/api/state";
@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { bytes } from "@/lib/format";
 import type { Connection } from "@/proto/daemon/started_service_pb";
+import { observeConnectionRates, type ConnectionRateMeasurement } from "./observed-rates";
 import { redactNativeConnectionText } from "./redaction";
 import { hasConnectionIntervalDelta } from "./traffic";
 
@@ -85,9 +86,10 @@ export function ConnectionInspector({
             ) : t(current ? "This connection is no longer in the current records." : "Waiting for the instance…")}
           </DialogDescription>
         </DialogHeader>
-        {record && (
+        {record && connectionId !== null && (
           <ConnectionDetails
             key={record.id}
+            connectionId={connectionId}
             record={record}
             current={current}
             onInspectOutbound={canInspectOutbound ? inspectOutbound : undefined}
@@ -98,12 +100,26 @@ export function ConnectionInspector({
   );
 }
 
-function ConnectionDetails({ record, current, onInspectOutbound }: {
+function ConnectionDetails({ connectionId, record, current, onInspectOutbound }: {
+  connectionId: string;
   record: Connection;
   current: boolean;
   onInspectOutbound?: () => void;
 }) {
-  const { language, session, t } = useWorkspace();
+  const { language, session, snapshot, t } = useWorkspace();
+  const [observation, setObservation] = useState<{
+    session: typeof session;
+    measurement: ConnectionRateMeasurement;
+  } | null>(null);
+  useEffect(() => observeConnectionRates(session, connectionId, (measurement) => {
+    setObservation(measurement ? { session, measurement } : null);
+  }), [session, connectionId]);
+  const measurement = observation?.measurement;
+  const showRates = observation?.session === session && current &&
+    !snapshot.authenticationFailed && snapshot.detailChannel === "connections" &&
+    measurement?.record === record && measurement.connectionGeneration === snapshot.connectionGeneration &&
+    measurement.topologyGeneration === snapshot.topologyGeneration;
+  const observedRate = (value: number | undefined) => showRates && value !== undefined ? `${bytes(value)}/s` : null;
   const dateFormat = useMemo(() => new Intl.DateTimeFormat(language, {
     year: "numeric",
     month: "short",
@@ -169,6 +185,8 @@ function ConnectionDetails({ record, current, onInspectOutbound }: {
     ["Download total", recordedBytes(record.downlinkTotal)],
     ["Upload in reported interval", intervalBytes(record.uplink)],
     ["Download in reported interval", intervalBytes(record.downlink)],
+    ["Browser-observed upload rate", observedRate(measurement?.upload)],
+    ["Browser-observed download rate", observedRate(measurement?.download)],
   ];
 
   async function copy(value: string) {
