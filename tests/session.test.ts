@@ -235,6 +235,30 @@ describe("session lifecycle", () => {
     expect(s.getSnapshot().notifications).toHaveLength(0);
     expect(session().getSnapshot().notifications).toHaveLength(0);
   });
+  it("shows a quiet native retry as awaiting an event", async () => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    let attempts = 0;
+    const s = session(undefined, {
+      ...client,
+      async *subscribeNotifications(_, options) {
+        if (++attempts === 1) throw new ConnectError("temporary", Code.Unavailable);
+        await delay(60_000, options!.signal!);
+        yield create(NotificationEventSchema, {
+          event: { case: "send", value: { identifier: "after-idle", title: "After the quiet period" } },
+        });
+      },
+    });
+    s.connect();
+    await vi.advanceTimersByTimeAsync(400);
+    s.setDetailChannel("notifications");
+    await vi.advanceTimersByTimeAsync(100);
+    expect(s.getSnapshot().streamErrors.notifications).toBeDefined();
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(attempts).toBe(2);
+    expect(s.getSnapshot().streamErrors.notifications).toBeUndefined();
+    expect(s.getSnapshot().loaded.notifications).toBe(false);
+  });
   it("bounds connection history and evicts closed records before active connections", async () => {
     vi.useFakeTimers();
     const client = createMockClient();

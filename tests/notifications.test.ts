@@ -26,7 +26,7 @@ describe("notification history", () => {
     const local = receiveLocalNotification([], "selectionFailed", 1, 1);
     const mix = receiveNativeNotification(local, send("selectionFailed"), 2, 2, redact);
     expect(mix[0]).toMatchObject({
-      source: "native", title: "<img src=[redacted]", subtitle: "[redacted]", body: "ANSI: [redacted]",
+      source: "native", title: "[redacted]", subtitle: "[redacted]", body: "[redacted]",
     });
     expect(mix[0]).not.toHaveProperty("openURL");
     const [native] = mix;
@@ -56,5 +56,23 @@ describe("notification history", () => {
     expect(history.at(-1)?.sequence).toBe(5);
     expect(receiveNativeNotification(history, send(""), 200, 200, redact)).toBe(history);
     expect(receiveNativeNotification(history, send("x".repeat(513)), 200, 200, redact)).toBe(history);
+    expect(receiveNativeNotification(history, send("session/demo%2Dmarker"), 200, 200, redact)).toBe(history);
+  });
+
+  it.each([
+    "API replied with Bearer synthetic-value",
+    "Set-Cookie: sid=synthetic-value; HttpOnly",
+    '{"password":"synthetic-value"}',
+    "x-api-key=synthetic-value",
+    "A path //user:synthetic-value@fixture.invalid/private",
+    "https%253A%252F%252Ffixture.invalid%252Fsynthetic-value",
+    "Authorization%3A%20Basic%20synthetic-value",
+  ])("redacts common sensitive text before storing native content", (body) => {
+    const packet = create(NotificationEventSchema, {
+      event: { case: "send", value: { identifier: "sample", title: "Ordinary title", body } },
+    });
+    expect(receiveNativeNotification([], packet, 1, 1, redact)[0]).toMatchObject({
+      title: "Ordinary title", body: "[redacted]",
+    });
   });
 });
