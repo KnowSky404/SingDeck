@@ -183,6 +183,7 @@ export class InstanceSession {
   private retainClosedOnResume = false;
   private streamsStarted = false;
   private revalidation?: { controller: AbortController; promise: Promise<void> };
+  private readonly versionReads = new Map<AbortSignal, (() => void) | undefined>();
   private revalidationGeneration = 0;
   private serviceRecoveryGeneration?: number;
   private bootScope?: AbortController;
@@ -295,6 +296,7 @@ export class InstanceSession {
   };
   disconnect = () => {
     this.controller?.abort();
+    this.versionReads.clear();
     this.notificationHistory = [];
     this.topologyGeneration++;
     this.streamsStarted = false;
@@ -549,8 +551,43 @@ export class InstanceSession {
       throw new ConnectError("Log stream unavailable", Code.Unavailable);
     return this.runUnary((options) => this.client.clearLogs({}, options), signal);
   };
+  private async readVersion(signal: AbortSignal, reportRejection = true) {
+    signal.throwIfAborted();
+    const session = this.signal;
+    this.versionReads.set(signal, undefined);
+    try {
+      return await this.client.getVersion({}, { signal });
+    } catch (error) {
+      if (reportRejection && !signal.aborted && session === this.signal && !this.pending.authenticationFailed &&
+          ConnectError.from(error).code === Code.Unauthenticated)
+        this.update({ authenticationFailed: true }, true);
+      throw error;
+    } finally {
+      const fallback = this.versionReads.get(signal);
+      if (fallback) signal.removeEventListener("abort", fallback);
+      this.versionReads.delete(signal);
+    }
+  }
+  private confirmCredentialRejection() {
+    const signal = this.signal;
+    if (!signal || signal.aborted || this.pending.authenticationFailed || this.versionReads.has(signal)) return;
+    const confirm = () => {
+      if (signal === this.signal && !signal.aborted && !this.pending.authenticationFailed && !this.versionReads.has(signal))
+        void this.readVersion(signal).catch(() => {});
+    };
+    const reused = [...this.versionReads.keys()].find((read) => !read.aborted);
+    if (!reused) return confirm();
+    if (this.versionReads.get(reused)) return;
+    // A service reset may cancel this metadata read without ending the session.
+    const fallback = () => {
+      this.versionReads.delete(reused);
+      confirm();
+    };
+    this.versionReads.set(reused, fallback);
+    reused.addEventListener("abort", fallback, { once: true, signal });
+  }
   private async readMetadata(signal: AbortSignal) {
-    const version = await this.client.getVersion({}, { signal });
+    const version = await this.readVersion(signal, false);
     signal.throwIfAborted();
     assertCompatible(version);
     const level = await this.runUnary(
@@ -607,7 +644,10 @@ export class InstanceSession {
         if (changed) this.invalidateServiceReads();
       })
       .catch((error: unknown) => {
-        if (!signal.aborted) throw error;
+        if (signal.aborted) return;
+        if (ConnectError.from(error).code === Code.Unauthenticated)
+          this.update({ authenticationFailed: true, error: describeError(error) }, true);
+        throw error;
       })
       .finally(() => {
         if (this.revalidation?.controller === controller) this.revalidation = undefined;
@@ -641,8 +681,6 @@ export class InstanceSession {
               phase: "error",
               checkingWarnings: false,
               error: error instanceof CompatibilityError ? error.message : describeError(error),
-              authenticationFailed:
-                this.pending.authenticationFailed || ConnectError.from(error).code === Code.Unauthenticated,
             }, true);
             return;
           }
@@ -798,6 +836,7 @@ export class InstanceSession {
     let attempt = 0;
     while (!signal.aborted) {
       try {
+        // Publish an initial rejection together with the terminal connection error.
         const metadata = await this.readMetadata(signal);
         if (signal.aborted) return;
         this.update({ ...metadata, error: undefined });
@@ -825,8 +864,9 @@ export class InstanceSession {
             {
               phase: "error",
               error: message,
-              authenticationFailed:
-                ConnectError.from(error).code === Code.Unauthenticated,
+              ...(!this.streamsStarted && ConnectError.from(error).code === Code.Unauthenticated && {
+                authenticationFailed: true,
+              }),
             },
             true,
           );
@@ -1118,9 +1158,6 @@ export class InstanceSession {
               loaded: { ...this.pending.loaded, usbip: false },
             }),
             streamErrors: { ...this.pending.streamErrors, [channel]: message },
-            authenticationFailed:
-              this.pending.authenticationFailed ||
-              code === Code.Unauthenticated,
             ...(channel === "status"
               ? { phase: retry ? "reconnecting" : "error", error: message,
                   ...(!retry && { checkingWarnings: false }) }
@@ -1128,6 +1165,7 @@ export class InstanceSession {
           },
           true,
         );
+        if (code === Code.Unauthenticated) this.confirmCredentialRejection();
         if (!retry) return;
       } finally {
         clearTimeout(watchdog);
@@ -1148,15 +1186,17 @@ export class InstanceSession {
     request: (options: { signal?: AbortSignal }) => Promise<T>,
     signal = this.signal,
   ) {
+    const session = this.signal;
     try {
       return await request({ signal });
     } catch (error) {
       if (
         signal &&
         !signal.aborted &&
+        session === this.signal &&
         ConnectError.from(error).code === Code.Unauthenticated
       )
-        this.update({ authenticationFailed: true }, true);
+        this.confirmCredentialRejection();
       throw error;
     }
   }
@@ -1492,7 +1532,7 @@ export class InstanceSession {
         throw new ConnectError("Diagnostic canceled", Code.Canceled);
       }
       const { code } = ConnectError.from(error);
-      if (code === Code.Unauthenticated) this.update({ authenticationFailed: true }, true);
+      if (code === Code.Unauthenticated) this.confirmCredentialRejection();
       // A missing selected tag is scoped to the request, not the whole RPC.
       if (!final && code !== Code.NotFound) this.setCapability(name, capabilityFailure(error));
       throw error;

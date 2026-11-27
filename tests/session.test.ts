@@ -4,7 +4,7 @@ import { EmptySchema } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { InstanceSession } from "@/api/session";
 import { createMockClient, MockControl } from "@/mocks/client";
-import { mockProfile } from "@/features/instances/profiles";
+import { defaultProfile, mockProfile } from "@/features/instances/profiles";
 import {
   ConnectionSchema,
   ConnectionEventsSchema,
@@ -17,6 +17,7 @@ import {
   LogSchema,
   NotificationEventSchema,
   USBIPServerStatusUpdateSchema,
+  type Version,
 } from "@/proto/daemon/started_service_pb";
 import { CONNECTION_LIMIT } from "@/api/state";
 import { delay, describeError } from "@/api/errors";
@@ -25,8 +26,9 @@ const sessions: InstanceSession[] = [];
 function session(
   control = new MockControl(),
   client = createMockClient(control),
+  profile = mockProfile,
 ) {
-  const s = new InstanceSession(client, mockProfile);
+  const s = new InstanceSession(client, profile);
   sessions.push(s);
   return s;
 }
@@ -560,20 +562,22 @@ describe("session lifecycle", () => {
     expect(s.getSnapshot().error).toContain("Unsupported API");
     expect(s.signal?.aborted).toBe(true);
   });
-  it("does not retry authentication failures", async () => {
+  it("marks a primary GetVersion authentication failure without retrying", async () => {
     vi.useFakeTimers();
     const client = createMockClient(),
       getVersion = vi
         .fn()
         .mockRejectedValue(new ConnectError("secret", Code.Unauthenticated));
-    const s = session(undefined, { ...client, getVersion });
+    const s = session(undefined, { ...client, getVersion }, defaultProfile);
     s.connect();
     await vi.advanceTimersByTimeAsync(10000);
     expect(getVersion).toHaveBeenCalledTimes(1);
-    expect(s.getSnapshot().phase).toBe("error");
+    expect(s.getSnapshot()).toMatchObject({ phase: "error", authenticationFailed: true });
     expect(s.getSnapshot().error).not.toContain("secret");
+    expect(s.getSnapshot().notifications.filter((entry) => entry.source === "local" && entry.kind === "apiConnection"))
+      .toMatchObject([{ count: 1 }]);
   });
-  it("reports a subscription rejecting authentication while status remains available", async () => {
+  it("keeps a groups subscription rejection scoped when GetVersion accepts the credential", async () => {
     vi.useFakeTimers();
     const client = createMockClient();
     const s = session(undefined, {
@@ -582,34 +586,175 @@ describe("session lifecycle", () => {
         yield create(GroupsSchema);
         throw new ConnectError("Authentication rejected", Code.Unauthenticated);
       },
-    });
+    }, defaultProfile);
     s.connect();
     await vi.advanceTimersByTimeAsync(1500);
-    expect(s.getSnapshot()).toMatchObject({
-      phase: "connected",
-      authenticationFailed: true,
-    });
+    expect(s.getSnapshot()).toMatchObject({ phase: "connected", loaded: { status: true } });
+    expect(s.getSnapshot().authenticationFailed).toBeFalsy();
+    expect(s.getSnapshot().streamErrors.groups).toBeTruthy();
   });
-  it("reports authentication rejected by an action while status stays connected", async () => {
+  it.each([
+    ["succeeds", undefined],
+    ["is forbidden", Code.PermissionDenied],
+    ["is temporarily unavailable", Code.Unavailable],
+    ["rejects the credential", Code.Unauthenticated],
+  ] as const)("reports secondary failures before their shared confirmation %s", async (_, result) => {
     vi.useFakeTimers();
     const client = createMockClient();
-    const s = session(undefined, {
-      ...client,
-      closeConnection: vi
-        .fn()
-        .mockRejectedValue(
-          new ConnectError("Authentication rejected", Code.Unauthenticated),
-        ),
-    });
+    const denied = new ConnectError("secondary RPC private text", Code.Unauthenticated);
+    const getVersion = vi.fn(client.getVersion);
+    const closeConnection = vi.fn(client.closeConnection).mockRejectedValue(denied);
+    const startSTUNTest = vi.fn<typeof client.startSTUNTest>(() => { throw denied; });
+    const subscribeUSBIPServerStatus = vi.fn<typeof client.subscribeUSBIPServerStatus>(() => { throw denied; });
+    const s = session(undefined, { ...client, getVersion, closeConnection, startSTUNTest, subscribeUSBIPServerStatus }, defaultProfile);
     s.connect();
     await vi.advanceTimersByTimeAsync(500);
-    await expect(s.closeConnection("active")).rejects.toMatchObject({
-      code: Code.Unauthenticated,
+
+    let finishConfirmation!: () => void;
+    const pending = new Promise<Version>((resolve, reject) => {
+      finishConfirmation = () => {
+        if (result === undefined) resolve(create(VersionSchema, { version: "1.14.0", apiVersion: 4 }));
+        else reject(new ConnectError("primary RPC private text", result));
+      };
     });
+    getVersion.mockClear().mockImplementationOnce(() => pending);
+    await Promise.all([
+      expect(s.closeConnection("active")).rejects.toMatchObject({ code: Code.Unauthenticated }),
+      expect(s.runSTUN({}, new AbortController().signal, vi.fn())).rejects.toMatchObject({ code: Code.Unauthenticated }),
+    ]);
+    s.setDetailChannel("usbip");
+    await vi.advanceTimersByTimeAsync(200);
     expect(s.getSnapshot()).toMatchObject({
       phase: "connected",
-      authenticationFailed: true,
+      loaded: { status: true },
+      capabilities: { stun: { status: "error", code: Code.Unauthenticated } },
     });
+    expect(s.getSnapshot().streamErrors.usbip).toBeTruthy();
+    expect(s.getSnapshot().streamErrors.usbip).not.toContain("secondary RPC private text");
+    expect(s.getSnapshot().authenticationFailed).toBeFalsy();
+    expect(getVersion).toHaveBeenCalledTimes(1);
+
+    finishConfirmation();
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(Boolean(s.getSnapshot().authenticationFailed)).toBe(result === Code.Unauthenticated);
+    if (result !== Code.Unauthenticated) {
+      expect(s.getSnapshot().phase).toBe("connected");
+      expect(s.getSnapshot().streamErrors.usbip).toBeTruthy();
+    }
+    expect(getVersion).toHaveBeenCalledTimes(1);
+    expect(closeConnection).toHaveBeenCalledTimes(1);
+    expect(startSTUNTest).toHaveBeenCalledTimes(1);
+    expect(subscribeUSBIPServerStatus).toHaveBeenCalledTimes(1);
+  });
+  it("reuses pending mandatory GetVersion during a notifications rejection", async () => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    let rejectVersion!: (error: ConnectError) => void;
+    const pending = new Promise<Version>((_, reject) => { rejectVersion = reject; });
+    const getVersion = vi.fn(client.getVersion)
+      .mockImplementationOnce(client.getVersion)
+      .mockImplementationOnce(() => pending);
+    const s = session(undefined, {
+      ...client,
+      getVersion,
+      subscribeNotifications() {
+        throw new ConnectError("notification RPC private text", Code.Unauthenticated);
+      },
+    }, defaultProfile);
+    s.connect();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(getVersion).toHaveBeenCalledTimes(2);
+    s.setDetailChannel("notifications");
+    await vi.advanceTimersByTimeAsync(200);
+    expect(s.getSnapshot().streamErrors.notifications).toBeTruthy();
+    expect(s.getSnapshot().authenticationFailed).toBeFalsy();
+    expect(getVersion).toHaveBeenCalledTimes(2);
+
+    rejectVersion(new ConnectError("primary RPC private text", Code.Unauthenticated));
+    await vi.advanceTimersByTimeAsync(200);
+    expect(s.getSnapshot()).toMatchObject({ phase: "error", authenticationFailed: true });
+    expect(s.getSnapshot().notifications.filter((entry) => entry.source === "local" && entry.kind === "apiConnection"))
+      .toMatchObject([{ count: 1 }]);
+    expect(getVersion).toHaveBeenCalledTimes(2);
+  });
+  it("immediately confirms a notifications rejection when IDLE cancels its pending validation", async () => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    let finishLegacyVersion!: (version: Version) => void;
+    const legacyVersion = new Promise<Version>((resolve) => { finishLegacyVersion = resolve; });
+    let stopService!: () => void;
+    const waitForIdle = new Promise<void>((resolve) => { stopService = resolve; });
+    const getVersion = vi.fn(client.getVersion)
+      .mockImplementationOnce(client.getVersion)
+      .mockImplementationOnce(() => legacyVersion)
+      .mockRejectedValueOnce(new ConnectError("fallback rejected", Code.Unauthenticated));
+    const s = session(undefined, {
+      ...client,
+      getVersion,
+      async *subscribeServiceStatus(_, options) {
+        yield create(ServiceStatusSchema, { status: ServiceStatus_Type.STARTED });
+        await waitForIdle;
+        yield create(ServiceStatusSchema, { status: ServiceStatus_Type.IDLE });
+        await delay(60_000, options!.signal!);
+      },
+      subscribeNotifications() {
+        throw new ConnectError("notification RPC rejected", Code.Unauthenticated);
+      },
+    }, defaultProfile);
+    s.connect();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(getVersion).toHaveBeenCalledTimes(2);
+    const currentSignal = s.signal;
+    const legacySignal = getVersion.mock.calls[1][1]?.signal;
+    expect(legacySignal).not.toBe(currentSignal);
+    expect(legacySignal?.aborted).toBe(false);
+
+    s.setDetailChannel("notifications");
+    await vi.advanceTimersByTimeAsync(200);
+    expect(s.getSnapshot().streamErrors.notifications).toBeTruthy();
+    expect(s.getSnapshot().authenticationFailed).toBeFalsy();
+    expect(getVersion).toHaveBeenCalledTimes(2);
+
+    stopService();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(legacySignal?.aborted).toBe(true);
+    expect(s.signal).toBe(currentSignal);
+    expect(currentSignal?.aborted).toBe(false);
+    expect(getVersion).toHaveBeenCalledTimes(3);
+    expect(getVersion.mock.calls[2][1]?.signal).toBe(currentSignal);
+    expect(s.getSnapshot()).toMatchObject({ service: { status: ServiceStatus_Type.IDLE }, authenticationFailed: true });
+
+    finishLegacyVersion(create(VersionSchema, { version: "1.14.1", apiVersion: 4 }));
+    await vi.advanceTimersByTimeAsync(200);
+    expect(s.getSnapshot()).toMatchObject({ version: { version: "1.14.0" }, authenticationFailed: true });
+    expect(getVersion).toHaveBeenCalledTimes(3);
+  });
+  it("ignores late confirmation of rejected credentials after reconnecting", async () => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    const getVersion = vi.fn(client.getVersion);
+    const denied = new ConnectError("Authentication rejected", Code.Unauthenticated);
+    const closeConnection = vi.fn(client.closeConnection).mockRejectedValueOnce(denied);
+    const s = session(undefined, { ...client, getVersion, closeConnection }, defaultProfile);
+    s.connect();
+    await vi.advanceTimersByTimeAsync(500);
+
+    let rejectOldVersion!: (error: ConnectError) => void;
+    const pending = new Promise<Version>((_, reject) => { rejectOldVersion = reject; });
+    getVersion.mockClear().mockImplementationOnce(() => pending);
+    await expect(s.closeConnection("active")).rejects.toMatchObject({ code: Code.Unauthenticated });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(getVersion).toHaveBeenCalledTimes(1);
+    const oldSignal = getVersion.mock.calls[0][1]?.signal;
+    expect(oldSignal?.aborted).toBe(false);
+
+    s.connect();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(oldSignal?.aborted).toBe(true);
+    rejectOldVersion(denied);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(s.getSnapshot()).toMatchObject({ phase: "connected", version: { version: "1.14.0", apiVersion: 4 } });
+    expect(s.getSnapshot().authenticationFailed).toBeFalsy();
   });
   it("ignores late responses from a canceled handshake", async () => {
     vi.useFakeTimers();
