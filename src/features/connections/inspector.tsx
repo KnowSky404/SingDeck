@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowRight, Copy } from "lucide-react";
 import { useWorkspace } from "@/app/context";
 import { hasCurrentConnections } from "@/api/state";
@@ -21,14 +21,18 @@ function recordedTime(timestamp: bigint, formatter: Intl.DateTimeFormat) {
   return <time dateTime={date.toISOString()}>{formatter.format(date)}</time>;
 }
 
+function recordedBytes(value: bigint) {
+  if (value < 0n) return null;
+  const readable = bytes(value);
+  return value < 1000n ? readable : `${readable} (${value} B)`;
+}
+
 export function ConnectionInspector({
   connectionId,
-  dateFormat,
   onClose,
   onCloseAutoFocus,
 }: {
   connectionId: string | null;
-  dateFormat: Intl.DateTimeFormat;
   onClose: () => void;
   onCloseAutoFocus: (event: Event) => void;
 }) {
@@ -69,19 +73,28 @@ export function ConnectionInspector({
           </DialogDescription>
         </DialogHeader>
         {record && (
-          <ConnectionDetails key={record.id} record={record} dateFormat={dateFormat} current={current} />
+          <ConnectionDetails key={record.id} record={record} current={current} />
         )}
       </DialogContent>
     </Dialog>
   );
 }
 
-function ConnectionDetails({ record, dateFormat, current }: {
+function ConnectionDetails({ record, current }: {
   record: Connection;
-  dateFormat: Intl.DateTimeFormat;
   current: boolean;
 }) {
-  const { session, t } = useWorkspace();
+  const { language, session, t } = useWorkspace();
+  const dateFormat = useMemo(() => new Intl.DateTimeFormat(language, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    fractionalSecondDigits: 3,
+    hour12: false,
+  }), [language]);
   const [feedback, setFeedback] = useState("");
   const safe = (value: string | undefined) =>
     value ? redactNativeConnectionText(value, (text) => session.redactText(text)) : null;
@@ -102,7 +115,7 @@ function ConnectionDetails({ record, dateFormat, current }: {
   const processOwner = processUserName ??
     (processUserId === null ? null : t("UID {id}", { id: processUserId }));
   const showInterval = current && hasConnectionIntervalDelta(record);
-  const intervalBytes = (value: bigint) => showInterval ? bytes(value) : null;
+  const intervalBytes = (value: bigint) => showInterval ? recordedBytes(value) : null;
   const route = ([
     ["Process", processPath || packages || processId || processOwner],
     ["Inbound", inbound],
@@ -133,8 +146,8 @@ function ConnectionDetails({ record, dateFormat, current }: {
     ["Package names", packages],
     ["Created at", recordedTime(record.createdAt, dateFormat)],
     ["Closed at", recordedTime(record.closedAt, dateFormat)],
-    ["Upload total", record.uplinkTotal >= 0n ? bytes(record.uplinkTotal) : null],
-    ["Download total", record.downlinkTotal >= 0n ? bytes(record.downlinkTotal) : null],
+    ["Upload total", recordedBytes(record.uplinkTotal)],
+    ["Download total", recordedBytes(record.downlinkTotal)],
     ["Upload in reported interval", intervalBytes(record.uplink)],
     ["Download in reported interval", intervalBytes(record.downlink)],
   ];

@@ -64,8 +64,9 @@ test("connection details show the reported route and retained closed state", asy
     "datetime",
     /T.*Z$/,
   );
+  await expect(fact("Created at").locator("time")).toHaveText(/\d{2}:\d{2}:\d{2}\.\d{3}/);
   await expect(fact("Closed at")).toHaveText("Unavailable");
-  await expect(fact("Download total")).toHaveText(/^[\d.]+ [KMGT]?B$/);
+  await expect(fact("Download total")).toHaveText(/^[\d.]+ [KMGT]B \(\d+ B\)$/);
   await expect(fact("Upload in reported interval")).toHaveText("Unavailable");
   await expect(fact("Download in reported interval")).toHaveText("Unavailable");
 
@@ -106,7 +107,7 @@ test("connection details show the reported route and retained closed state", asy
     /T.*Z$/,
   );
   await expect(route).toContainText(/Primary route.*Singapore 01/s);
-  await expect(fact("Download total")).toHaveText(/^[\d.]+ [KMGT]?B$/);
+  await expect(fact("Download total")).toHaveText(/^[\d.]+ [KMGT]B \(\d+ B\)$/);
 });
 
 test("connection filters compose with search and reset to all active rows", async ({
