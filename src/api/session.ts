@@ -130,6 +130,7 @@ export class InstanceSession {
   private serviceReadsScope?: AbortController;
   private detailScope?: AbortController;
   private inventoryEnabled = false;
+  private retainClosedOnResume = false;
   private streamsStarted = false;
   private revalidation?: Promise<void>;
   private warningsScope?: AbortController;
@@ -175,6 +176,7 @@ export class InstanceSession {
   disconnect = () => {
     this.controller?.abort();
     this.streamsStarted = false;
+    this.retainClosedOnResume = false;
     this.revalidation = undefined;
     this.detailScope = undefined;
     this.warningsScope = undefined;
@@ -213,34 +215,36 @@ export class InstanceSession {
     this.serviceReadsScope = undefined;
     this.warningsScope = undefined;
     this.interruptDiagnostic();
+    this.retainClosedOnResume = false;
     this.update({
+      connections: new Map(),
+      connectionOverflow: false,
       groups: undefined,
       outbounds: undefined,
       warnings: undefined,
       checkingWarnings: undefined,
       capabilities: initialCapabilities(),
-      loaded: { ...this.pending.loaded, groups: false, outbounds: false },
+      loaded: { ...this.pending.loaded, connections: false, groups: false, outbounds: false },
       streamErrors: {
         ...this.pending.streamErrors,
         groups: undefined,
         outbounds: undefined,
       },
     });
+    if (!this.inventoryEnabled) this.startDetailStream();
   }
   private async refreshServiceReads(parent: AbortSignal) {
     const scope = new AbortController();
     this.serviceReadsScope = scope;
     const signal = AbortSignal.any([parent, scope.signal]);
     if (this.inventoryEnabled) this.startDetailStream();
-    await Promise.all([
-      this.stream("groups", signal),
-      this.refreshWarnings(),
-      this.probeClashMode(signal),
-    ]);
+    this.readServiceConfiguration();
+    await this.stream("groups", signal);
   }
   setInventoryEnabled = (enabled: boolean) => {
     if (enabled === this.inventoryEnabled) return;
     this.inventoryEnabled = enabled;
+    if (enabled && this.pending.loaded.connections) this.retainClosedOnResume = true;
     this.detailScope?.abort();
     this.update({
       outbounds: undefined,
@@ -265,10 +269,19 @@ export class InstanceSession {
     this.detailScope = scope;
     void this.stream(channel, AbortSignal.any([parent, service, scope.signal]));
   }
-  private redactText(value: string) {
+  redactText(value: string) {
     return this.secret ? value.replaceAll(this.secret, "[redacted]") : value;
   }
+  private readServiceConfiguration() {
+    const parent = this.signal;
+    const service = this.serviceReadsScope?.signal;
+    if (!parent || !service || this.pending.service?.status !== ServiceStatus_Type.STARTED)
+      return;
+    void this.refreshWarnings();
+    void this.probeClashMode(AbortSignal.any([parent, service]));
+  }
   refreshWarnings = async () => {
+    if (this.pending.service?.status !== ServiceStatus_Type.STARTED) return;
     const parent = this.signal;
     const service = this.serviceReadsScope?.signal;
     if (!parent || parent.aborted || !service || service.aborted || this.warningsScope) return;
@@ -528,6 +541,7 @@ export class InstanceSession {
               this.update({ service });
               if (recovering || (previous !== undefined && previous !== ServiceStatus_Type.STARTED))
                 void this.recoverServiceReads(parentSignal);
+              else if (previous === undefined) this.readServiceConfiguration();
             } else {
               if (this.pending.service?.status !== service.status)
                 this.invalidateServiceReads();
@@ -575,10 +589,18 @@ export class InstanceSession {
           )) {
             if (parentSignal.aborted) return;
             received();
-            const connections = applyConnections(
-              this.pending.connections,
-              events,
-            );
+            const snapshot = applyConnections(this.pending.connections, events);
+            const resume = events.reset && this.retainClosedOnResume;
+            let connections = snapshot;
+            if (resume) {
+              // The core's reset replaces live rows but its closed buffer is shorter than ours.
+              connections = new Map();
+              for (const [id, row] of this.pending.connections) {
+                if (row.closedAt > 0n && !snapshot.has(id)) connections.set(id, row);
+              }
+              for (const [id, row] of snapshot) connections.set(id, row);
+              this.retainClosedOnResume = false;
+            }
             const overflow = connections.size > CONNECTION_LIMIT;
             // Discard closed history before active rows when the bounded view is full.
             for (const [id, row] of connections) {
@@ -591,7 +613,7 @@ export class InstanceSession {
             this.update({
               connections,
               connectionOverflow: events.reset
-                ? overflow
+                ? overflow || (resume && this.pending.connectionOverflow)
                 : this.pending.connectionOverflow || overflow,
             });
           }
