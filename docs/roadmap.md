@@ -9,7 +9,7 @@ SingDeck connects directly to the native sing-box Service API for control, diagn
 | Phase 2 · v0.10.0 target | In development | Runtime Monitor, Connection Inspector with export and bulk disconnect, core log controls, native Clash Mode, and the Notification Center are available. Traffic Analytics is in development. |
 | Phase 3 · v0.11.0 target | Planned | Instance management and quick switch, session isolation, opt-in multi-instance credential migration, and evaluation of a bounded multi-instance overview. |
 | Phase 4 · v0.12.0 target | In development | Read-only USB/IP server status is available and locally verified. The RPC matrix tracks the remaining Tailscale, Taildrop, OpenConnect, OpenVPN and USB/IP capabilities. Browser bidirectional features require feature-specific transport verification. |
-| Phase 5 · v1.0.0 target | In development | Synthetic Connections, Logs and Outbound measurements, browser and hosting checks, installability research, and security fixes are recorded in the verification record. Production deployment acceptance, desktop and mobile installation, and workspace customization remain open. |
+| Phase 5 · v1.0.0 target | In development | Synthetic capacity measurements, browser and hosting checks, and security fixes are recorded in the verification record. Headed desktop Chromium installation is verified. Overview card ordering, chart window selection and local runtime history controls are available. Default page and preference portability are paused at the review limit. Physical mobile installation and current-candidate release and deployment acceptance remain open. |
 
 Versions are targets. Work is accepted against its phase criteria before moving to the next phase. Publication requires a separately authorized release.
 
