@@ -44,7 +44,8 @@ export default function Logs() {
   const coreClear = useAction();
   const canClearCore = hasCurrentLogs(snapshot) && !coreClear.pending;
   const viewport = useRef<HTMLDivElement>(null);
-  const query = useDeferredValue(search.toLowerCase());
+  const searchText = search.toLowerCase();
+  const query = useDeferredValue(searchText);
   const logs = paused ?? snapshot.logs;
   const entries = useMemo(() => {
     const threshold = level === "all" ? Infinity : Number(level);
@@ -55,6 +56,7 @@ export default function Logs() {
         (source === "all" || logSource(log.text) === source),
     );
   }, [logs, level, query, source]);
+  const canCopyOrExport = query === searchText && entries.length > 0;
   const logPage = Math.min(requestedPage, Math.max(0, Math.ceil(entries.length / logPageSize) - 1));
   const pageEnd = entries.length - logPage * logPageSize;
   const pageStart = Math.max(0, pageEnd - logPageSize);
@@ -78,6 +80,7 @@ export default function Logs() {
       )
       .join("\n");
   async function copy() {
+    if (!canCopyOrExport) return;
     try {
       await navigator.clipboard.writeText(text());
       setFeedback("Filtered logs copied.");
@@ -86,6 +89,7 @@ export default function Logs() {
     }
   }
   function download() {
+    if (!canCopyOrExport) return;
     const url = URL.createObjectURL(
       new Blob([text()], { type: "text/plain;charset=utf-8" }),
     );
@@ -201,7 +205,7 @@ export default function Logs() {
               size="icon-sm"
               aria-label={t("Copy filtered logs")}
               onClick={() => void copy()}
-              disabled={!entries.length}
+              disabled={!canCopyOrExport}
             >
               <Copy />
             </Button>
@@ -210,7 +214,7 @@ export default function Logs() {
               size="icon-sm"
               aria-label={t("Export filtered logs")}
               onClick={download}
-              disabled={!entries.length}
+              disabled={!canCopyOrExport}
             >
               <Download />
             </Button>
