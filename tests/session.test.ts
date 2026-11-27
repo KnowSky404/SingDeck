@@ -208,7 +208,7 @@ describe("session lifecycle", () => {
     const connections = vi.fn(client.subscribeConnections);
     const notifications = vi.fn<typeof client.subscribeNotifications>(async function* () {
       yield create(NotificationEventSchema, {
-        event: { case: "send", value: { identifier: "live", typeID: 1, title: "Live message" } },
+        event: { case: "send", value: { identifier: "taildrop/peer/password=reset.txt", typeID: 1, title: "Live message" } },
       });
       await delay(2000, new AbortController().signal);
       yield create(NotificationEventSchema, {
@@ -226,6 +226,8 @@ describe("session lifecycle", () => {
     await vi.advanceTimersByTimeAsync(200);
     expect(notifications).toHaveBeenCalledTimes(1);
     expect(s.getSnapshot().notifications[0]).toMatchObject({ source: "native", title: "Live message" });
+    expect(s.getSnapshot().notifications[0].id).toMatch(/^native:\d+$/);
+    expect(JSON.stringify(s.getSnapshot().notifications)).not.toContain("password=reset.txt");
     s.setDetailChannel("connections");
     expect(notifications.mock.calls[0][1]?.signal?.aborted).toBe(true);
     await vi.advanceTimersByTimeAsync(2100);

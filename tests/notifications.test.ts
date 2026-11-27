@@ -7,7 +7,8 @@ import {
   receiveLocalNotification,
   receiveNativeNotification,
   setNotificationRead,
-  type NotificationEntry,
+  visibleNotifications,
+  type NotificationRecord,
 } from "@/api/notifications";
 
 const redact = (text: string) => text.replaceAll("demo-marker", "[redacted]");
@@ -48,7 +49,7 @@ describe("notification history", () => {
   });
 
   it("bounds memory and drops incomplete or oversized identities", () => {
-    let history: NotificationEntry[] = [];
+    let history: NotificationRecord[] = [];
     for (let i = 0; i < NOTIFICATION_LIMIT + 5; i++) {
       history = receiveNativeNotification(history, send(`row-${i}`), i, i, redact);
     }
@@ -56,7 +57,21 @@ describe("notification history", () => {
     expect(history.at(-1)?.sequence).toBe(5);
     expect(receiveNativeNotification(history, send(""), 200, 200, redact)).toBe(history);
     expect(receiveNativeNotification(history, send("x".repeat(513)), 200, 200, redact)).toBe(history);
-    expect(receiveNativeNotification(history, send("session/demo%2Dmarker"), 200, 200, redact)).toBe(history);
+  });
+
+  it("keeps credential-like filenames and their cancels paired through opaque history IDs", () => {
+    const identifier = "taildrop/peer/password=reset.txt";
+    const first = receiveNativeNotification([], send(identifier), 1, 1, redact);
+    const both = receiveNativeNotification(first, send("taildrop/peer/password=other.txt"), 2, 2, redact);
+    const cancel = create(NotificationEventSchema, { event: { case: "cancel", value: { identifier, typeID: 1 } } });
+    const visible = visibleNotifications(receiveNativeNotification(both, cancel, 3, 3, redact));
+    expect(visible).toEqual([
+      expect.objectContaining({ id: "native:2", read: false }),
+      expect.objectContaining({ id: "native:1", read: true, canceled: true }),
+    ]);
+    expect(visible[0]).not.toHaveProperty("canceled");
+    expect(JSON.stringify(visible)).not.toContain("password=");
+    expect(visible.every((entry) => !("nativeIdentity" in entry))).toBe(true);
   });
 
   it.each([
