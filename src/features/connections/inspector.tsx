@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { bytes } from "@/lib/format";
 import type { Connection } from "@/proto/daemon/started_service_pb";
+import { redactNativeConnectionText } from "./redaction";
 
 function recordedTime(timestamp: bigint, formatter: Intl.DateTimeFormat) {
   const date = new Date(Number(timestamp));
@@ -56,7 +57,10 @@ export function ConnectionInspector({
             {record ? (
               <>
                 <span className="min-w-0 truncate">
-                  {session.redactText(record.domain || record.destination) || t("Unavailable")}
+                  {redactNativeConnectionText(
+                    record.domain || record.destination,
+                    (value) => session.redactText(value),
+                  ) || t("Unavailable")}
                 </span>{" "}
                 <span className="shrink-0">{t(record.closedAt > 0n ? "Closed" : "Active")}</span>
               </>
@@ -78,7 +82,8 @@ function ConnectionDetails({ record, dateFormat, current }: {
 }) {
   const { session, t } = useWorkspace();
   const [feedback, setFeedback] = useState("");
-  const safe = (value: string | undefined) => value ? session.redactText(value) : null;
+  const safe = (value: string | undefined) =>
+    value ? redactNativeConnectionText(value, (text) => session.redactText(text)) : null;
   const inbound = safe(record.inbound);
   const source = safe(record.source);
   const destination = safe(record.destination);
@@ -90,8 +95,13 @@ function ConnectionDetails({ record, dateFormat, current }: {
   const processId = process && process.processId > 0 ? String(process.processId) : null;
   const processPath = safe(process?.processPath);
   const packages = safe(process?.packageNames.filter(Boolean).join(", "));
+  const processUserName = safe(process?.userName);
+  // The core uses -1 for an unavailable UID and 0 is a valid UID.
+  const processUserId = process && process.userId >= 0 ? process.userId : null;
+  const processOwner = processUserName ??
+    (processUserId === null ? null : t("UID {id}", { id: processUserId }));
   const route = ([
-    ["Process", processPath || packages || processId],
+    ["Process", processPath || packages || processId || processOwner],
     ["Inbound", inbound],
     ["Matched rule", rule],
     ["Outbound chain", chain],
@@ -114,9 +124,8 @@ function ConnectionDetails({ record, dateFormat, current }: {
     ["Matched rule", rule, "Copy rule"],
     ["Outbound chain", chain, "Copy outbound chain"],
     ["Process ID", processId],
-    // The core uses -1 for an unavailable UID and 0 is a valid UID.
-    ["Process user ID", process && process.userId >= 0 ? process.userId : null],
-    ["Process user name", safe(process?.userName)],
+    ["Process user ID", processUserId],
+    ["Process user name", processUserName],
     ["Process path", processPath],
     ["Package names", packages],
     ["Created at", recordedTime(record.createdAt, dateFormat)],
@@ -139,7 +148,12 @@ function ConnectionDetails({ record, dateFormat, current }: {
     <div className="flex min-h-0 flex-col">
       {!current && <p className="pb-2 text-muted-foreground">{t("Retained data may be stale.")}</p>}
       <p className="text-muted-foreground" role="status">{feedback && t(feedback)}</p>
-      <div className="grid min-h-0 gap-4 overflow-y-auto pr-1">
+      <div
+        role="region"
+        aria-label={t("Reported connection fields")}
+        tabIndex={0}
+        className="grid min-h-0 gap-4 overflow-y-auto rounded-sm pr-1"
+      >
         <section aria-label={t("Route")} className="grid gap-2 rounded-lg border p-3">
           <h3 className="font-medium">{t("Route")}</h3>
           {route.length ? (

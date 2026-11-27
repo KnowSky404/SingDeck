@@ -35,6 +35,14 @@ test("connection details show the reported route and retained closed state", asy
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole("heading", { name: "Connection details" })).toBeFocused();
   await expect(header).toContainText(/\bActive\b/);
+  const fields = dialog.getByRole("region", { name: "Reported connection fields" });
+  await page.keyboard.press("Tab");
+  await expect(fields).toBeFocused();
+  if (isMobile) {
+    await page.keyboard.press("PageDown");
+    await expect.poll(() => fields.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+    await page.keyboard.press("Home");
+  }
 
   const fact = (label: string) =>
     dialog
