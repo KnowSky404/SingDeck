@@ -553,6 +553,11 @@ export class InstanceSession {
     const { version } = this.pending;
     return version?.version !== next.version || version?.apiVersion !== next.apiVersion;
   }
+  clearOlderRuntimeSamples = () => {
+    const { runtime } = this.pending;
+    if (runtime.samples.length <= 1) return;
+    this.update({ runtime: { ...runtime, samples: runtime.samples.slice(-1) } }, true);
+  };
   clearLogs = () => this.update({ logs: [] }, true);
   clearCoreLogs = async () => {
     const signal = this.signal;

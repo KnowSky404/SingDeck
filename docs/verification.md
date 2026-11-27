@@ -39,6 +39,12 @@ Visual inspection of a prefinal candidate used desktop light and emulated mobile
 
 The official sing-box v1.14.0 Linux integration measures the received runtime counters and rate conversions. It waits across four status intervals while the lifecycle stream stays quiet, then sends SIGHUP and checks that the changed native service start time records one restart and a gap in the rate history. The mock unit tests cover the observation limits, counter resets, and gaps after late frames. Browser history is bounded to the current session.
 
+**Clear older chart samples** removes earlier in-memory samples from the current session and keeps the newest sample. Runtime Monitor and Overview use that same buffer. Current readings, service events and stream receipt times stay in place. New samples continue to arrive through the existing stream.
+
+In a local production Chromium run with official sing-box 1.14.0/API 4, the action reduced a populated memory curve to its newest marker. The visible memory and traffic readings and the exact status and lifecycle receipt times stayed the same. Both streams stayed Live. The next regular status sample extended the curve and made the action available again. The browser used one status subscription and made no mutation request in this fixture.
+
+The session regression also clears while a newer status sample is queued for publication. The clear publishes that exact sample and leaves lifecycle events, stream state and sibling receipt times intact. Desktop and 320px mobile Demo tests separately check keyboard or touch, retained readings, new samples, the wider window and the same cleared buffer after navigating through Overview.
+
 ## Phase 2 — Per-connection observed rates
 
 A production Chromium 159.0.8154.6 browser connected to the built-in dashboard on official sing-box 1.14.0/API 4 with a one-second Connections interval. An isolated TCP fixture sent 128 B up and 256 B down after the inspector opened. The first live update established the baseline and both rates stayed unavailable. The next update of 192 B up and 384 B down displayed 192 B/s and 384 B/s in that run. Reported interval fields kept their original byte values.

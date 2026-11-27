@@ -56,6 +56,108 @@ it("bounds observations and keeps outbound counts independent of traffic trackin
   expect(afterGap.samples[0]).toMatchObject({ connectionsOut: 3, gapBefore: true });
 });
 
+it("clears older samples while retaining a status frame still pending publication", async () => {
+  vi.useFakeTimers();
+  const client = createMockClient();
+  const statuses = Array.from({ length: 4 }, (_, index) => create(StatusSchema, {
+    memory: BigInt(index + 1) * 1024n,
+    trafficAvailable: true,
+    uplink: 50n,
+    downlink: 100n,
+    uplinkTotal: BigInt(index + 1) * 50n,
+    downlinkTotal: BigInt(index + 1) * 100n,
+  }));
+  const receipts: number[] = [];
+  const statusStream = vi.spyOn(client, "subscribeStatus").mockImplementation(async function* (_, options) {
+    for (const status of statuses) {
+      receipts.push(Date.now());
+      yield status;
+      await delay(1000, options!.signal!);
+    }
+    await delay(60_000, options!.signal!);
+  });
+  const serviceStream = vi.spyOn(client, "subscribeServiceStatus").mockImplementation(async function* (_, options) {
+    yield create(ServiceStatusSchema, { status: ServiceStatus_Type.STARTED });
+    await delay(60_000, options!.signal!);
+  });
+  const logStream = vi.spyOn(client, "subscribeLog");
+  const groupsStream = vi.spyOn(client, "subscribeGroups");
+  const connectionsStream = vi.spyOn(client, "subscribeConnections");
+  const session = new InstanceSession(client, mockProfile);
+  const publish = vi.fn();
+  const unsubscribe = session.subscribe(publish);
+  try {
+    const empty = session.getSnapshot();
+    session.clearOlderRuntimeSamples();
+    expect(session.getSnapshot()).toBe(empty);
+    expect(publish).not.toHaveBeenCalled();
+
+    session.connect();
+    await vi.advanceTimersByTimeAsync(300);
+    const one = session.getSnapshot();
+    expect(one.runtime.samples).toHaveLength(1);
+    publish.mockClear();
+    session.clearOlderRuntimeSamples();
+    expect(session.getSnapshot()).toBe(one);
+    expect(publish).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1699);
+    const before = session.getSnapshot();
+    expect(before.runtime.samples).toHaveLength(2);
+    expect(before.status).toBe(statuses[1]);
+    expect(before.runtime.lastFrameAt.status).toBe(receipts[1]);
+    expect(before.runtime.lastBoot).toBeDefined();
+    expect(before.runtime.events).not.toHaveLength(0);
+
+    publish.mockClear();
+    await vi.advanceTimersByTimeAsync(2);
+    expect(receipts).toHaveLength(3);
+    expect(session.getSnapshot()).toBe(before);
+    const signal = session.signal;
+    const streams = [statusStream, serviceStream, logStream, groupsStream, connectionsStream];
+    const streamCalls = streams.map(stream => stream.mock.calls.length);
+    const streamSignals = streams.map(stream => stream.mock.calls[0]?.[1]?.signal);
+    session.clearOlderRuntimeSamples();
+    const cleared = session.getSnapshot();
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(cleared.runtime.samples).toEqual([expect.objectContaining({
+      time: receipts[2], memory: 3072n, up: 50, down: 100, gapBefore: false,
+    })]);
+    expect(cleared.status).toBe(statuses[2]);
+    expect(cleared.runtime.lastFrameAt.status).toBe(receipts[2]);
+    expect(cleared.runtime.lastFrameAt.service).toBe(before.runtime.lastFrameAt.service);
+    expect(cleared.runtime.lastFrameAt.logs).toBe(before.runtime.lastFrameAt.logs);
+    expect(cleared.runtime.events).toBe(before.runtime.events);
+    expect(cleared.runtime.lastBoot).toBe(before.runtime.lastBoot);
+    expect(cleared.startedAt).toBe(before.startedAt);
+    expect(cleared.service).toBe(before.service);
+    expect(cleared.phase).toBe("connected");
+    expect(cleared.streamErrors).toEqual(before.streamErrors);
+    expect(cleared.loaded).toEqual(before.loaded);
+    expect(session.signal).toBe(signal);
+    expect(signal?.aborted).toBe(false);
+    expect(streamCalls).toEqual([1, 1, 1, 1, 1]);
+    expect(streams.map(stream => stream.mock.calls.length)).toEqual(streamCalls);
+    expect(streamSignals.every(signal => signal?.aborted === false)).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(publish).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    const later = session.getSnapshot();
+    expect(later.runtime.samples.map(sample => sample.time)).toEqual(receipts.slice(2));
+    expect(later.runtime.samples[0]).toBe(cleared.runtime.samples[0]);
+    expect(later.runtime.samples[1]).toMatchObject({ memory: 4096n, up: 50, down: 100 });
+    expect(later.runtime.lastFrameAt.status).toBe(receipts[3]);
+    expect(streams.map(stream => stream.mock.calls.length)).toEqual(streamCalls);
+    session.clearOlderRuntimeSamples();
+    expect(session.getSnapshot().runtime.samples[0]).toBe(later.runtime.samples[1]);
+  } finally {
+    unsubscribe();
+    session.disconnect();
+    vi.useRealTimers();
+  }
+});
+
 it("leaves an unreported outbound count unknown after lifecycle stream failure", async () => {
   vi.useFakeTimers();
   const client = createMockClient();
