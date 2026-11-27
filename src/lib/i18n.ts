@@ -272,6 +272,8 @@ const zh: Record<string, string> = {
   Active: "活动中",
   Closed: "已关闭",
   "Connection records": "连接记录",
+  Columns: "显示列",
+  "Reset columns": "恢复默认列",
   "Connection action failed": "连接操作失败",
   "Batch close result": "批量关闭结果",
   "Requests acknowledged {acknowledged} · Already closed {skipped} · Requests unsent {unsent}":

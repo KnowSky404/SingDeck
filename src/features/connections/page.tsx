@@ -31,6 +31,15 @@ import {
 } from "@/components/ui/collapsible";
 import { Field, FieldLabel } from "@/components/ui/field";
 import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -50,11 +59,17 @@ import {
 import { ConnectionInspector } from "./inspector";
 
 const PAGE_SIZE = 50;
-const sortColumns = [
-  { key: "createdAt", label: "Start time" },
+const trafficColumns = [
   { key: "uplinkTotal", label: "Upload" },
   { key: "downlinkTotal", label: "Download" },
 ] as const;
+const sortColumns = [{ key: "createdAt", label: "Start time" }, ...trafficColumns] as const;
+const optionalColumns = [
+  { key: "network", label: "Network" },
+  { key: "outbound", label: "Outbound" },
+  ...trafficColumns,
+] as const;
+type OptionalColumn = (typeof optionalColumns)[number]["key"];
 const advancedTextFilters = [
   ["inbound", "Inbound"],
   ["protocol", "Protocol"],
@@ -67,6 +82,7 @@ type ConnectionSort = {
   column: (typeof sortColumns)[number]["key"];
   direction: "ascending" | "descending";
 };
+const defaultSort: ConnectionSort = { column: "createdAt", direction: "descending" };
 
 function hasStartTime(timestamp: bigint) {
   return timestamp > 0n && timestamp <= 8_640_000_000_000_000n;
@@ -78,10 +94,8 @@ export default function Connections({ onInspectOutbound }: {
   const { snapshot, session, profile, language, t } = useWorkspace();
   const [filters, setFilters] = useState(defaultConnectionFilters);
   const [search, setSearch] = useState("");
-  const [sort, setSort] = useState<ConnectionSort>({
-    column: "createdAt",
-    direction: "descending",
-  });
+  const [sort, setSort] = useState(defaultSort);
+  const [hiddenColumns, setHiddenColumns] = useState<ReadonlySet<OptionalColumn>>(() => new Set());
   const [page, setPage] = useState(0);
   const startTimeFormat = useMemo(
     () =>
@@ -92,6 +106,18 @@ export default function Connections({ onInspectOutbound }: {
       }),
     [language],
   );
+  function setColumnVisible(column: OptionalColumn, visible: boolean) {
+    setHiddenColumns((current) => {
+      const next = new Set(current);
+      if (visible) next.delete(column);
+      else next.add(column);
+      return next;
+    });
+    if (!visible && sort.column === column) {
+      setSort(defaultSort);
+      setPage(0);
+    }
+  }
   const { outbound } = filters;
   const outbounds = useMemo(
     () =>
@@ -360,6 +386,33 @@ export default function Connections({ onInspectOutbound }: {
           count: rows.length.toLocaleString(),
           size: PAGE_SIZE,
         })}
+        action={(
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm">{t("Columns")}</Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuGroup>
+                {optionalColumns.map(({ key, label }) => (
+                  <DropdownMenuCheckboxItem
+                    key={key}
+                    checked={!hiddenColumns.has(key)}
+                    onCheckedChange={(checked) => setColumnVisible(key, checked)}
+                    onSelect={(event) => event.preventDefault()}
+                  >
+                    {t(label)}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuGroup>
+                <DropdownMenuItem disabled={hiddenColumns.size === 0} onSelect={() => setHiddenColumns(new Set())}>
+                  {t("Reset columns")}
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       >
         <ChannelState channel="connections" empty={!rows.length}>
           <div className="connection-table-wrap">
@@ -367,10 +420,11 @@ export default function Connections({ onInspectOutbound }: {
               <thead>
                 <tr>
                   <th scope="col">{t("Destination")}</th>
-                  <th scope="col">{t("Network")}</th>
-                  <th scope="col">{t("Outbound")}</th>
+                  {!hiddenColumns.has("network") && <th scope="col">{t("Network")}</th>}
+                  {!hiddenColumns.has("outbound") && <th scope="col">{t("Outbound")}</th>}
                   <th scope="col">{t("Status")}</th>
                   {sortColumns.map(({ key, label }) => {
+                    if (key !== "createdAt" && hiddenColumns.has(key)) return null;
                     const direction =
                       sort.column === key ? sort.direction : undefined;
                     const Icon =
@@ -423,16 +477,20 @@ export default function Connections({ onInspectOutbound }: {
                         <strong>{c.domain || c.destination}</strong>
                         <span>{c.domain ? c.destination : c.source}</span>
                       </td>
-                      <td>
-                        <Badge variant="secondary">
-                          {c.network.toUpperCase()}
-                        </Badge>
-                        <span>{c.protocol || t("Unknown")}</span>
-                      </td>
-                      <td>
-                        <strong>{c.outbound || "—"}</strong>
-                        <span>{c.outboundType}</span>
-                      </td>
+                      {!hiddenColumns.has("network") && (
+                        <td>
+                          <Badge variant="secondary">
+                            {c.network.toUpperCase()}
+                          </Badge>
+                          <span>{c.protocol || t("Unknown")}</span>
+                        </td>
+                      )}
+                      {!hiddenColumns.has("outbound") && (
+                        <td>
+                          <strong>{c.outbound || "—"}</strong>
+                          <span>{c.outboundType}</span>
+                        </td>
+                      )}
                       <td>
                         <Badge
                           variant={c.closedAt > 0n ? "secondary" : "outline"}
@@ -449,12 +507,12 @@ export default function Connections({ onInspectOutbound }: {
                           "—"
                         )}
                       </td>
-                      <td className="connection-upload">
-                        {bytes(c.uplinkTotal)}
-                      </td>
-                      <td className="connection-download">
-                        {bytes(c.downlinkTotal)}
-                      </td>
+                      {!hiddenColumns.has("uplinkTotal") && (
+                        <td className="connection-upload">{bytes(c.uplinkTotal)}</td>
+                      )}
+                      {!hiddenColumns.has("downlinkTotal") && (
+                        <td className="connection-download">{bytes(c.downlinkTotal)}</td>
+                      )}
                       <td>
                         <div className="button-row">
                           <Button

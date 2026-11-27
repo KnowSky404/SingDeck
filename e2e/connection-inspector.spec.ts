@@ -177,3 +177,67 @@ test("connection filters compose with search and reset to all active rows", asyn
     (await page.viewportSize())!.width,
   );
 });
+
+test("configures connection columns by keyboard and keeps a visible sort", async ({ page, isMobile }) => {
+  if (isMobile) await page.setViewportSize({ width: 320, height: 740 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Explore demo", exact: true }).click();
+  await page.getByRole("link", { name: "Connections", exact: true }).first().click();
+
+  const table = page.locator(".connection-table");
+  const rows = table.locator("tbody tr");
+  const allColumns = ["Destination", "Network", "Outbound", "Status", "Start time", "Upload", "Download", "Actions"];
+  const expectLayout = async (headers: string[]) => {
+    const layout = await table.evaluate((node) => {
+      const table = node as HTMLTableElement;
+      const headers = Array.from(table.tHead?.rows[0]?.cells ?? [], (cell) => cell.textContent?.trim());
+      const rows = Array.from(table.tBodies[0]?.rows ?? []);
+      return {
+        headers,
+        rows: rows.length,
+        aligned: rows.every((row) => row.cells.length === headers.length),
+        fitsViewport: document.documentElement.scrollWidth <= innerWidth,
+      };
+    });
+    expect(layout).toEqual({ headers, rows: 28, aligned: true, fitsViewport: true });
+  };
+  await expect(rows).toHaveCount(28);
+  await expectLayout(allColumns);
+
+  const upload = table.getByRole("button", { name: "Upload", exact: true });
+  await upload.press("Enter");
+  await expect(upload.locator("..")).toHaveAttribute("aria-sort", "descending");
+  await expect(rows.first().getByRole("button", { name: "Details for mock-28", exact: true })).toBeVisible();
+
+  const trigger = page.getByRole("button", { name: "Columns", exact: true });
+  const menu = page.getByRole("menu");
+  const option = (name: string) => menu.getByRole("menuitemcheckbox", { name, exact: true });
+  await trigger.press("Enter");
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole("menuitemcheckbox")).toHaveCount(4);
+  for (const name of ["Network", "Outbound", "Upload", "Download"]) {
+    await expect(option(name)).toHaveAttribute("aria-checked", "true");
+  }
+  await option("Upload").press("Enter");
+  await expect(option("Upload")).toHaveAttribute("aria-checked", "false");
+  await expect(menu).toBeVisible();
+  await expectLayout(allColumns.filter((name) => name !== "Upload"));
+  await expect(table.locator('thead th[aria-sort="descending"]')).toHaveText("Start time");
+
+  for (const name of ["Network", "Outbound", "Download"]) {
+    await option(name).press("Enter");
+    await expect(option(name)).toHaveAttribute("aria-checked", "false");
+  }
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+  await expect(trigger).toBeFocused();
+  await expectLayout(["Destination", "Status", "Start time", "Actions"]);
+  const start = table.getByRole("button", { name: "Start time", exact: true });
+  await expect(start.locator("..")).toHaveAttribute("aria-sort", "descending");
+  await expect(rows.first().getByRole("button", { name: "Details for mock-1", exact: true })).toBeVisible();
+
+  await page.keyboard.press("Enter");
+  await menu.getByRole("menuitem", { name: "Reset columns", exact: true }).press("Enter");
+  await expect(menu).toBeHidden();
+  await expectLayout(allColumns);
+});
