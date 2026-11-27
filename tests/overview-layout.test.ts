@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   defaultOverviewLayout,
   loadOverviewLayout,
-  saveOverviewLayout,
   type OverviewLayout,
 } from "@/features/dashboard/overview-layout";
 
@@ -15,18 +14,14 @@ const alternate: OverviewLayout = {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Overview layout preferences", () => {
-  it("round-trips the two complete orders without copying other fields", () => {
-    let stored: string | null = null;
-    const setItem = vi.fn((_key: string, value: string) => { stored = value; });
-    vi.stubGlobal("localStorage", { getItem: () => stored, setItem });
+  it("loads both legacy orders without copying other fields or writing", () => {
+    const setItem = vi.fn();
+    const getItem = vi.fn(() => JSON.stringify({ ...alternate, extra: "unrelated" }));
+    vi.stubGlobal("localStorage", { getItem, setItem });
 
-    const additionalFields = { ...alternate, extra: "unrelated" };
-    saveOverviewLayout(additionalFields);
-
-    expect(setItem).toHaveBeenCalledExactlyOnceWith(storageKey, JSON.stringify(alternate));
-    stored = JSON.stringify(additionalFields);
     expect(loadOverviewLayout()).toEqual(alternate);
-    expect(setItem).toHaveBeenCalledTimes(1);
+    expect(getItem).toHaveBeenCalledExactlyOnceWith(storageKey);
+    expect(setItem).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -45,11 +40,10 @@ describe("Overview layout preferences", () => {
     expect(setItem).not.toHaveBeenCalled();
   });
 
-  it("tolerates browser policies that deny reads or writes", () => {
+  it("tolerates browser policies that deny legacy reads", () => {
     const blocked = () => { throw new DOMException("Storage denied", "SecurityError"); };
-    vi.stubGlobal("localStorage", { getItem: blocked, setItem: blocked });
+    vi.stubGlobal("localStorage", { getItem: blocked });
 
     expect(loadOverviewLayout()).toBe(defaultOverviewLayout);
-    expect(() => saveOverviewLayout(alternate)).not.toThrow();
   });
 });

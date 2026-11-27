@@ -6,6 +6,7 @@ import { useWorkspace } from "@/app/context";
 import { Notice, PageHeading, Panel } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DisplayPreferenceFiles } from "./display-preference-files";
 
 function ClashMode() {
   const { session, snapshot, t } = useWorkspace();
@@ -142,6 +143,7 @@ export default function Settings() {
             </Button>
           </div>
         </Panel>
+        <DisplayPreferenceFiles />
         {snapshot.capabilities.clashMode.status === "supported" && <ClashMode />}
         {profile.mode === "native" && (
           <Panel title="Native services">

@@ -15,7 +15,6 @@ import {
   saveProfiles,
   mockProfile,
   type Profile,
-  type Theme,
 } from "@/features/instances/profiles";
 import {
   claimRememberedConnection,
@@ -32,7 +31,13 @@ import {
   type RememberedSelection,
 } from "@/features/instances/remembered-connection";
 import { WorkspaceContext } from "./context";
-import { loadLanguage, translate, type Language } from "@/lib/i18n";
+import {
+  loadDisplayPreferences,
+  saveDisplayPreference,
+  saveDisplayPreferences,
+  type DisplayPreferences,
+} from "./display-preferences";
+import { translate } from "@/lib/i18n";
 
 const rememberError =
   "Could not remember this connection. Check your browser’s site data settings.";
@@ -80,25 +85,21 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }>(null);
   const [storageError, setStorageError] = useState<string>();
-  const [language, setLanguage] = useState<Language>(loadLanguage);
+  const [displayPreferences, setDisplayPreferences] = useState(loadDisplayPreferences);
+  const { language, theme } = displayPreferences;
+  function setDisplayPreference<Key extends keyof DisplayPreferences>(key: Key, value: DisplayPreferences[Key]) {
+    setDisplayPreferences((current) => ({ ...current, [key]: value }));
+    saveDisplayPreference(key, value);
+  }
+  function applyDisplayPreferences(preferences: DisplayPreferences) {
+    setDisplayPreferences(preferences);
+    return saveDisplayPreferences(preferences);
+  }
   const t = useMemo(() => translate(language), [language]);
   useEffect(() => {
     document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
     document.title = t("SingDeck · Network workspace");
-    try {
-      localStorage.setItem("singdeck.language", language);
-    } catch {
-      /* Language remains available in memory. */
-    }
   }, [language, t]);
-  const [theme, setTheme] = useState<Theme>(() => {
-    try {
-      const saved = localStorage.getItem("singdeck.theme");
-      return saved === "light" || saved === "dark" ? saved : "system";
-    } catch {
-      return "system";
-    }
-  });
   const [mockControl] = useState(() => new MockControl());
   const profile =
     activeId === "demo"
@@ -290,11 +291,6 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
     apply();
     media.addEventListener("change", apply);
-    try {
-      localStorage.setItem("singdeck.theme", theme);
-    } catch {
-      /* Theme remains available in memory. */
-    }
     return () => media.removeEventListener("change", apply);
   }, [theme]);
   useEffect(() => {
@@ -473,10 +469,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         profiles,
         session,
         snapshot,
-        theme,
-        setTheme,
-        language,
-        setLanguage,
+        ...displayPreferences,
+        setTheme: (theme) => setDisplayPreference("theme", theme),
+        setLanguage: (language) => setDisplayPreference("language", language),
+        setOverviewLayout: (layout) => setDisplayPreference("overviewLayout", layout),
+        applyDisplayPreferences,
         t,
         saveProfile,
         selectProfile,

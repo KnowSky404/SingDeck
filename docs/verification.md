@@ -193,6 +193,12 @@ Customize Overview reorders the four metric cards and four detail panels in thei
 
 Chromium desktop and 320px emulated mobile verified visual and keyboard order, focus, reload, reset and a 250px-tall scrollable settings dialog. The chart continued rendering its selected history window after moving between panel slots. A Chromium session on the official sing-box 1.14.0 built-in dashboard measured real traffic before and after the reorder using the same status subscription. It restored the layout after a reload and new login.
 
+### Display preference files
+
+Settings exports the current theme, language and Overview card order in a versioned JSON file. Import accepts a file of up to 4096 bytes and validates the values and card order before applying them together. The new browser storage entry holds a complete display snapshot. Existing display preferences load from their previous entries until the first successful save in the new format. If a save fails, Settings reports that the import applies for the current visit. A reload uses the last saved snapshot.
+
+Chromium desktop and emulated mobile verified actual file export and import, legacy storage compatibility, atomic rejection and live preferences after a denied write. The official sing-box 1.14.0 built-in dashboard in Chromium kept its status subscription live as the three display preferences changed and restored those preferences after a reload and fresh login.
+
 ### Overview traffic history window
 
 In a production Chromium 159.0.8154.6 browser, official sing-box 1.14.0/API 4 served the built-in dashboard and reported traffic from one isolated QA connection. Overview showed a nonzero chart while the browser switched through the 1-, 3- and 5-minute views. Later status updates and the confirmed connection close kept the 5-minute selection. The browser used one native status subscription throughout. This check used the stock one-minute profile default.

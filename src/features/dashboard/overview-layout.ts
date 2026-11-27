@@ -37,26 +37,21 @@ function isFullOrder<Card extends string>(
     expected.every((card) => order.includes(card));
 }
 
+export function parseOverviewLayout(layout: unknown): OverviewLayout | null {
+  if (layout && typeof layout === "object" &&
+    "metrics" in layout && isFullOrder(layout.metrics, metricOrder) &&
+    "panels" in layout && isFullOrder(layout.panels, panelOrder)) {
+    return { metrics: layout.metrics, panels: layout.panels };
+  }
+  return null;
+}
+
 export function loadOverviewLayout(): OverviewLayout {
   try {
     const stored = localStorage.getItem(storageKey);
     if (stored === null) return defaultOverviewLayout;
-    const layout: unknown = JSON.parse(stored);
-    if (layout && typeof layout === "object" &&
-      "metrics" in layout && isFullOrder(layout.metrics, metricOrder) &&
-      "panels" in layout && isFullOrder(layout.panels, panelOrder)) {
-      return { metrics: layout.metrics, panels: layout.panels };
-    }
+    return parseOverviewLayout(JSON.parse(stored)) ?? defaultOverviewLayout;
   } catch {
-    // Storage access and parsing may fail before any preference is available.
-  }
-  return defaultOverviewLayout;
-}
-
-export function saveOverviewLayout({ metrics, panels }: OverviewLayout) {
-  try {
-    localStorage.setItem(storageKey, JSON.stringify({ metrics, panels }));
-  } catch {
-    // The mounted Overview can still use the selected order.
+    return defaultOverviewLayout;
   }
 }

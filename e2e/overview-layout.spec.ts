@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-const storageKey = "singdeck.overview-layout";
+const storageKey = "singdeck.display-preferences";
+const legacyLayoutKey = "singdeck.overview-layout";
 const defaultMetrics = ["Download", "Upload", "Active connections", "Memory"];
 const defaultPanels = ["Traffic activity", "Instance details", "Outbound groups", "Recent logs"];
 const customMetrics = ["Upload", "Download", "Active connections", "Memory"];
@@ -50,7 +51,7 @@ test("Overview rearranges real cards, retains its active chart window and restor
   await page.goto("/");
   await startDemo(page);
   await expectCardOrder(page, defaultMetrics, defaultPanels);
-  const storedOrder = () => page.evaluate(key => JSON.parse(localStorage.getItem(key) ?? "null"), storageKey);
+  const storedOrder = () => page.evaluate(key => JSON.parse(localStorage.getItem(key) ?? "null")?.overviewLayout ?? null, storageKey);
   expect(await storedOrder()).toBeNull();
 
   const history = page.getByRole("combobox", { name: "History window", exact: true });
@@ -137,8 +138,8 @@ test("Overview rearranges real cards, retains its active chart window and restor
 
 test("Overview can customize and reset in a short viewport when layout storage is unavailable", async ({ page, isMobile }) => {
   await page.setViewportSize({ width: isMobile ? 320 : 420, height: 250 });
-  await page.addInitScript((key) => {
-    if (location.search === "?layout=corrupt") localStorage.setItem(key, "{");
+  await page.addInitScript(({ key, legacyKey }) => {
+    if (location.search === "?layout=corrupt") localStorage.setItem(legacyKey, "{");
     if (location.search === "?layout=blocked") {
       const { getItem, setItem } = Storage.prototype;
       Storage.prototype.getItem = function (name) {
@@ -150,12 +151,12 @@ test("Overview can customize and reset in a short viewport when layout storage i
         setItem.call(this, name, value);
       };
     }
-  }, storageKey);
+  }, { key: storageKey, legacyKey: legacyLayoutKey });
 
   await page.goto("/?layout=corrupt");
   await startDemo(page);
   await expectCardOrder(page, defaultMetrics, defaultPanels);
-  expect(await page.evaluate(key => localStorage.getItem(key), storageKey)).toBe("{");
+  expect(await page.evaluate(key => localStorage.getItem(key), legacyLayoutKey)).toBe("{");
 
   await page.goto("/?layout=blocked");
   await startDemo(page);
