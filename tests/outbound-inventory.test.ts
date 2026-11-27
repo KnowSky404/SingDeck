@@ -124,6 +124,44 @@ it("keeps the same topology generation through an isolated inventory retry", asy
   }
 });
 
+it("stops queued inventory probes when Groups fails and still allows a standalone probe", async () => {
+  const client = createMockClient();
+  const tags = Array.from({ length: 11 }, (_, index) => `node-${index}`);
+  const inventory = create(OutboundListSchema, {
+    outbounds: tags.map((tag) => ({ tag, type: "direct" })),
+  });
+  vi.spyOn(client, "subscribeOutbounds").mockImplementation(async function* (_, options) {
+    yield inventory;
+    await delay(60_000, options!.signal!);
+  });
+  vi.spyOn(client, "subscribeGroups").mockImplementation(async function* (_, options) {
+    yield create(GroupsSchema);
+    await delay(500, options!.signal!);
+    throw new ConnectError("Groups access denied", Code.PermissionDenied);
+  });
+  const probe = vi.spyOn(client, "uRLTest").mockResolvedValue(create(EmptySchema));
+  const session = new InstanceSession(client, { ...mockProfile, mode: "native" });
+  vi.useFakeTimers();
+  try {
+    session.setInventoryEnabled(true);
+    session.connect();
+    await vi.advanceTimersByTimeAsync(200);
+    const batch = session.testInventory(tags, inventory.outbounds);
+    const canceled = expect(batch).rejects.toMatchObject({ name: "AbortError" });
+    expect(probe).toHaveBeenCalledTimes(10);
+    await vi.advanceTimersByTimeAsync(45_750);
+    await canceled;
+    expect(probe).toHaveBeenCalledTimes(10);
+    expect(session.getSnapshot().streamErrors.groups).toBeDefined();
+    await expect(session.testInventory(tags, inventory.outbounds)).rejects.toMatchObject({ code: Code.Canceled });
+    await expect(session.testLatency(tags[10], 1, "outbounds")).resolves.toBeUndefined();
+    expect(probe).toHaveBeenCalledTimes(11);
+  } finally {
+    session.disconnect();
+    vi.useRealTimers();
+  }
+});
+
 it.each([
   { outcome: "continues", types: ["wireguard", "direct", "direct"], unchanged: true },
   { outcome: "stops", types: ["wireguard", "direct", "wireguard"], unchanged: false },

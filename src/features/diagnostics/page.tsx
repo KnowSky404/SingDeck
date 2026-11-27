@@ -316,6 +316,14 @@ function DiagnosticTool({
           </span>}
         >
           <div className="grid gap-4">
+            {result && (
+              <dl className="min-w-0 text-sm">
+                <dt className="text-muted-foreground">{t("Tested outbound")}</dt>
+                <dd className="wrap-anywhere font-medium">
+                  {result.outboundTag || t("Core default outbound")}
+                </dd>
+              </dl>
+            )}
             {running && quality && (
               <progress className="h-2 w-full accent-primary" aria-label={t("Measurement progress")}
                 max={Number(runtime)} value={elapsed > 0 ? Math.min(elapsed / 1000, Number(runtime) * 0.99) : undefined} />

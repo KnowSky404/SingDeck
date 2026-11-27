@@ -23,13 +23,22 @@ test("diagnostics require consent, cancel cleanly, and report streamed measureme
 
   await page.getByRole("textbox", { name: "Test configuration URL" }).clear();
   await page.getByRole("checkbox", { name: "Keep results for this page" }).check();
-  await page.getByRole("combobox", { name: "Outbound", exact: true }).click();
+  const outbound = page.getByRole("combobox", { name: "Outbound", exact: true });
+  await outbound.click();
   await page.getByRole("option", { name: /Independent direct/ }).click();
   await run.click();
   await expect(page.getByRole("status").filter({ hasText: /^Completed$/ })).toBeVisible();
   await expect(page.getByRole("img", { name: /capacity over time/ })).toBeVisible();
   await expect(page.getByText("High confidence", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Test comparison", { exact: true })).toBeVisible();
+  const testedOutbound = page.locator("dl")
+    .filter({ has: page.getByText("Tested outbound", { exact: true }) })
+    .getByRole("definition");
+  await expect(testedOutbound).toHaveText("Independent direct");
+  await outbound.click();
+  await page.getByRole("option", { name: "Core default outbound", exact: true }).click();
+  await expect(outbound).toHaveText("Core default outbound");
+  await expect(testedOutbound).toHaveText("Independent direct");
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export report" }).click();
   const report = JSON.parse(await readFile(await (await download).path(), "utf8"));
@@ -49,6 +58,7 @@ test("diagnostics require consent, cancel cleanly, and report streamed measureme
   await expect(page.getByText("Binding response received")).toBeVisible();
   await expect(page.getByText("203.0.113.24:42424")).toBeVisible();
   await expect(page.getByText("Address-dependent", { exact: true })).toBeVisible();
+  await expect(testedOutbound).toHaveText("Core default outbound");
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(await page.viewportSize()!.width);
   expect(errors).toEqual([]);
 });

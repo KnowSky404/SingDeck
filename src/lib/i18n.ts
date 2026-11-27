@@ -412,6 +412,7 @@ const zh: Record<string, string> = {
   "The core could not complete STUN. Check the core logs for UDP or timeout details.": "核心未能完成 STUN 检测。请查看核心日志以确认 UDP 或超时详情。",
   "Test incomplete": "测试未完成",
   "Test report": "测试报告",
+  "Tested outbound": "测试使用的出站",
   "Test progress": "测试进度",
   "Completed": "已完成",
   "Incomplete": "未完成",

@@ -180,7 +180,7 @@ export class InstanceSession {
   };
   private update(patch: Partial<Snapshot>, immediate = false) {
     this.pending = { ...this.pending, ...patch };
-    if (this.latencyTest && !this.canTestLatencies(this.latencyTest.source))
+    if (this.latencyTest && !this.canTestLatencyBatch(this.latencyTest.source))
       this.latencyTest.controller.abort();
     if (!this.canRunServiceAction()) this.interruptDiagnostic();
     if (immediate) this.flush();
@@ -999,6 +999,10 @@ export class InstanceSession {
       this.pending.capabilities.urlTest.status !== "unsupported"
     );
   }
+  private canTestLatencyBatch(source: "groups" | "outbounds") {
+    return this.canTestLatencies("groups") &&
+      (source === "groups" || this.canTestLatencies("outbounds"));
+  }
   testLatency = (tag: string, windows: number, source: "groups" | "outbounds" = "groups") => {
     const signal = this.signal;
     const activeTags = this.pending.testingManualLatencies;
@@ -1048,7 +1052,7 @@ export class InstanceSession {
     if (!sessionSignal || sessionSignal.aborted)
       return Promise.reject(new ConnectError("Disconnected", Code.Canceled));
     const source = plannedOutbounds === undefined ? "groups" : "outbounds";
-    if (!this.canTestLatencies(source) || this.pending.testingManualLatencies)
+    if (!this.canTestLatencyBatch(source) || this.pending.testingManualLatencies)
       return Promise.reject(new ConnectError("Service unavailable", Code.Canceled));
     const controller = new AbortController();
     const stop = () => controller.abort(sessionSignal.reason);
