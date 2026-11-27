@@ -62,6 +62,22 @@ A zero marker and the ensuing idle period cleared the rates. A fresh update rees
 
 At `ccb84bd`, one owned TCP fixture connection ran in isolated network and PID namespaces. The official sing-box 1.14.0/API 4 native record matched the fixture's executable, UID and user name. Chromium's Connection Inspector showed those fields and a Process route step. A matching filter returned that row, a nonmatching filter excluded it, and the one-row JSON export matched the native attributes. The core supplied neither a PID nor Android package names for this fixture, and those fields stayed unavailable in the view.
 
+### Native connection filters and route chain
+
+At `ccb84bd`, official sing-box 1.14.0/API 4 and Chromium 159.0.8154.6 observed three controlled loopback connections. The native attributes were TCP/IPv4 HTTP, UDP/IPv4 DNS and UDP/IPv6 DNS. Combined network, IP-family and application-protocol filters returned the expected rows or no match. Keyboard **Clear filters** restored all three. Inspector preserved the bracketed IPv6 destination from the native record. The browser used one HTTP 200 gRPC-Web Connections subscription.
+
+In a separate controlled connection with the same build and core, an explicit inbound rule selected an outer group, an inner group and a direct leaf. The native chain ran from leaf to inner to outer, and native `outbound` identified the leaf. Inspector showed Inbound, Matched rule, Outbound chain in outer-to-leaf order, and Destination. The Outbound field identified the leaf. The core omitted `fromOutbound`, so the field displayed Unavailable. The exact rule matched one row, a different rule matched none, and clearing restored the row without opening another browser subscription.
+
+## Phase 2 — Native notifications
+
+At `ccb84bd`, Chromium 159.0.8154.6 used a source-built `v1.14.0` fixture with a synthetic in-process producer. The upstream daemon observer and authenticated gRPC-Web served the notifications page in an isolated loopback-only namespace. A wrong Bearer was rejected. The browser kept two events with the same identifier and different types separate. A type-mismatched cancel affected neither. A matching cancel marked only its target canceled and read, and the other item remained unread.
+
+Leaving the page closed the browser observer. An independent observer received a notice while the browser was away. Returning opened a quiet subscription and kept the browser's two existing records without replay. A fresh event arrived on the new subscription. The tested notification URL and shared identifier stayed out of the page. The fixture text and Bearer were absent from Web Storage and IndexedDB. Separate checks with the official release CLI verified live idle subscription and teardown on route exit. Actual desktop notification delivery remains a separate check.
+
+## Phase 2 — Local outbound group disclosure
+
+At `9687377`, Chromium against official sing-box 1.14.0/API 4 used the keyboard to open one of two groups. The same group remained open after returning from Logs and from All outbounds, and the other stayed collapsed. Disconnect and reconnection in the same tab returned both groups to their initial collapsed state. Changing the group disclosure left Web Storage unchanged, and the browser sent no native mutation. The checked-in desktop and emulated mobile Demo regression also verifies temporary filtering. A separate synthetic stream sent an empty frame and then the original list, which kept the open group. After a subsequent nonempty list omitted that group, it returned collapsed when it reappeared. [Native browser regression](../e2e/native.spec.ts) · [Demo browser regression](../e2e/workspace.spec.ts)
+
 ## Phase 2 — Core log buffer and browsing
 
 An active subscriber received a reset after an authenticated `ClearLogs` call on official sing-box 1.14.0 over loopback. Browser checks use explicit demo mode for the confirmation and cancellation flows, local-only clearing, ANSI rendering and filtered export. The core action clears the shared in-memory history after confirmation. The local action clears the current browser view. Exports are explicit local files using filtered plain text with the active API credential redacted. The scale fixture and screenshots used synthetic data outside the repository.
@@ -77,7 +93,13 @@ A local comparison used production builds on loopback with Chromium 159.0.8154.6
 
 An official sing-box 1.14.0/API 4 Linux fixture ran in a loopback-only network namespace. Its named Tailscale endpoint stayed in `NeedsLogin` with zero peers while the authenticated HTTP gRPC-Web inbox stream reported one preseeded completed file. The reported name, size and modification time matched the file.
 
-Downloading the 4,194,357-byte file returned a size frame and 258 data frames. The largest data frame carried 16,320 bytes, and the assembled SHA-256 matched the fixture file. A missing filename returned `NotFound`. In a second download, closing the client after one data frame released the core's open file handle. The file checksum stayed intact and the API remained responsive. This check covers seeded inbox listing and download cancellation. Live peer receipt, sender metadata, send progress, inbox mutations and browser storage bounds still need separate verification.
+Downloading the 4,194,357-byte file returned a size frame and 258 data frames. The largest data frame carried 16,320 bytes, and the assembled SHA-256 matched the fixture file. A missing filename returned `NotFound`. In a second download, closing the client after one data frame released the core's open file handle. The file checksum stayed intact and the API remained responsive. This check covers seeded inbox listing and download cancellation. Live peer receipt, sender metadata, send progress and inbox mutations still need separate verification.
+
+### Browser storage research
+
+In a separate loopback-only fixture, a standalone Chromium 159.0.8154.6 harness downloaded a seeded Taildrop file from official sing-box 1.14.0/API 4 through authenticated Connect gRPC-Web. The browser awaited all 258 writes to its disposable origin-private file system (OPFS) and held at most one application-owned payload chunk. Its largest chunk was 16,320 bytes. Readback in chunks of at most 32 KiB produced a SHA-256 matching the 4,194,357-byte source. A separate cancellation after the first write removed the partial local entry. The harness rejected a declared size above a configured 1 MiB cap before it consumed a data frame or created a file. These measurements cover application-held chunks and local cleanup. Browser internal buffering, real peer transfers and integration into SingDeck need separate evidence.
+
+An ephemeral Firefox 159.0 context and a disposable WebKit 27.2 profile backed by disk each wrote and read back 20,771 synthetic bytes through awaited origin-private storage writes. Aborting another write left a zero-byte entry that was removed. The tested ephemeral WebKit context exposed `getDirectory()` and returned `UnknownError` when it was called. These small sink checks cover browser API feasibility.
 
 ## Phase 4 — USB/IP Server status
 
@@ -114,11 +136,13 @@ The 12,000-record smoke retained 9,599 active and 401 closed records, showed the
 
 One ten-minute follow-up at `5404626` used the same 10,000-record synthetic fixture in a foreground Chromium 159.0.8154.6 context at 1280 × 720. The initial list had 7,999 active and 2,001 closed records. At the start and each of ten one-minute checkpoints, **All statuses** retained 10,000 records and displayed 50 rows on page 1 of 200. The displayed upload counter on one mock row advanced from 12 KB to 1.7 MB. Unforced Chromium JS heap samples ranged from 34.2 to 53.2 MiB and ended at 34.2 MiB. After setup, the browser observed 131 tasks of at least 50 ms, with a maximum of 444 ms. Browser errors, failed requests and off-origin attempts stayed at zero. This single shared-host run covers bounded synthetic updates over ten minutes.
 
-### Native 1,000-connection baseline
+### Native TCP connection baseline
 
 At `ccb84bd`, official sing-box 1.14.0/API 4 served the production dashboard to Chromium 159.0.8154.6 at 1280 × 720 in an isolated loopback-only Linux namespace. The fixture opened 50 TCP flows at a time with a 100 ms pause between batches. The native subscriber and browser both reported 1,000 active connections. The browser displayed 50 rows per page, stayed on page 2 of 20 and used one HTTP 200 gRPC-Web Connections subscription.
 
 Three controlled traffic rounds on all 1,000 sockets delivered 512,000, 1,024,000 and 2,048,000 bytes. The native stream reported 1,000 positive updates per round, with subsequent update receipts 995 and 1,000 ms apart. During a two-second update observation, unforced browser JS heap samples were 14.1 and 18.5 MiB and no task of at least 50 ms was recorded. Longer retention and higher-volume native throughput remain separate measurements.
+
+A separate ramp used the same production build, native core, Chromium viewport and loopback isolation. At the 2,500-flow checkpoint, the native subscriber and browser both reported 2,500 active connections and the browser rendered 50 rows. The fixture stopped after opening 3,250 socket pairs when the host's available memory reached about 529 MiB, below its configured 560 MiB reserve. The fixture closed all sockets and listeners. A 10,000-flow run and traffic updates above the earlier 1,000-flow baseline remain unverified.
 
 ## Phase 5 — Sustained Runtime Monitor updates
 
