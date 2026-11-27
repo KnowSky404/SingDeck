@@ -934,9 +934,7 @@ test("language and theme controls work without replacing the session and persist
   await expect(chinese).toBeChecked();
   await page.keyboard.up("ArrowRight");
   await expect(
-    page.locator('[data-slot="tooltip-content"]').filter({
-      hasText: "简体中文",
-    }),
+    page.getByRole("tooltip", { name: "简体中文", exact: true }),
   ).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("lang", "zh-CN");
   await expect(page.getByText("演示模式", { exact: true })).toBeVisible();
