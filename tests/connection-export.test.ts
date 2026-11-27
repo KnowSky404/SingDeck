@@ -107,6 +107,27 @@ it("redacts percent-encoded credentials even within malformed native text", () =
   });
 });
 
+it("keeps nested percent and form-encoded credentials out of the file", () => {
+  const marker = "synthetic value/marker";
+  const row = create(ConnectionSchema, {
+    rule: "literal=synthetic+value/marker",
+    inbound: "synthetic%2520value%252Fmarker",
+    processInfo: { processPath: "apps/synthetic%2520value%252fmarker" },
+  });
+  const report = serializeConnectionExport(
+    [row],
+    "native",
+    new Date(0),
+    false,
+    (value) => value.replaceAll(marker, "[redacted]"),
+  );
+  expect(JSON.parse(report).connections[0]).toMatchObject({
+    rule: "[redacted]",
+    inbound: "[redacted]",
+    processInfo: { processPath: "[redacted]" },
+  });
+});
+
 it("exports every matching retained row past the first page", () => {
   const rows = Array.from({ length: 51 }, (_, index) =>
     create(ConnectionSchema, { id: `row-${index + 1}` }),
