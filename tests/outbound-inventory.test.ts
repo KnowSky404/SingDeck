@@ -8,6 +8,7 @@ import { delay } from "@/api/errors";
 import { InstanceSession } from "@/api/session";
 import { initialSnapshot, type Snapshot } from "@/api/state";
 import { WorkspaceContext } from "@/app/context";
+import { defaultOverviewLayout } from "@/features/dashboard/overview-layout";
 import { mockProfile } from "@/features/instances/profiles";
 import { OutboundInventory } from "@/features/proxies/inventory";
 import { translate } from "@/lib/i18n";
@@ -31,9 +32,12 @@ function renderInventory(session: InstanceSession, snapshot: Snapshot, reportedT
       snapshot,
       theme: "system",
       language: "en",
+      overviewLayout: defaultOverviewLayout,
       t: translate("en"),
       setTheme: noop,
       setLanguage: noop,
+      setOverviewLayout: noop,
+      applyDisplayPreferences: () => true,
       selectProfile: noop,
       saveProfile: noop,
       connect: noop,

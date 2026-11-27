@@ -6,7 +6,7 @@ import {
   Cpu,
   Activity,
 } from "lucide-react";
-import { Fragment, useState, type ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import {
   AreaChart,
   Area,
@@ -36,10 +36,8 @@ import { runtimeWindows, useRuntimeWindow } from "./use-runtime-window";
 import { useRuntimeStale } from "./use-runtime-stale";
 import { OverviewCustomization } from "./overview-customization";
 import {
-  loadOverviewLayout,
   overviewMetricLabels,
   overviewPanelLabels,
-  saveOverviewLayout,
   type OverviewLayout,
   type OverviewPanel,
 } from "./overview-layout";
@@ -55,12 +53,7 @@ function OverviewPanels({ order, ...panels }: Record<OverviewPanel, ReactNode> &
 }
 
 export default function Dashboard() {
-  const { profile, snapshot, t } = useWorkspace();
-  const [layout, setLayout] = useState(loadOverviewLayout);
-  function changeLayout(next: OverviewLayout) {
-    setLayout(next);
-    saveOverviewLayout(next);
-  }
+  const { profile, snapshot, overviewLayout, setOverviewLayout, t } = useWorkspace();
   const { status, version, runtime, service } = snapshot;
   const latest = runtime.samples.at(-1);
   const stale = useRuntimeStale(snapshot, profile.preferences.intervalMs);
@@ -97,7 +90,7 @@ export default function Dashboard() {
     <>
       <PageHeading title={t("Overview")} />
       <div className="flex justify-end">
-        <OverviewCustomization layout={layout} onChange={changeLayout} />
+        <OverviewCustomization layout={overviewLayout} onChange={setOverviewLayout} />
       </div>
       {stale && !snapshot.streamErrors.status && (
         <Notice title="Runtime data is stale">
@@ -105,7 +98,7 @@ export default function Dashboard() {
         </Notice>
       )}
       <div className="metrics-grid">
-        {layout.metrics.map((card) => {
+        {overviewLayout.metrics.map((card) => {
           const { value, icon: Icon, kind } = metrics[card];
           return (
             <Card key={card} className="metric">
@@ -121,7 +114,7 @@ export default function Dashboard() {
         })}
       </div>
       <OverviewPanels
-        order={layout.panels}
+        order={overviewLayout.panels}
         traffic={<Panel
           title={overviewPanelLabels.traffic}
           action={

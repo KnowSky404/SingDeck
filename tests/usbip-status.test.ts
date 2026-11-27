@@ -7,6 +7,7 @@ import { delay } from "@/api/errors";
 import { InstanceSession } from "@/api/session";
 import { initialSnapshot, type Snapshot } from "@/api/state";
 import { WorkspaceContext, type Workspace } from "@/app/context";
+import { defaultOverviewLayout } from "@/features/dashboard/overview-layout";
 import { defaultProfile } from "@/features/instances/profiles";
 import USBIPStatus from "@/features/settings/usbip";
 import { translate } from "@/lib/i18n";
@@ -25,9 +26,12 @@ const workspace: Workspace = {
   snapshot: initialSnapshot(),
   theme: "system",
   language: "en",
+  overviewLayout: defaultOverviewLayout,
   t: translate("en"),
   setTheme: noop,
   setLanguage: noop,
+  setOverviewLayout: noop,
+  applyDisplayPreferences: () => true,
   selectProfile: noop,
   saveProfile: noop,
   connect: noop,
