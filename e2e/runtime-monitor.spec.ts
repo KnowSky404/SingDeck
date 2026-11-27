@@ -91,8 +91,10 @@ test("runtime monitor shows live metrics and lets the user change the history wi
       await page.keyboard.press("Tab");
       await expect(main.getByRole("application", { name, exact: true })).toBeFocused();
     }
-    const tooltip = main.getByRole("region", { name: "Memory history" }).getByRole("status");
+    const memoryHistory = main.getByRole("region", { name: "Memory history" });
+    const tooltip = memoryHistory.getByRole("status");
     await expect(tooltip).toContainText(/Memory.*\d.*MB/);
+    await expect(memoryHistory.locator(".recharts-active-dot circle")).toBeVisible();
     await page.keyboard.press("Enter");
     await expect(tooltip).toBeHidden();
     await page.keyboard.press("Enter");
@@ -110,4 +112,34 @@ test("runtime monitor shows live metrics and lets the user change the history wi
   await expect(main.getByRole("application", { name: "Traffic rate history" })).toHaveCount(0);
   await expect(main.getByRole("application", { name: "Memory history" })).toHaveCount(0);
   expect(errors).toEqual([]);
+});
+
+test("runtime chart keeps isolated markers and separates contiguous segments across a gap", async ({ page, isMobile }) => {
+  if (isMobile) await page.setViewportSize({ width: 320, height: 740 });
+  await page.clock.install();
+  await page.goto("/");
+  await page.getByRole("button", { name: "Explore demo", exact: true }).click();
+  await expect(page.getByText("Mock mode", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "View runtime monitor" }).click();
+
+  const region = page.getByRole("region", { name: "Memory history", exact: true });
+  const chart = region.getByRole("application", { name: "Memory history", exact: true });
+  const markers = chart.locator(".recharts-line-dots circle");
+  const curve = chart.locator("path.recharts-line-curve");
+  await expect(chart).toBeVisible();
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+  await page.clock.runFor(2_000);
+  await expect(curve).toHaveAttribute("d", /^M[^M]*L[^M]*$/);
+  await expect(markers).toHaveCount(0);
+
+  // One elapsed status tick after the stale interval creates an actual observed gap.
+  await page.clock.fastForward(4_000);
+  await page.clock.runFor(200);
+  await expect(page.getByText("Chart gaps show interruptions in observed data.")).toBeVisible();
+  await expect(markers).toHaveCount(1);
+  await expect(markers).toBeVisible();
+
+  await page.clock.runFor(1_000);
+  await expect(curve).toHaveAttribute("d", /^(?:M[^M]*L[^M]*){2}$/);
+  await expect(markers).toHaveCount(0);
 });
