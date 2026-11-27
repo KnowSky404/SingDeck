@@ -53,6 +53,10 @@ Connection `chainList` runs from the resolved outbound back through its selectin
 
 The inspector displays per-connection UPDATE byte deltas and keeps cumulative totals separate. The first update may cover part of a polling interval, and a frame carries no elapsed duration. A reset snapshot supplies cumulative counters. An all-zero UPDATE can be an idle marker or a counter reset, so zero-only fields do not establish an interval measurement.
 
+The connection JSON download includes the retained records that match the current filters across all pages. It annotates retention truncation and preserves exact counters and timestamps as decimal strings. Native text fields go through the inspector's redaction. The file can contain network and process metadata.
+
+The v1.14.0 log stream carries only level and text. Its optional rendered context ID differs from the connection UUID, so the workspace cannot reliably join logs to connections. [Log context ID](https://github.com/SagerNet/sing-box/blob/v1.14.0/log/id.go) · [Connection tracker](https://github.com/SagerNet/sing-box/blob/v1.14.0/common/trafficcontrol/tracker.go)
+
 ## Native diagnostic semantics
 
 - Both diagnostic RPCs use the core's configured outbound when the tag is empty. A missing selected outbound can yield `NotFound` before a test runs. Both report execution failures inside an `isFinal` message, even when the RPC trailers are OK. SingDeck requires a final done message with an empty error and a clean stream end. It treats cancellation and interruption as incomplete.
