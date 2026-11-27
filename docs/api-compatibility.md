@@ -49,6 +49,8 @@ Status rates must divide byte deltas by the selected interval in seconds. First 
 
 Connection `chainList` runs from the resolved outbound back through its selecting groups. Connection Inspector reverses the reported list for display. The native `outbound` and `outboundType` identify the resolved outbound, while `fromOutbound` comes from the original connection metadata. The chain describes selection. It omits transport detours. The rule contains the matched predicate when supplied. Connection creation and close times are Unix milliseconds. Process information and other absent fields are shown as unavailable. [Pinned tracker](https://github.com/SagerNet/sing-box/blob/v1.14.0/common/trafficcontrol/tracker.go#L67-L104) · [Connection encoding](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/started_service.go#L1043-L1080)
 
+The inspector displays per-connection UPDATE byte deltas and keeps cumulative totals separate. The first update may cover part of a polling interval, and a frame carries no elapsed duration. A reset snapshot supplies cumulative counters. An all-zero UPDATE can be an idle marker or a counter reset, so zero-only fields do not establish an interval measurement.
+
 ## Native diagnostic semantics
 
 - Both diagnostic RPCs use the core's configured outbound when the tag is empty. A missing selected outbound can yield `NotFound` before a test runs. Both report execution failures inside an `isFinal` message, even when the RPC trailers are OK. SingDeck requires a final done message with an empty error and a clean stream end. It treats cancellation and interruption as incomplete.

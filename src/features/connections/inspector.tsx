@@ -13,6 +13,7 @@ import {
 import { bytes } from "@/lib/format";
 import type { Connection } from "@/proto/daemon/started_service_pb";
 import { redactNativeConnectionText } from "./redaction";
+import { hasConnectionIntervalDelta } from "./traffic";
 
 function recordedTime(timestamp: bigint, formatter: Intl.DateTimeFormat) {
   const date = new Date(Number(timestamp));
@@ -100,6 +101,8 @@ function ConnectionDetails({ record, dateFormat, current }: {
   const processUserId = process && process.userId >= 0 ? process.userId : null;
   const processOwner = processUserName ??
     (processUserId === null ? null : t("UID {id}", { id: processUserId }));
+  const showInterval = current && hasConnectionIntervalDelta(record);
+  const intervalBytes = (value: bigint) => showInterval ? bytes(value) : null;
   const route = ([
     ["Process", processPath || packages || processId || processOwner],
     ["Inbound", inbound],
@@ -132,6 +135,8 @@ function ConnectionDetails({ record, dateFormat, current }: {
     ["Closed at", recordedTime(record.closedAt, dateFormat)],
     ["Upload total", record.uplinkTotal >= 0n ? bytes(record.uplinkTotal) : null],
     ["Download total", record.downlinkTotal >= 0n ? bytes(record.downlinkTotal) : null],
+    ["Upload in reported interval", intervalBytes(record.uplink)],
+    ["Download in reported interval", intervalBytes(record.downlink)],
   ];
 
   async function copy(value: string) {
