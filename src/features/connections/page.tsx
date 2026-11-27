@@ -23,6 +23,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { Field, FieldLabel } from "@/components/ui/field";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -32,6 +38,11 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { bytes } from "@/lib/format";
+import {
+  connectionMatcher,
+  defaultConnectionFilters,
+  type ConnectionFilters,
+} from "./filters";
 import { ConnectionInspector } from "./inspector";
 
 const PAGE_SIZE = 50;
@@ -39,6 +50,14 @@ const sortColumns = [
   { key: "createdAt", label: "Start time" },
   { key: "uplinkTotal", label: "Upload" },
   { key: "downlinkTotal", label: "Download" },
+] as const;
+const advancedTextFilters = [
+  ["inbound", "Inbound"],
+  ["protocol", "Protocol"],
+  ["domain", "Domain"],
+  ["rule", "Matched rule"],
+  ["process", "Process"],
+  ["user", "User"],
 ] as const;
 type ConnectionSort = {
   column: (typeof sortColumns)[number]["key"];
@@ -51,14 +70,13 @@ function hasStartTime(timestamp: bigint) {
 
 export default function Connections() {
   const { snapshot, session, language, t } = useWorkspace();
-  const [search, setSearch] = useState(""),
-    [network, setNetwork] = useState("all"),
-    [state, setState] = useState("active"),
-    [sort, setSort] = useState<ConnectionSort>({
-      column: "createdAt",
-      direction: "descending",
-    }),
-    [page, setPage] = useState(0);
+  const [filters, setFilters] = useState(defaultConnectionFilters);
+  const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<ConnectionSort>({
+    column: "createdAt",
+    direction: "descending",
+  });
+  const [page, setPage] = useState(0);
   const startTimeFormat = useMemo(
     () =>
       new Intl.DateTimeFormat(language, {
@@ -68,7 +86,7 @@ export default function Connections() {
       }),
     [language],
   );
-  const [outbound, setOutbound] = useState<string | null>(null);
+  const { outbound } = filters;
   const outbounds = useMemo(
     () =>
       [
@@ -84,20 +102,11 @@ export default function Connections() {
   const detailTrigger = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const action = useAction();
-  const query = useDeferredValue(search.toLowerCase());
+  const query = useDeferredValue(search);
   const rows = useMemo(
     () =>
       [...snapshot.connections.values()]
-        .filter(
-          (c) =>
-            (state === "all" ||
-              (state === "closed" ? c.closedAt > 0n : c.closedAt === 0n)) &&
-            (network === "all" || c.network === network) &&
-            (outbound === null || c.outbound === outbound) &&
-            `${c.domain} ${c.destination} ${c.source} ${c.outbound} ${c.protocol}`
-              .toLowerCase()
-              .includes(query),
-        )
+        .filter(connectionMatcher(filters, query))
         .sort((a, b) => {
           const missing =
             Number(hasStartTime(b.createdAt)) -
@@ -117,7 +126,7 @@ export default function Connections() {
                 : a.id.localeCompare(b.id))
           );
         }),
-    [snapshot.connections, state, network, outbound, sort, query],
+    [snapshot.connections, filters, query, sort],
   );
   const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE)),
     currentPage = Math.min(page, pages - 1);
@@ -132,6 +141,11 @@ export default function Connections() {
   const enabled = current && !action.pending;
   const closeAllEnabled = enabled && activeCount > 0;
 
+  function updateFilter<Key extends keyof ConnectionFilters>(key: Key, value: ConnectionFilters[Key]) {
+    setFilters((previous) => ({ ...previous, [key]: value }));
+    setPage(0);
+  }
+
   function confirmCloseAll() {
     void action.run(session.closeAllConnections).then((ok) => {
       if (ok) setConfirm(false);
@@ -144,11 +158,8 @@ export default function Connections() {
       <div className="toolbar">
         <Choice
           label={t("Status filter")}
-          value={state}
-          onChange={(value) => {
-            setState(value);
-            setPage(0);
-          }}
+          value={filters.status}
+          onChange={(value) => updateFilter("status", value)}
           options={[
             { value: "active", label: t("Active") },
             { value: "closed", label: t("Closed") },
@@ -162,19 +173,16 @@ export default function Connections() {
             aria-label={t("Search connections")}
             placeholder={t("Search destinations, sources, routes…")}
             value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
+            onChange={(event) => {
+              setSearch(event.target.value);
               setPage(0);
             }}
           />
         </div>
         <Choice
           label={t("Network filter")}
-          value={network}
-          onChange={(v) => {
-            setNetwork(v);
-            setPage(0);
-          }}
+          value={filters.network}
+          onChange={(value) => updateFilter("network", value)}
           options={[
             { value: "all", label: t("All networks") },
             { value: "tcp", label: t("TCP") },
@@ -184,10 +192,9 @@ export default function Connections() {
         <Choice
           label={t("Outbound filter")}
           value={outbound === null ? "all" : `outbound:${outbound}`}
-          onChange={(v) => {
-            setOutbound(v === "all" ? null : v.slice("outbound:".length));
-            setPage(0);
-          }}
+          onChange={(value) =>
+            updateFilter("outbound", value === "all" ? null : value.slice("outbound:".length))
+          }
           options={[
             { value: "all", label: t("All outbounds") },
             ...outbounds.map((tag) => ({
@@ -205,6 +212,50 @@ export default function Connections() {
           {t("Close all connections")}
         </Button>
       </div>
+      <Collapsible>
+        <div className="button-row">
+          <CollapsibleTrigger asChild>
+            <Button variant="outline">{t("Advanced filters")}</Button>
+          </CollapsibleTrigger>
+          <Button
+            variant="ghost"
+            onClick={() => {
+              setFilters(defaultConnectionFilters);
+              setSearch("");
+              setPage(0);
+            }}
+          >
+            {t("Clear filters")}
+          </Button>
+        </div>
+        <CollapsibleContent>
+          <div className="grid gap-3 pt-3 sm:grid-cols-2 lg:grid-cols-3">
+            <Field>
+              <FieldLabel>{t("IP version")}</FieldLabel>
+              <Choice
+                label="IP version"
+                value={filters.ipVersion}
+                onChange={(value) => updateFilter("ipVersion", value)}
+                options={[
+                  { value: "all", label: t("All IP versions") },
+                  { value: "4", label: "IPv4" },
+                  { value: "6", label: "IPv6" },
+                ]}
+              />
+            </Field>
+            {advancedTextFilters.map(([key, label]) => (
+              <Field key={key}>
+                <FieldLabel htmlFor={`connections-filter-${key}`}>{t(label)}</FieldLabel>
+                <Input
+                  id={`connections-filter-${key}`}
+                  value={filters[key]}
+                  onChange={(event) => updateFilter(key, event.target.value)}
+                />
+              </Field>
+            ))}
+          </div>
+        </CollapsibleContent>
+      </Collapsible>
       {action.error && (
         <Notice title={t("Connection action failed")}>{t(action.error)}</Notice>
       )}

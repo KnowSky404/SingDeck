@@ -98,3 +98,69 @@ test("connection details show the reported route and retained closed state", asy
   await expect(route).toContainText(/Primary route.*Singapore 01/s);
   await expect(fact("Download total")).toHaveText(/^[\d.]+ [KMGT]?B$/);
 });
+
+test("connection filters compose with search and reset to all active rows", async ({
+  page,
+  isMobile,
+}) => {
+  if (isMobile) await page.setViewportSize({ width: 320, height: 740 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Explore demo", exact: true }).click();
+  await page.getByRole("link", { name: "Connections", exact: true }).first().click();
+
+  const choose = async (label: string, option: string) => {
+    await page.getByRole("combobox", { name: label, exact: true }).click();
+    await page.getByRole("option", { name: option, exact: true }).click();
+  };
+  const field = (label: string) => page.getByRole("textbox", { name: label, exact: true });
+  const matching = (count: number) =>
+    expect(page.getByText(new RegExp(`^${count} matching connections\\b`))).toBeVisible();
+
+  await matching(28);
+  await choose("Status filter", "All statuses");
+  await matching(30);
+  await choose("Network filter", "TCP");
+  await choose("Outbound filter", "Tokyo 01");
+  await matching(14);
+
+  const advanced = page.getByRole("button", { name: "Advanced filters", exact: true });
+  await advanced.focus();
+  await page.keyboard.press("Enter");
+  await expect(advanced).toBeFocused();
+  await expect(advanced).toHaveAttribute("aria-expanded", "true");
+
+  await field("Domain").fill("cdn.example.org");
+  await matching(5);
+  await choose("IP version", "IPv6");
+  await matching(0);
+  await choose("IP version", "IPv4");
+  await matching(5);
+
+  for (const [label, absent, reported] of [
+    ["Inbound", "unreported-inbound", "mixed-in"],
+    ["Protocol", "quic", "tls"],
+    ["Matched rule", "inbound=unreported", "inbound=mixed-in"],
+    ["Process", "unavailable", ""],
+    ["User", "unavailable", ""],
+  ]) {
+    await field(label).fill(absent);
+    await matching(0);
+    await field(label).fill(reported);
+    await matching(5);
+  }
+
+  const search = field("Search connections");
+  await search.fill("  TOKYO   cdn.example.org  127.0.0.1:50001  ");
+  await matching(1);
+  await expect(page.getByRole("button", { name: "Details for mock-2", exact: true })).toBeVisible();
+  await choose("Status filter", "Closed");
+  await matching(0);
+
+  await page.getByRole("button", { name: "Clear filters", exact: true }).press("Enter");
+  await matching(28);
+  await expect(search).toHaveValue("");
+  await expect(page.getByRole("combobox", { name: "Status filter", exact: true })).toHaveText("Active");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    (await page.viewportSize())!.width,
+  );
+});
