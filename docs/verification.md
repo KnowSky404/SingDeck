@@ -203,7 +203,13 @@ Across the three collapsed windows the baseline recorded 12 tasks of at least 50
 
 At `c08b35a`, two fresh Chromium 159.0.8154.6 contexts used the production app with explicit demo mode and synthetic ANSI messages at 1280 × 720. A 1,000-message reset retained all 1,000 messages. The 12,000-message case applied the same reset and eleven 1,000-message appends, checking the latest displayed sequence after each batch. It retained exactly the latest 2,000 messages. The adjacent evicted sequence was absent from search. Both cases mounted at most 200 rows, showed the expected bold styling and exported one searched latest row as plain text without ANSI escapes. There were no page errors or off-origin requests.
 
-In the 12,000-message case, browser dispatch through visible assertions took 167–329 ms per append. The live measurement window contained four long tasks with a maximum of 95 ms. The JS heap sample was 24.1 MiB without forced collection. These are single synthetic runs. Real-core logging throughput and long-run memory behavior require separate measurements.
+In the 12,000-message case, browser dispatch through visible assertions took 167–329 ms per append. The live measurement window contained four long tasks with a maximum of 95 ms. The JS heap sample was 24.1 MiB without forced collection. These are single synthetic runs.
+
+### Native high-volume log delivery
+
+At `f71339b`, Chromium 159.0.8154.6 (Playwright 1.65.1, 1280 × 720) loaded the production dashboard served by official sing-box 1.14.0/API 4 in a Linux loopback-only network namespace. The fixture opened and closed owned TCP connections in waves of eight. An independent native observer and the browser's decoded gRPC-Web response contained the same ordered live log sequence. The 200-connection checkpoint delivered 1,000 live records in 1.205 seconds. The 2,000-connection checkpoint delivered 10,000 in 11.493 seconds. Three initial reset-history records were counted separately.
+
+The Logs view rendered 200 rows on its oldest and newest retained pages. Its complete plain-text export matched the latest 2,000 records from both observers and confirmed the adjacent eviction boundary. The export used browser receipt times. The browser used one HTTP 200 log subscription and made no mutation requests. With CDP response capture enabled, the 11.895-second delivery and quiet window recorded no tasks of at least 50 ms. This was one paced loopback run. Sustained logging and long-run memory behavior remain unmeasured by this fixture.
 
 ## Phase 5 — Local browser and HTTPS compatibility
 
