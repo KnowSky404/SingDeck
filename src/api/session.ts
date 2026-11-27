@@ -6,7 +6,7 @@ import {
   type Group,
   type GroupItem,
 } from "@/proto/daemon/started_service_pb";
-import type { SingBoxClient } from "./client";
+import { normalizeBearerToken, type SingBoxClient } from "./client";
 import {
   capabilityFailure,
   initialCapabilities,
@@ -161,11 +161,15 @@ export class InstanceSession {
   private retryWarningsAfterCurrent = false;
   private diagnosticScope?: AbortController;
 
+  private readonly secret: string;
+
   constructor(
     readonly client: SingBoxClient,
     readonly profile: Profile,
-    private readonly secret = "",
-  ) {}
+    secret = "",
+  ) {
+    this.secret = normalizeBearerToken(secret);
+  }
   getSnapshot = () => this.snapshot;
   getOutboundTopology() {
     const { groups, outbounds, streamErrors } = this.pending;
