@@ -63,6 +63,8 @@ Connection `chainList` runs from the resolved outbound back through its selectin
 
 The inspector displays per-connection UPDATE byte deltas and keeps cumulative totals separate. The first update may cover part of a polling interval, and a frame carries no elapsed duration. A reset snapshot supplies cumulative counters. An all-zero UPDATE can be an idle marker or a counter reset, so zero-only fields do not establish an interval measurement.
 
+While the inspector is open, it can show browser-observed upload and download rates. It divides the change in cumulative bytes between two fresh observations of the same active connection by the elapsed browser time. Both directions use the same observation interval. A pair must span at least half the configured polling interval and less than two intervals. The display expires two intervals after its latest observation. A rate becomes unavailable after idle markers or a gap, on an invalid or reset counter, or when the current connection scope changes.
+
 The connection JSON download includes the retained records that match the current filters across all pages. It annotates retention truncation and preserves exact counters and timestamps as decimal strings. Native text fields go through the inspector's redaction. The file can contain network and process metadata.
 
 The demo stream starts with a reset and cumulative counters. Subsequent UPDATE events carry per-interval byte changes for active connections. CLOSED events carry final totals and a closing timestamp.

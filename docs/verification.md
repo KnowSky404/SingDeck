@@ -39,6 +39,12 @@ Visual inspection of a prefinal candidate used desktop light and emulated mobile
 
 The official sing-box v1.14.0 Linux integration measures the received runtime counters and rate conversions. It waits across four status intervals while the lifecycle stream stays quiet, then sends SIGHUP and checks that the changed native service start time records one restart and a gap in the rate history. The mock unit tests cover the observation limits, counter resets, and gaps after late frames. Browser history is bounded to the current session.
 
+## Phase 2 — Per-connection observed rates
+
+A production Chromium 159.0.8154.6 browser connected to the built-in dashboard on official sing-box 1.14.0/API 4 with a one-second Connections interval. An isolated TCP fixture sent 128 B up and 256 B down after the inspector opened. The first live update established the baseline and both rates stayed unavailable. The next update of 192 B up and 384 B down displayed 192 B/s and 384 B/s in that run. Reported interval fields kept their original byte values.
+
+A zero marker and the ensuing idle period cleared the rates. A fresh update reestablished a baseline. The next one-way update showed 320 B/s up and 0 B/s down, and the confirmed close cleared both rates again. The browser used one native Connections subscription. The amounts and timings describe this loopback fixture and its browser observations. Chromium desktop and emulated mobile tests separately exercise Demo rate display, an observation gap, resumption and inspector reopening.
+
 ## Phase 2 — Core log buffer and browsing
 
 An active subscriber received a reset after an authenticated `ClearLogs` call on official sing-box 1.14.0 over loopback. Browser checks use explicit demo mode for the confirmation and cancellation flows, local-only clearing, ANSI rendering and filtered export. The core action clears the shared in-memory history after confirmation. The local action clears the current browser view. Exports are explicit local files using filtered plain text with the active API credential redacted. The scale fixture and screenshots used synthetic data outside the repository.
