@@ -238,3 +238,67 @@ test("clears older chart points without interrupting live runtime readings", asy
   await expect.poll(async () => onlyNewPoints(await pointCount())).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test("clears local service event history while preserving runtime readings and charts", async ({ page, isMobile }) => {
+  if (isMobile) await page.setViewportSize({ width: 320, height: 740 });
+  await page.clock.install();
+  await page.goto("/");
+  await page.getByRole("button", { name: "Explore demo", exact: true }).click();
+  await expect(page.getByText("Mock mode", { exact: true })).toBeVisible();
+
+  const goToRuntime = () => page.getByRole("link", { name: "View runtime monitor", exact: true }).click();
+  await goToRuntime();
+  const main = page.getByRole("main");
+  const card = (name: string) => main.locator('[data-slot="card"]').filter({
+    has: page.getByRole("heading", { name, exact: true }),
+  });
+  const events = card("Service events");
+  const clear = events.getByRole("button", { name: "Clear service event history", exact: true });
+  const empty = events.getByText("No service events yet", { exact: true });
+  const status = main.getByRole("row", { name: /^Runtime status\b/ });
+  const service = main.getByRole("row", { name: /^Service lifecycle\b/ });
+  const receipts = [status.locator("time"), service.locator("time")];
+  const chartCurves = main.locator("path.recharts-line-curve");
+  const readings = [card("Current runtime").locator("dl"), card("Instance details").locator("dl")];
+  await expect(events.getByRole("listitem")).toHaveCount(1);
+  await expect(events.getByText("Service: Running", { exact: true })).toBeVisible();
+  await expect(clear).toBeEnabled();
+  await page.clock.runFor(4_000);
+  await expect(chartCurves).toHaveCount(6);
+  await clear.scrollIntoViewIfNeeded();
+  await expect(clear).toBeInViewport({ ratio: 1 });
+
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_500));
+  const readReceipts = () => Promise.all(receipts.map(receipt => receipt.getAttribute("datetime")));
+  const readMetrics = () => Promise.all(readings.map(reading => reading.innerText()));
+  const readCurves = () => chartCurves.evaluateAll(curves => curves.map(curve => curve.getAttribute("d")));
+  const now = await page.evaluate(() => Date.now());
+  const latestReceipt = Math.max(...(await readReceipts()).map(receipt => Date.parse(receipt!)));
+  // Compare immediately before and after the action, between mock stream updates and coalesced publication.
+  await page.clock.runFor(Math.max(150, 1_250 - (now - latestReceipt)));
+  const before = { receipts: await readReceipts(), readings: await readMetrics(), curves: await readCurves() };
+  if (isMobile) await clear.tap({ force: true });
+  else {
+    await clear.press("Enter");
+    await expect(clear).toBeFocused();
+  }
+  await expect(clear).toBeDisabled();
+  await expect(empty).toBeVisible();
+  await expect(events.getByRole("listitem")).toHaveCount(0);
+  await expect(status.getByText("Live", { exact: true })).toBeVisible();
+  await expect(service.getByText("Live", { exact: true })).toBeVisible();
+  expect(await readReceipts()).toEqual(before.receipts);
+  expect(await readMetrics()).toEqual(before.readings);
+  expect(await readCurves()).toEqual(before.curves);
+
+  await page.clock.runFor(1_100);
+  await expect(receipts[0]).not.toHaveAttribute("datetime", before.receipts[0]!);
+  await expect(receipts[1]).not.toHaveAttribute("datetime", before.receipts[1]!);
+  await page.clock.resume();
+  await page.getByRole("link", { name: "Overview", exact: true }).first().click();
+  await goToRuntime();
+  await expect(chartCurves).toHaveCount(6);
+  await expect(clear).toBeDisabled();
+  await expect(empty).toBeVisible();
+  await expect(events.getByRole("listitem")).toHaveCount(0);
+});

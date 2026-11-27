@@ -628,6 +628,7 @@ const zh: Record<string, string> = {
   "Awaiting event": "等待事件",
   "Event received": "已收到事件",
   "Service events": "服务事件",
+  "Clear service event history": "清除服务事件历史",
   "No service events yet": "暂无服务事件",
   "Observed lifecycle and connection changes will appear here.": "此处将显示观测到的生命周期及连接变化。",
   "Service: {status}": "服务：{status}",

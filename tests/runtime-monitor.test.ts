@@ -56,6 +56,26 @@ it("bounds observations and keeps outbound counts independent of traffic trackin
   expect(afterGap.samples[0]).toMatchObject({ connectionsOut: 3, gapBefore: true });
 });
 
+it("uses sample order instead of timestamps or retained events to establish restart freshness", () => {
+  const status = create(StatusSchema);
+  const time = 1000;
+  let runtime = initialSnapshot().runtime;
+  runtime = recordRuntimeSample(runtime, status, time, true, false);
+  const restart = { time, kind: "restart", startedAt: 20_000n } as const;
+  runtime = recordRuntimeEvent(runtime, restart);
+  expect(runtime.events).toEqual([restart]);
+  expect(runtime.awaitingPostRestartSample).toBe(true);
+  for (let index = 0; index < 60; index++) {
+    runtime = recordRuntimeEvent(runtime, { time, kind: "status-resumed" });
+  }
+  expect(runtime.events).toHaveLength(60);
+  expect(runtime.events).not.toContain(restart);
+  expect(runtime.awaitingPostRestartSample).toBe(true);
+  runtime = recordRuntimeSample(runtime, status, time, true, true);
+  expect(runtime.samples.map((sample) => sample.time)).toEqual([time, time]);
+  expect(runtime.awaitingPostRestartSample).toBe(false);
+});
+
 it("clears older samples while retaining a status frame still pending publication", async () => {
   vi.useFakeTimers();
   const client = createMockClient();
@@ -189,36 +209,85 @@ it("leaves an unreported outbound count unknown after lifecycle stream failure",
   }
 });
 
-it("records an observed service restart without turning its first interval into a rate", async () => {
+it("clears even unpublished service events while keeping restart freshness and chart history", async () => {
   vi.useFakeTimers();
   const client = createMockClient();
   vi.spyOn(client, "getStartedAt")
     .mockResolvedValueOnce(create(StartedAtSchema, { startedAt: 10_000n }))
     .mockResolvedValue(create(StartedAtSchema, { startedAt: 20_000n }));
   vi.spyOn(client, "subscribeServiceStatus").mockImplementation(async function* (_, options) {
-    const signal = options?.signal ?? new AbortController().signal;
+    const signal = options!.signal!;
     yield create(ServiceStatusSchema, { status: ServiceStatus_Type.STARTED });
     await delay(1200, signal);
     yield create(ServiceStatusSchema, { status: ServiceStatus_Type.STOPPING });
-    await delay(300, signal);
+    await delay(350, signal);
     yield create(ServiceStatusSchema, { status: ServiceStatus_Type.STARTED });
     yield create(ServiceStatusSchema, { status: ServiceStatus_Type.STARTED });
+    await delay(750, signal);
+    yield create(ServiceStatusSchema, { status: ServiceStatus_Type.STOPPING });
     await delay(60_000, signal);
   });
   const session = new InstanceSession(client, mockProfile);
+  const publish = vi.fn();
+  const unsubscribe = session.subscribe(publish);
   try {
+    const empty = session.getSnapshot();
+    session.clearRuntimeEvents();
+    expect(session.getSnapshot()).toBe(empty);
+    expect(publish).not.toHaveBeenCalled();
+
     session.connect();
-    await vi.advanceTimersByTimeAsync(1100);
-    const before = session.getSnapshot().runtime;
-    expect(before.samples[0]?.down).toBeUndefined();
-    expect(before.samples.at(-1)?.down).toBeGreaterThan(0);
-    await vi.advanceTimersByTimeAsync(1000);
-    const runtime = session.getSnapshot().runtime;
-    expect(runtime.lastFrameAt.status).toBeGreaterThan(before.lastFrameAt.status!);
-    expect(runtime.events.map(({ kind }) => kind)).toEqual(["service", "service", "service", "restart"]);
-    expect(runtime.events.at(-1)).toMatchObject({ kind: "restart", startedAt: 20_000n });
-    expect(runtime.samples.at(-1)).toMatchObject({ gapBefore: true, down: undefined, up: undefined });
+    await vi.advanceTimersByTimeAsync(1549);
+    const before = session.getSnapshot();
+    expect(before.runtime.samples[0]?.down).toBeUndefined();
+    expect(before.runtime.samples.at(-1)?.down).toBeGreaterThan(0);
+    expect(before.runtime.events.map(({ kind }) => kind)).toEqual(["service", "service"]);
+    expect(before.runtime.lastBoot).toBe(10_000n);
+    const signal = session.signal;
+
+    await vi.advanceTimersByTimeAsync(2);
+    expect(session.getSnapshot()).toBe(before);
+    publish.mockClear();
+    session.clearRuntimeEvents();
+    const cleared = session.getSnapshot();
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(cleared.runtime.events).toEqual([]);
+    expect(cleared.runtime.samples).toBe(before.runtime.samples);
+    expect(cleared.runtime.lastFrameAt.status).toBe(before.runtime.lastFrameAt.status);
+    expect(cleared.runtime.lastFrameAt.service).toBeGreaterThan(before.runtime.lastFrameAt.service!);
+    expect(cleared.runtime.lastBoot).toBe(20_000n);
+    expect(cleared.startedAt).toBe(20_000n);
+    expect(cleared.runtime.awaitingPostRestartSample).toBe(true);
+    expect(cleared.status).toBe(before.status);
+    expect(cleared.notifications).toBe(before.notifications);
+    expect(session.signal).toBe(signal);
+    expect(signal?.aborted).toBe(false);
+
+    session.clearRuntimeEvents();
+    expect(session.getSnapshot()).toBe(cleared);
+    expect(publish).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(448);
+    expect(session.getSnapshot().runtime.awaitingPostRestartSample).toBe(true);
+    expect(session.getSnapshot().runtime.events).toEqual([]);
+    session.clearOlderRuntimeSamples();
+    expect(session.getSnapshot().runtime.samples).toEqual(cleared.runtime.samples.slice(-1));
+    expect(session.getSnapshot().runtime.awaitingPostRestartSample).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(102);
+    const resumed = session.getSnapshot().runtime;
+    expect(resumed.lastFrameAt.status).toBeGreaterThan(cleared.runtime.lastFrameAt.status!);
+    expect(resumed.awaitingPostRestartSample).toBe(false);
+    expect(resumed.events).toEqual([]);
+    expect(resumed.samples.at(-1)).toMatchObject({ gapBefore: true, down: undefined, up: undefined });
+
+    await vi.advanceTimersByTimeAsync(199);
+    expect(session.getSnapshot().runtime.events).toEqual([
+      expect.objectContaining({ kind: "service", status: ServiceStatus_Type.STOPPING }),
+    ]);
+    session.disconnect();
+    expect(session.getSnapshot().runtime).toEqual(initialSnapshot().runtime);
   } finally {
+    unsubscribe();
     session.disconnect();
     vi.useRealTimers();
   }

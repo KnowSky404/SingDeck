@@ -109,6 +109,7 @@ export default function RuntimeMonitor() {
   const streamsAborted = session.signal?.aborted ?? false;
   const latest = runtime.samples.at(-1);
   const canClearOlderSamples = runtime.samples.length > 1;
+  const canClearServiceEvents = runtime.events.length > 0;
   const { samples, windowSeconds, selectWindow } = useRuntimeWindow(runtime.samples, profile.preferences.windowSeconds);
   const points = useMemo(() => chartPoints(samples), [samples]);
   const averages = useMemo(
@@ -149,7 +150,7 @@ export default function RuntimeMonitor() {
     snapshot.phase !== "connected" ||
     snapshot.streamErrors.status ||
     (lastStatus !== undefined && staleFrame === lastStatus) ||
-    runtime.events.some((event) => event.kind === "restart" && event.time > latest.time)
+    runtime.awaitingPostRestartSample
   ));
   const metrics = [
     ["Memory", bytes(latest?.memory || undefined)],
@@ -340,8 +341,23 @@ export default function RuntimeMonitor() {
             </tbody>
           </table>
         </Panel>
-        <Panel title={<h2>{t("Service events")}</h2>}>
-          {runtime.events.length ? (
+        <Panel title={
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2>{t("Service events")}</h2>
+            <Button
+              type="button"
+              variant="outline"
+              aria-disabled={!canClearServiceEvents}
+              className="h-auto min-h-8 max-w-full whitespace-normal aria-disabled:opacity-50"
+              onClick={() => {
+                if (canClearServiceEvents) session.clearRuntimeEvents();
+              }}
+            >
+              {t("Clear service event history")}
+            </Button>
+          </div>
+        }>
+          {canClearServiceEvents ? (
             <ol className="grid gap-2">
               {runtime.events.slice().reverse().map((event, index) => (
                 <li key={`${event.time}-${event.kind}-${index}`} className="flex flex-wrap justify-between gap-x-3 gap-y-1 border-b pb-2 text-sm last:border-b-0">

@@ -41,6 +41,10 @@ The official sing-box v1.14.0 Linux integration measures the received runtime co
 
 **Clear older chart samples** removes earlier in-memory samples from the current session and keeps the newest sample. Runtime Monitor and Overview use that same buffer. Current readings, service events and stream receipt times stay in place. New samples continue to arrive through the existing stream.
 
+**Clear service event history** empties the current session's in-memory timeline. Runtime Monitor keeps the current readings, chart samples and stream receipt times. A confirmed restart marks the prior sample as stale until the next status sample arrives, including when the restart and prior sample share a receipt timestamp. Clearing the timeline leaves that freshness check in place. Later lifecycle and status-stream events appear in the cleared timeline.
+
+In Chromium 159.0.8154.6 on the official sing-box 1.14.0 built-in dashboard, clearing by keyboard emptied a real service event timeline while keeping the memory curve and status and lifecycle receipt times. Both subscriptions stayed live. The next status frame advanced its receipt time, and returning to Runtime Monitor showed the cleared timeline in the same session.
+
 In a local production Chromium run with official sing-box 1.14.0/API 4, the action reduced a populated memory curve to its newest marker. The visible memory and traffic readings and the exact status and lifecycle receipt times stayed the same. Both streams stayed Live. The next regular status sample extended the curve and made the action available again. The browser used one status subscription and made no mutation request in this fixture.
 
 The session regression also clears while a newer status sample is queued for publication. The clear publishes that exact sample and leaves lifecycle events, stream state and sibling receipt times intact. Desktop and 320px mobile Demo tests separately check keyboard or touch, retained readings, new samples, the wider window and the same cleared buffer after navigating through Overview.
