@@ -50,6 +50,21 @@ A local comparison used production builds on loopback with Chromium 159.0.8154.6
 | Desktop 1280 × 720 | 4,652 → 722 ms | 3,045 → 294 ms |
 | Emulated mobile 320 × 700 | 4,209 → 679 ms | 4,036 → 283 ms |
 
+## Phase 5 — Connections capacity baseline
+
+The baseline uses application source `ec030fb`, Bun 1.4.4, Playwright 1.65.1 and headless Chromium 159.0.8154.6 at 1280 × 720 on a shared Linux x86_64 host with two available CPUs. The [measurement script](../scripts/measure-connection-capacity.ts) serves an isolated production-mode fixture build on `127.0.0.1:15926` and blocks browser requests to other origins. The initial reset seeds active connections and closed history. The test reads both through the status filter and observes subsequent traffic updates on active rows. The fixture build emitted 376,544 gzip bytes of JS and CSS, compressed individually.
+
+Run `bun scripts/measure-connection-capacity.ts` after the frozen install with the pinned Playwright Chromium available. The script requires clean application source and configuration and disables Vite env-file loading during the build. The printed JSON report records application HEAD, worktree changes and SHA-256 hashes for the script and this document as measured. Only those two files had local changes in the recorded run.
+
+All cases use one browser process and fresh contexts, with one discarded warmup and three alternating runs per in-limit workload. Timings include Playwright actions, assertions and two animation frames. Explore demo to first rows includes the startup and Connections navigation. Connected to rows starts after the workspace reports Connected, when connection data may already be available. The long-task window ends after returning from Diagnostics for every case, before the separate eight-second update observation. Heap samples use Chromium CDP without forcing garbage collection.
+
+| Synthetic input | Retained active / closed | Explore demo / Connected to rows median | Search / clear median | Next page median | Return from Diagnostics median | First-page heap median | Longest observed task |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 799 / 201 | 401 / 197 ms | 226 / 133 ms | 118 ms | 344 ms | 12.6 MiB | 84 ms |
+| 10,000 | 7,999 / 2,001 | 567 / 306 ms | 226 / 133 ms | 117 ms | 371 ms | 29.1 MiB | 236 ms |
+
+The 12,000-record smoke retained 9,599 active and 401 closed records, showed the display-limit notice and kept the 50-row page. Its longest task was 224 ms. In one 10,000-record sample, traffic values changed during the eight-second update observation after the timed work. Heap use went from 50.1 to 45.1 MiB during that observation. These are short synthetic measurements on a shared host. Long-run memory behavior and real-core throughput need separate measurements.
+
 ## v0.3.0 local regression record
 
 Worktree feature validation on 2026-11-17: lint, typecheck, production build, frozen installation, actionlint, schema regeneration and license reproducibility pass. Unit tests: **26 pass**. Official sing-box 1.14.0 integration: **5 pass**, including download of a root-layout ZIP from a loopback HTTP fixture, extraction into a new directory and serving HTML/assets under `/dashboard/`. This proves core archive handling; it does not prove a user's GitHub download route.
