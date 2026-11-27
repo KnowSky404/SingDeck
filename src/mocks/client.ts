@@ -401,21 +401,27 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
     async *subscribeConnections(request, opts) {
       const signal = opts?.signal ?? new AbortController().signal;
       let first = true;
+      const previous = new Map<string, { closedAt: bigint; uplinkTotal: bigint; downlinkTotal: bigint }>();
       while (!signal.aborted) {
         check();
-        yield clone(
-          ConnectionEventsSchema,
-          create(ConnectionEventsSchema, {
-            reset: true,
-            events: [...connections.values()].map((c) =>
-              create(ConnectionEventSchema, {
-                type: ConnectionEventType.CONNECTION_EVENT_NEW,
-                id: c.id,
-                connection: c,
-              }),
-            ),
-          }),
-        );
+        const events = [...connections.values()].flatMap((c) => {
+          const last = previous.get(c.id);
+          previous.set(c.id, { closedAt: c.closedAt, uplinkTotal: c.uplinkTotal, downlinkTotal: c.downlinkTotal });
+          if (!last) return [create(ConnectionEventSchema, {
+            type: ConnectionEventType.CONNECTION_EVENT_NEW, id: c.id, connection: c,
+          })];
+          if (last.closedAt > 0n) return [];
+          if (c.closedAt > 0n) return [create(ConnectionEventSchema, {
+            type: ConnectionEventType.CONNECTION_EVENT_CLOSED, id: c.id, closedAt: c.closedAt, connection: c,
+          })];
+          return [create(ConnectionEventSchema, {
+            type: ConnectionEventType.CONNECTION_EVENT_UPDATE,
+            id: c.id,
+            uplinkDelta: c.uplinkTotal - last.uplinkTotal,
+            downlinkDelta: c.downlinkTotal - last.downlinkTotal,
+          })];
+        });
+        yield clone(ConnectionEventsSchema, create(ConnectionEventsSchema, { reset: first, events }));
         if (!first)
           for (const c of connections.values()) {
             if (c.closedAt > 0n) continue;

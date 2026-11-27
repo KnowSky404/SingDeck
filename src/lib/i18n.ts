@@ -211,6 +211,7 @@ const zh: Record<string, string> = {
   "No outbounds match your filters.": "没有符合筛选条件的出站。",
   "No result": "无结果",
   "Invalid result": "无效结果",
+  "Close matching connections": "关闭匹配的连接",
   "Close all connections": "关闭全部连接",
   "Search connections": "搜索连接",
   "Search destinations, sources, routes…": "搜索目标、来源、路由…",
@@ -232,6 +233,13 @@ const zh: Record<string, string> = {
   Closed: "已关闭",
   "Connection records": "连接记录",
   "Connection action failed": "连接操作失败",
+  "Batch close result": "批量关闭结果",
+  "Requests acknowledged {acknowledged} · Already closed {skipped} · Requests unsent {unsent}":
+    "请求已确认 {acknowledged} · 连接已关闭而跳过 {skipped} · 请求未发送 {unsent}",
+  "One attempted request had no acknowledgement.": "有一条已尝试的请求未收到确认。",
+  "The live connection list confirms which connections closed.": "实际关闭状态以实时连接列表为准。",
+  "Connection records changed. Review the current filters and try again.":
+    "连接记录已更改，请重新核对当前筛选结果后重试。",
   "No active connections remain.": "当前已无活动连接。",
   "Wait for the connection list to refresh, then try again.": "请等待连接列表刷新后重试。",
   "Display limit reached": "已达到显示上限",
@@ -250,6 +258,10 @@ const zh: Record<string, string> = {
   "Next page": "下一页",
   "Page {page} / {pages}": "第 {page} / {pages} 页",
   "Close all active connections?": "关闭全部活动连接？",
+  "Close matching active connections?": "关闭匹配的活动连接？",
+  "This interrupts traffic on {count} active connections matching the current filters across all pages. Only this fixed set will be requested.":
+    "此次操作会中断当前筛选条件下所有页面共 {count} 条活动连接的流量。请求范围限于这批连接。",
+  "Stop closing connections": "停止关闭连接",
   "This interrupts traffic on {count} tracked connections. Applications may reconnect automatically.":
     "这会中断 {count} 条活动连接的流量。应用可能会自动重连。",
   "Close failed": "关闭失败",
