@@ -267,7 +267,8 @@ suite("official sing-box 1.14.0 native integration (not mock)", () => {
       const signal = AbortSignal.any([verify.signal, AbortSignal.timeout(1000)]);
       try {
         const snapshot = await first(client.subscribeConnections({}, { signal }));
-        const closed = snapshot.value?.events.find((event) => event.id === id)?.connection;
+        if (snapshot.done || !snapshot.value.reset) return;
+        const closed = snapshot.value.events.find((event) => event.id === id)?.connection;
         return closed && closed.closedAt >= createdAt ? closed : undefined;
       } finally {
         verify.abort();
