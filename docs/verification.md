@@ -179,7 +179,13 @@ Official sing-box 1.14.0 downloaded a root-layout ZIP over loopback and extracte
 
 On the same candidate, Firefox 159.0 and WebKit 27.2 opened explicit Demo at `/preview/` and rendered all 28 Connections rows under both CSP controls. With `manifest-src 'self'`, WebKit sent a native manifest request and received HTTP 200. With `manifest-src 'none'`, it produced a policy violation before sending the request. Firefox resolved the same-origin manifest link and made no manifest request in either desktop run.
 
-Runtime Monitor already offers 1, 3 and 5 minute windows for the current visit. Overview takes its window from profile preferences and has a fixed card layout. The existing hash route determines the initial page, with Overview as the default. Runtime history is bounded and held in the active session. Distinct manifest identities on one origin still share that origin's storage boundary. Persisted customization and retention controls depend on the instance preference and storage model. [Runtime Monitor](../src/features/dashboard/runtime-monitor.tsx) · [Overview](../src/features/dashboard/page.tsx) · [Architecture](architecture.md)
+Runtime Monitor and the Overview Traffic activity chart offer 1, 3 and 5 minute history windows for the current visit. Both start with the configured profile window. Overview still has a fixed card layout. The existing hash route determines the initial page, with Overview as the default. Runtime history is bounded and held in the active session. Distinct manifest identities on one origin still share that origin's storage boundary. Persisted customization and retention controls depend on the instance preference and storage model. [Runtime Monitor](../src/features/dashboard/runtime-monitor.tsx) · [Overview](../src/features/dashboard/page.tsx) · [Architecture](architecture.md)
+
+### Overview traffic history window
+
+In a production Chromium 159.0.8154.6 browser, official sing-box 1.14.0/API 4 served the built-in dashboard and reported traffic from one isolated QA connection. Overview showed a nonzero chart while the browser switched through the 1-, 3- and 5-minute views. Later status updates and the confirmed connection close kept the 5-minute selection. The browser used one native status subscription throughout. This check used the stock one-minute profile default.
+
+Chromium desktop and 320px emulated mobile also exercised explicit Demo in the production build. Each series rendered 59–60, 179–180 and 299–300 samples as the selected interval widened. Keyboard and touch controls stayed within the viewport. Live updates kept the selected window, a later visit restored the default, and widening an empty view after more than five minutes kept expired samples hidden. The Runtime Monitor chart and keyboard regressions passed on the same build.
 
 ### Credential handling and dependency audit
 
