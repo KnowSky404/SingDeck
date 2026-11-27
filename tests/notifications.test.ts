@@ -67,6 +67,25 @@ describe("notification history", () => {
     expect(entry.body).toBe("Ordinary body value");
   });
 
+  it("redacts a credential revealed by collapsing HTML whitespace in native text", () => {
+    const token = "fixture-part fixture-marker";
+    const body = "fixture-part\u00a0fixture-marker  remains separate";
+    const packet = create(NotificationEventSchema, {
+      event: { case: "send", value: {
+        identifier: "sample",
+        title: "fixture-part   fixture-marker",
+        subtitle: encodeURIComponent("fixture-part\t\r\nfixture-marker"),
+        body,
+      } },
+    });
+    const [entry] = receiveNativeNotification([], packet, 1, 1, (text) =>
+      text.replaceAll(token, "[redacted]"),
+    );
+    if (entry.source !== "native") throw new Error("Missing native notification");
+    expect([entry.title, entry.subtitle].map((text) => text === "[redacted]")).toEqual([true, true]);
+    expect(entry.body).toBe(body);
+  });
+
   it("bounds memory and drops incomplete or oversized identities", () => {
     let history: NotificationRecord[] = [];
     for (let i = 0; i < NOTIFICATION_LIMIT + 5; i++) {
