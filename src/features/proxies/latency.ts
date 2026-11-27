@@ -1,12 +1,30 @@
 import type { Group, GroupItem } from "@/proto/daemon/started_service_pb";
 
+export function testedAt(item: GroupItem): Date | undefined {
+  const time = new Date(Number(item.urlTestTime) * 1000);
+  if (item.urlTestTime > 0n && Number.isFinite(time.valueOf())) return time;
+}
+
+export function selectedRoute(
+  root: Group,
+  groups: ReadonlyMap<string, Group>,
+): string[] {
+  const visited = new Set([root.tag]);
+  let tag = root.selected;
+  while (tag && !visited.has(tag)) {
+    visited.add(tag);
+    tag = groups.get(tag)?.selected ?? "";
+  }
+  return [...visited];
+}
+
 export function latency(item: GroupItem): string {
-  if (item.urlTestTime === 0n) return "No result";
+  if (item.urlTestTime <= 0n) return "No result";
   return item.urlTestDelay < 0 ? "Invalid result" : `${item.urlTestDelay} ms`;
 }
 
 export function latencyTone(item: GroupItem) {
-  if (item.urlTestTime === 0n || item.urlTestDelay < 0) return "unknown";
+  if (item.urlTestTime <= 0n || item.urlTestDelay < 0) return "unknown";
   if (item.urlTestDelay < 150) return "low";
   return item.urlTestDelay < 300 ? "medium" : "high";
 }

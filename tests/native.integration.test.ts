@@ -4,6 +4,7 @@ import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { randomBytes } from "node:crypto";
+import { createInterface } from "node:readline";
 import {
   createServer,
   request,
@@ -32,6 +33,7 @@ suite("official sing-box 1.14.0 native integration (not mock)", () => {
     endpoint: string,
     secret: string;
   let target: Server, proxyRequest: ClientRequest | undefined;
+  let cliDeprecationReported = false;
   const scopes: AbortController[] = [];
   const scope = () => {
     const c = new AbortController();
@@ -58,19 +60,30 @@ suite("official sing-box 1.14.0 native integration (not mock)", () => {
     const config = JSON.parse(
       await readFile("examples/sing-box-1.14.0.json", "utf8"),
     );
-    config.outbounds.push({
-      type: "urltest",
-      tag: "Auto route",
-      outbounds: ["direct", "direct-backup"],
-      url: `http://127.0.0.1:${address.port}/probe`,
-      interval: "10m",
-    });
+    config.dns = { independent_cache: true };
+    config.outbounds.push(
+      { type: "direct", tag: "ungrouped" },
+      {
+        type: "urltest",
+        tag: "Auto route",
+        outbounds: ["direct", "direct-backup"],
+        url: `http://127.0.0.1:${address.port}/probe`,
+        interval: "10m",
+      },
+    );
     config.services[0].secret = secret;
     config.services[0].dashboard.path = resolve("dist");
     const path = `${directory}/config.json`;
     await writeFile(path, JSON.stringify(config), { mode: 0o600 });
     expect(spawnSync(binary!, ["check", "-c", path]).status).toBe(0);
-    child = spawn(binary!, ["run", "-c", path], { stdio: "ignore" });
+    const daemon = spawn(binary!, ["run", "-c", path], {
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    child = daemon;
+    createInterface({ input: daemon.stderr }).on("line", (line) => {
+      if (line.includes("`independent_cache` DNS option is deprecated"))
+        cliDeprecationReported = true;
+    });
     client = createNativeClient(endpoint, secret);
     const deadline = Date.now() + 10000;
     while (true) {
@@ -130,6 +143,34 @@ suite("official sing-box 1.14.0 native integration (not mock)", () => {
     expect(log.value?.reset).toBe(true);
     expect(connections.value?.reset).toBe(true);
     s.abort();
+  });
+  it("streams configured outbounds with their tags and types, including ungrouped entries", async () => {
+    const s = scope();
+    try {
+      const [inventory, groups] = await Promise.all([
+        first(client.subscribeOutbounds({}, { signal: s.signal })),
+        first(client.subscribeGroups({}, { signal: s.signal })),
+      ]);
+      if (inventory.done || groups.done)
+        throw new Error("Expected an inventory and a group snapshot");
+      expect(inventory.value.outbounds).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ tag: "ungrouped", type: "direct" }),
+          expect.objectContaining({ tag: "Primary route", type: "selector" }),
+          expect.objectContaining({ tag: "Auto route", type: "urltest" }),
+        ]),
+      );
+      const groupMembers = groups.value.group.flatMap((group) =>
+        group.items.map((item) => item.tag),
+      );
+      expect(new Set(groupMembers)).toEqual(new Set(["direct", "direct-backup"]));
+    } finally {
+      s.abort();
+    }
+  });
+  it("returns no collected warnings in CLI mode even when a deprecation is logged", async () => {
+    await expect.poll(() => cliDeprecationReported).toBe(true);
+    expect((await client.getDeprecatedWarnings({})).warnings).toEqual([]);
   });
   it("confirms a selector switch through the real subscription; receives native RPC errors", async () => {
     const session = new InstanceSession(client, {

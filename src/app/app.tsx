@@ -14,6 +14,7 @@ import {
   ChevronLeft,
   ChevronRight,
   FlaskConical,
+  Gauge,
   House,
   Layers3,
   Menu,
@@ -52,6 +53,8 @@ const Overview = lazy(() => import("@/features/dashboard/page"));
 const Proxies = lazy(() => import("@/features/proxies/page"));
 const Connections = lazy(() => import("@/features/connections/page"));
 const Logs = lazy(() => import("@/features/logs/page"));
+const Diagnostics = lazy(() => import("@/features/diagnostics/page"));
+const ConfigurationHealth = lazy(() => import("@/features/diagnostics/health"));
 const SettingsPage = lazy(() => import("@/features/settings/page"));
 const links = [
   {
@@ -62,7 +65,7 @@ const links = [
   },
   {
     path: "/proxies",
-    label: "Proxies",
+    label: "Outbounds",
     description: "Find your route. Keep your network moving.",
     icon: Layers3,
   },
@@ -77,6 +80,12 @@ const links = [
     label: "Logs",
     description: "A live view into your instance.",
     icon: Terminal,
+  },
+  {
+    path: "/diagnostics",
+    label: "Diagnostics",
+    description: "Run native network quality and STUN tests.",
+    icon: Gauge,
   },
   {
     path: "/settings",
@@ -300,6 +309,9 @@ export default function App() {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [path]);
+  useEffect(() => {
+    session.setInventoryEnabled(path === "/proxies" || path === "/diagnostics");
+  }, [path, session]);
   const [collapsed, setCollapsed] = useState(false),
     [menu, setMenu] = useState(false);
   const Page =
@@ -311,9 +323,13 @@ export default function App() {
           ? Connections
           : path === "/logs"
             ? Logs
-            : path === "/settings"
-              ? SettingsPage
-              : null;
+            : path === "/diagnostics"
+              ? Diagnostics
+              : path === "/configuration-health"
+                ? ConfigurationHealth
+                : path === "/settings"
+                  ? SettingsPage
+                  : null;
   const partial = Object.entries(snapshot.streamErrors).filter(
     ([channel, error]) => channel !== "status" && error,
   );

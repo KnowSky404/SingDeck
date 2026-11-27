@@ -39,7 +39,6 @@ jobs:
       - run: bun run test
       - run: bun run build
       - run: bunx playwright install --with-deps chromium
-      - run: bun run test:e2e
       - name: Obtain pinned official integration fixture
         env:
           GH_TOKEN: ${{ github.token }}
@@ -49,7 +48,7 @@ jobs:
           tar --no-same-owner -xzf "$RUNNER_TEMP/sing-box-1.14.0-linux-amd64.tar.gz" -C "$RUNNER_TEMP"
           echo "SING_BOX_BINARY=$RUNNER_TEMP/sing-box-1.14.0-linux-amd64/sing-box" >> "$GITHUB_ENV"
       - run: bun run test:integration
-      - run: bun run test:e2e -- e2e/native.spec.ts --project desktop
+      - run: bun run test:e2e
       - name: Upload verified Pages build
         if: inputs.publish-pages
         uses: actions/upload-pages-artifact@v4

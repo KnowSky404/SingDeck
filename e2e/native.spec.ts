@@ -1,10 +1,18 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test as base, expect, type Page } from "@playwright/test";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { createSocket } from "node:dgram";
+import { once } from "node:events";
 import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import {
+  serveDiagnostics,
+  stunBindingResponse,
+  stunFixtureDNS,
+  stunFixtureHost,
+} from "../tests/fixtures/diagnostics";
 
 function holdConnectionLock(page: Page, key: string) {
   return page.evaluateHandle(
@@ -31,62 +39,121 @@ function simulateVisualViewport(
   }, dimensions);
 }
 
+const test = base.extend<{ core: { secret: string; httpPort: number; stunServer: string } }>({
+  core: async ({ baseURL }, use, info) => {
+    info.skip(
+      !process.env.SING_BOX_BINARY || info.project.name !== "desktop",
+      "Requires the official sing-box binary and a production build; desktop integration fixture.",
+    );
+    const directory = await mkdtemp(`${tmpdir()}/singdeck-browser-`);
+    const secret = randomBytes(24).toString("hex");
+    const probe = createServer(serveDiagnostics);
+    const udp = createSocket("udp4");
+    udp.on("message", (request, remote) => {
+      const response = stunBindingResponse(request, remote.port);
+      if (response) udp.send(response, remote.port, remote.address);
+    });
+    let child: ChildProcess | undefined;
+    try {
+      probe.listen(0, "127.0.0.1");
+      udp.bind(0, "127.0.0.1");
+      await Promise.all([once(probe, "listening"), once(udp, "listening")]);
+      const address = probe.address();
+      if (!address || typeof address === "string")
+        throw new Error("Missing probe fixture address");
+      const config = JSON.parse(
+        await readFile("examples/sing-box-1.14.0.json", "utf8"),
+      );
+      config.dns = stunFixtureDNS;
+      config.outbounds.push(
+        { type: "direct", tag: "ungrouped" },
+        {
+          type: "urltest",
+          tag: "Auto route",
+          outbounds: ["direct", "direct-backup"],
+          url: `http://127.0.0.1:${address.port}/probe`,
+          interval: "10m",
+        },
+      );
+      if (baseURL)
+        config.services[0].access_control_allow_origin.push(new URL(baseURL).origin);
+      config.services[0].secret = secret;
+      config.services[0].listen_port = 19190;
+      config.services[0].dashboard.path = resolve("dist");
+      config.inbounds[0].listen_port = 19180;
+      await writeFile(`${directory}/config.json`, JSON.stringify(config), {
+        mode: 0o600,
+      });
+      child = spawn(
+        process.env.SING_BOX_BINARY!,
+        ["run", "-c", `${directory}/config.json`],
+        { stdio: "ignore" },
+      );
+      await expect
+        .poll(async () => {
+          try {
+            return (await fetch("http://127.0.0.1:19190/dashboard/")).ok;
+          } catch {
+            return false;
+          }
+        })
+        .toBe(true);
+      await use({ secret, httpPort: address.port, stunServer: `${stunFixtureHost}:${udp.address().port}` });
+    } finally {
+      if (child?.pid !== undefined && child.exitCode === null) {
+        const daemon = child;
+        const exited = new Promise<void>((r) => daemon.once("exit", () => r()));
+        child.kill();
+        await exited;
+      }
+      udp.close();
+      probe.closeAllConnections();
+      await new Promise<void>((closed) => probe.close(() => closed()));
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+});
+
 test.use({ trace: "off" });
+test.describe.configure({ mode: "default" });
+
+test("browser completes local network quality and STUN diagnostics through the native service", async ({
+  page,
+  core: { secret, httpPort, stunServer },
+}) => {
+  await page.goto("/");
+  await page.getByRole("textbox", { name: "API endpoint", exact: true }).fill("http://127.0.0.1:19190");
+  await page.getByLabel("Bearer token", { exact: true }).fill(secret);
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: /^Connected$/ })).toBeVisible();
+  await page.getByRole("link", { name: "Diagnostics", exact: true }).first().click();
+  const run = page.getByRole("button", { name: "Run test", exact: true });
+  const completed = page.getByRole("status").filter({ hasText: /^Completed$/ });
+  await page.getByLabel("Test configuration URL").fill(`http://127.0.0.1:${httpPort}/config`);
+  await page.getByLabel("Measurement duration (seconds)").fill("2");
+  await page.getByRole("switch", { name: "Run download and upload in sequence" }).check();
+  await expect(run).toBeDisabled();
+  await page.getByRole("checkbox", { name: /I authorize the core to fetch/ }).check();
+  await run.click();
+  await expect(completed).toBeVisible();
+  await expect(page.getByText(/^[1-9].*bit\/s$/).first()).toBeVisible();
+  await page.getByRole("radio", { name: "STUN / NAT", exact: true }).click();
+  await page.getByLabel("STUN server", { exact: true }).fill(stunServer);
+  await expect(run).toBeDisabled();
+  await page.getByRole("checkbox", { name: /I authorize the core to send UDP/ }).check();
+  await run.click();
+  await expect(completed).toBeVisible();
+  await expect(page.getByText("Binding response received", { exact: true })).toBeVisible();
+  await expect(page.getByText("Unavailable on this STUN server", { exact: true })).toBeVisible();
+});
 
 test("browser uses the official native service through CORS and built-in dashboard hosting", async ({
   page,
   context,
-}, info) => {
-  test.skip(
-    !process.env.SING_BOX_BINARY || info.project.name !== "desktop",
-    "Requires the official sing-box binary and a production build; desktop integration fixture.",
-  );
+  core: { secret },
+}) => {
   test.setTimeout(120_000);
-  const directory = await mkdtemp(`${tmpdir()}/singdeck-browser-`);
-  const secret = randomBytes(24).toString("hex");
-  const probe = createServer((_request, response) => {
-    response.writeHead(204).end();
-  });
-  let child: ChildProcess | undefined;
   try {
-    await new Promise<void>((listening, reject) => {
-      probe.once("error", reject);
-      probe.listen(0, "127.0.0.1", listening);
-    });
-    const address = probe.address();
-    if (!address || typeof address === "string")
-      throw new Error("Missing probe fixture address");
-    const config = JSON.parse(
-      await readFile("examples/sing-box-1.14.0.json", "utf8"),
-    );
-    config.outbounds.push({
-      type: "urltest",
-      tag: "Auto route",
-      outbounds: ["direct", "direct-backup"],
-      url: `http://127.0.0.1:${address.port}/probe`,
-      interval: "10m",
-    });
-    config.services[0].secret = secret;
-    config.services[0].listen_port = 19190;
-    config.services[0].dashboard.path = resolve("dist");
-    config.inbounds[0].listen_port = 19180;
-    await writeFile(`${directory}/config.json`, JSON.stringify(config), {
-      mode: 0o600,
-    });
-    child = spawn(
-      process.env.SING_BOX_BINARY!,
-      ["run", "-c", `${directory}/config.json`],
-      { stdio: "ignore" },
-    );
-    await expect
-      .poll(async () => {
-        try {
-          return (await fetch("http://127.0.0.1:19190/dashboard/")).ok;
-        } catch {
-          return false;
-        }
-      })
-      .toBe(true);
     await page.clock.install();
     await page.goto("/#/settings");
     await expect(page.getByRole("navigation")).toHaveCount(0);
@@ -108,10 +175,10 @@ test("browser uses the official native service through CORS and built-in dashboa
     const overviewLink = page
       .getByRole("link", { name: "Overview", exact: true })
       .first();
-    const proxiesLink = page
-      .getByRole("link", { name: "Proxies", exact: true })
+    const outboundsLink = page
+      .getByRole("link", { name: "Outbounds", exact: true })
       .first();
-    await proxiesLink.click();
+    await outboundsLink.click();
     await page
       .getByRole("button", { name: "Expand Primary route", exact: true })
       .click();
@@ -127,6 +194,15 @@ test("browser uses the official native service through CORS and built-in dashboa
         exact: true,
       }),
     ).toBeVisible();
+    await page.getByRole("radio", { name: "All outbounds", exact: true }).click();
+    const inventory = page.getByRole("list", { name: "All outbounds", exact: true });
+    await expect(
+      inventory.getByRole("listitem").filter({ has: page.getByText("ungrouped", { exact: true }) }),
+    ).toContainText("direct");
+    await expect(
+      inventory.getByRole("listitem").filter({ has: page.getByText("direct-backup", { exact: true }) }),
+    ).toContainText("Selected");
+    await page.getByRole("radio", { name: "Groups", exact: true }).click();
     const grid = page.locator(".proxy-group-grid");
     const gridTop = (await grid.boundingBox())!.y;
     const testAll = page.getByRole("button", {
@@ -152,7 +228,7 @@ test("browser uses the official native service through CORS and built-in dashboa
       document.dispatchEvent(new Event("visibilitychange"));
     });
     await expect(toast).toBeHidden();
-    await proxiesLink.click();
+    await outboundsLink.click();
     await expect(toast).toBeVisible();
     await expect(toast).toContainText("Test requests sent.");
     await expect(page.locator(".latency-toast-viewport")).toHaveCSS(
@@ -277,7 +353,7 @@ test("browser uses the official native service through CORS and built-in dashboa
     await page.setViewportSize(desktop);
     await overviewLink.click();
     await expect(toast).toBeHidden({ timeout: 1000 });
-    await proxiesLink.click();
+    await outboundsLink.click();
     await expect(grid).toBeVisible();
     await expect(toast).toBeHidden();
     await page.goto("http://127.0.0.1:19190/dashboard/#/settings");
@@ -893,14 +969,5 @@ test("browser uses the official native service through CORS and built-in dashboa
         })
         .catch(() => {});
     }
-    if (child?.pid !== undefined && child.exitCode === null) {
-      const daemon = child;
-      const exited = new Promise<void>((r) => daemon.once("exit", () => r()));
-      child.kill();
-      await exited;
-    }
-    probe.closeAllConnections();
-    await new Promise<void>((closed) => probe.close(() => closed()));
-    await rm(directory, { recursive: true, force: true });
   }
 });
