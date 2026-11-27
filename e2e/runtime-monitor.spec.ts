@@ -87,6 +87,8 @@ test("runtime monitor shows live metrics and lets the user change the history wi
   }
   if (!isMobile) {
     await expect(historyWindow).toBeFocused();
+    await page.keyboard.press("Tab");
+    await expect(main.getByRole("button", { name: "Clear older chart samples", exact: true })).toBeFocused();
     for (const name of ["Traffic rate history", "Connection count history", "Memory history"]) {
       await page.keyboard.press("Tab");
       await expect(main.getByRole("application", { name, exact: true })).toBeFocused();
@@ -142,4 +144,97 @@ test("runtime chart keeps isolated markers and separates contiguous segments acr
   await page.clock.runFor(1_000);
   await expect(curve).toHaveAttribute("d", /^(?:M[^M]*L[^M]*){2}$/);
   await expect(markers).toHaveCount(0);
+});
+
+test("clears older chart points without interrupting live runtime readings", async ({ page, isMobile }) => {
+  if (isMobile) await page.setViewportSize({ width: 320, height: 740 });
+  await page.clock.install();
+  await page.goto("/");
+  await page.getByRole("button", { name: "Explore demo", exact: true }).click();
+  await expect(page.getByText("Mock mode", { exact: true })).toBeVisible();
+  await page.clock.runFor(125_000);
+
+  const goToRuntime = () => page.getByRole("link", { name: "View runtime monitor", exact: true }).click();
+  await goToRuntime();
+  const clear = page.getByRole("button", { name: "Clear older chart samples", exact: true });
+  const window = page.getByRole("combobox", { name: "History window", exact: true });
+  const memory = page.getByRole("region", { name: "Memory history", exact: true });
+  const curve = memory.locator("path.recharts-line-curve");
+  const pointCount = () => curve.evaluate(element => (element.getAttribute("d")?.match(/[ML]/g) ?? []).length);
+  const marker = memory.locator(".recharts-line-dots circle");
+  const status = page.getByRole("row", { name: /^Runtime status\b/ });
+  const receipt = status.locator("time");
+  const current = page.locator('[data-slot="card"]').filter({
+    has: page.getByRole("heading", { name: "Current runtime", exact: true }),
+  }).locator("dl");
+  const event = page.getByText("Service: Running", { exact: true });
+
+  await expect(memory).toBeVisible();
+  await expect(curve).toHaveCount(1);
+  await expect.poll(pointCount).toBeGreaterThan(45);
+  await expect(clear).toBeEnabled();
+  await clear.scrollIntoViewIfNeeded();
+  expect(await clear.evaluate(node => {
+    const { left, right, width } = node.getBoundingClientRect();
+    return width > 0 && left >= 0 && right <= document.documentElement.clientWidth;
+  })).toBe(true);
+
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1500));
+  await page.clock.runFor(150);
+  const age = await page.evaluate(() => Date.now()) - Date.parse((await receipt.getAttribute("datetime"))!);
+  // Move past the next publication if the frozen clock landed near a status tick.
+  if (age >= 850) await page.clock.runFor(Math.max(150, 1300 - age));
+  const beforeReceipt = await receipt.getAttribute("datetime");
+  expect(beforeReceipt).toBeTruthy();
+  const beforeReadings = await current.innerText();
+  await expect(event).toHaveCount(1);
+  if (isMobile) await clear.tap({ force: true });
+  else {
+    await clear.focus();
+    await page.keyboard.press("Enter");
+    await expect(clear).toBeFocused();
+  }
+  await expect(clear).toBeDisabled();
+  await expect(curve).toHaveCount(0);
+  await expect(marker).toHaveCount(1);
+  await expect(marker).toBeVisible();
+  await expect(status.getByText("Live", { exact: true })).toBeVisible();
+  await expect(receipt).toHaveAttribute("datetime", beforeReceipt!);
+  await expect.poll(() => current.innerText()).toBe(beforeReadings);
+  await expect(event).toHaveCount(1);
+
+  await page.clock.runFor(2100);
+  await expect(clear).toBeEnabled();
+  await expect(curve).toHaveCount(1);
+  await expect.poll(async () => [3, 4].includes(await pointCount())).toBe(true);
+  await expect(receipt).not.toHaveAttribute("datetime", beforeReceipt!);
+  const onlyNewPoints = async (...counts: number[]) => {
+    const elapsed = await page.evaluate(() => Date.now()) - Date.parse(beforeReceipt!);
+    const limit = 1 + Math.floor(elapsed / 1000);
+    return counts.every(count => count >= 3 && count <= limit);
+  };
+
+  await page.clock.resume();
+  if (isMobile) await window.tap();
+  else await window.press("Enter");
+  const fiveMinutes = page.getByRole("option", { name: "5 minutes", exact: true });
+  if (isMobile) await fiveMinutes.tap();
+  else {
+    await page.keyboard.press("End");
+    await expect(fiveMinutes).toBeFocused();
+    await page.keyboard.press("Enter");
+  }
+  await expect(window).toHaveText("5 minutes");
+  await expect.poll(async () => onlyNewPoints(await pointCount())).toBe(true);
+  await page.getByRole("link", { name: "Overview", exact: true }).first().click();
+  const overviewCurves = page.getByRole("img", { name: /^Traffic history\./ }).locator("path.recharts-area-curve");
+  await expect(overviewCurves).toHaveCount(2);
+  await expect.poll(async () => onlyNewPoints(...await overviewCurves.evaluateAll(paths => paths.map(path =>
+    path.getAttribute("d")?.match(/[MCL]/g)?.length ?? 0,
+  )))).toBe(true);
+  await goToRuntime();
+  await expect(window).toHaveText("1 minute");
+  await expect(curve).toHaveCount(1);
+  await expect.poll(async () => onlyNewPoints(await pointCount())).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

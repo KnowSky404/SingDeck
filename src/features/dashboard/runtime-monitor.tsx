@@ -12,6 +12,7 @@ import { useWorkspace } from "@/app/context";
 import { notificationStreamState, runtimeStaleIntervals } from "@/api/runtime";
 import type { Channel, Snapshot } from "@/api/state";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Choice, EmptyState, Notice, Panel } from "@/components/shared";
 import { bytes, uptime } from "@/lib/format";
 import { runtimeWindows, useRuntimeWindow } from "./use-runtime-window";
@@ -107,6 +108,7 @@ export default function RuntimeMonitor() {
   const { status, version, service, runtime } = snapshot;
   const streamsAborted = session.signal?.aborted ?? false;
   const latest = runtime.samples.at(-1);
+  const canClearOlderSamples = runtime.samples.length > 1;
   const { samples, windowSeconds, selectWindow } = useRuntimeWindow(runtime.samples, profile.preferences.windowSeconds);
   const points = useMemo(() => chartPoints(samples), [samples]);
   const averages = useMemo(
@@ -221,13 +223,26 @@ export default function RuntimeMonitor() {
             <p className="text-sm text-muted-foreground">{t("History covers samples received by this browser.")}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm">{t("History window")}</span>
-            <Choice
-              label="History window"
-              value={windowSeconds}
-              onChange={selectWindow}
-              options={runtimeWindows.map(({ value, label }) => ({ value, label: t(label) }))}
-            />
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm">{t("History window")}</span>
+              <Choice
+                label="History window"
+                value={windowSeconds}
+                onChange={selectWindow}
+                options={runtimeWindows.map(({ value, label }) => ({ value, label: t(label) }))}
+              />
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              aria-disabled={!canClearOlderSamples}
+              className="aria-disabled:opacity-50"
+              onClick={() => {
+                if (canClearOlderSamples) session.clearOlderRuntimeSamples();
+              }}
+            >
+              {t("Clear older chart samples")}
+            </Button>
           </div>
         </div>
         {samples.slice(1).some(({ gapBefore }) => gapBefore) && (

@@ -593,6 +593,7 @@ const zh: Record<string, string> = {
   "Observed runtime history": "运行观测历史",
   "History covers samples received by this browser.": "历史记录来自此浏览器接收的样本。",
   "History window": "历史时间范围",
+  "Clear older chart samples": "清除较早的图表样本",
   "1 minute": "1 分钟",
   "3 minutes": "3 分钟",
   "5 minutes": "5 分钟",
