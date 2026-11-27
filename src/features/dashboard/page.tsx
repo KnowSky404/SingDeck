@@ -32,8 +32,12 @@ import { LogLine } from "@/features/logs/log-line";
 
 export default function Dashboard() {
   const { profile, snapshot, t } = useWorkspace();
-  const { status, version, traffic, service } = snapshot;
-  const latest = traffic.at(-1);
+  const { status, version, runtime, service } = snapshot;
+  const latest = runtime.samples.at(-1);
+  const traffic = latest
+    ? runtime.samples.filter(({ time }) => time >= latest.time - profile.preferences.windowSeconds * 1000)
+    : [];
+  const measuredCount = traffic.filter(({ down }) => down !== undefined).length;
   const recentLogs = snapshot.logs
     .filter((entry) => entry.level <= LogLevel.INFO)
     .slice(-4);
@@ -41,13 +45,13 @@ export default function Dashboard() {
   const metrics = [
     {
       label: t("Download"),
-      value: available && latest ? `${bytes(latest.down)}/s` : "—",
+      value: available && latest?.down !== undefined ? `${bytes(latest.down)}/s` : "—",
       icon: ArrowDown,
       kind: "download",
     },
     {
       label: t("Upload"),
-      value: available && latest ? `${bytes(latest.up)}/s` : "—",
+      value: available && latest?.up !== undefined ? `${bytes(latest.up)}/s` : "—",
       icon: ArrowUp,
       kind: "upload",
     },
@@ -59,7 +63,7 @@ export default function Dashboard() {
       icon: Network,
       kind: "",
     },
-    { label: t("Memory"), value: bytes(status?.memory), icon: Cpu, kind: "" },
+    { label: t("Memory"), value: bytes(status?.memory || undefined), icon: Cpu, kind: "" },
   ];
   const serviceName = service
     ? (["Idle", "Starting", "Running", "Stopping", "Fatal"][service.status] ??
@@ -94,14 +98,14 @@ export default function Dashboard() {
           className="traffic-panel"
         >
           <ChannelState channel="status">
-            {!available ? (
+            {measuredCount === 0 && !available ? (
               <EmptyState
                 title={t("Traffic unavailable")}
                 description={t(
                   "The native API has not reported traffic tracking data.",
                 )}
               />
-            ) : traffic.length < 2 ? (
+            ) : measuredCount === 0 ? (
               <EmptyState
                 title={t("Collecting traffic samples")}
                 description={t(
@@ -193,25 +197,33 @@ export default function Dashboard() {
                         color: "var(--foreground)",
                       }}
                     />
-                    <Area
-                      dataKey="down"
-                      type="monotone"
-                      stroke="var(--chart-1)"
-                      fill="url(#download-fill)"
-                      strokeWidth={2}
-                      isAnimationActive={false}
-                    />
-                    <Area
-                      dataKey="up"
-                      type="monotone"
-                      stroke="var(--chart-2)"
-                      fill="url(#upload-fill)"
-                      strokeWidth={2}
-                      isAnimationActive={false}
-                    />
+                    {([
+                      ["down", "var(--chart-1)", "url(#download-fill)"],
+                      ["up", "var(--chart-2)", "url(#upload-fill)"],
+                    ] as const).map(([key, stroke, fill]) => (
+                      <Area
+                        key={key}
+                        dataKey={key}
+                        type="monotone"
+                        stroke={stroke}
+                        fill={fill}
+                        strokeWidth={2}
+                        dot={({ index, cx, cy }) => {
+                          const isolated = traffic[index]?.[key] !== undefined &&
+                            traffic[index - 1]?.[key] === undefined &&
+                            traffic[index + 1]?.[key] === undefined;
+                          return isolated ? <circle cx={cx} cy={cy} r={3} fill={stroke} /> : null;
+                        }}
+                        connectNulls={false}
+                        isAnimationActive={false}
+                      />
+                    ))}
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
+            )}
+            {!available && measuredCount > 0 && (
+              <p className="footnote">{t("The native API has not reported traffic tracking data.")}</p>
             )}
             <div className="chart-legend">
               <span>
@@ -274,12 +286,20 @@ export default function Dashboard() {
               <dd>{snapshot.warnings?.length ?? "—"}</dd>
             </div>
           </dl>
-          <Button className="px-0" variant="link" size="sm" asChild>
-            <a href="#/configuration-health">
-              {t("View configuration health")}
-              <ArrowRight data-icon="inline-end" />
-            </a>
-          </Button>
+          <div className="flex flex-wrap gap-x-3">
+            <Button className="px-0" variant="link" size="sm" asChild>
+              <a href="#/runtime-monitor">
+                {t("View runtime monitor")}
+                <ArrowRight data-icon="inline-end" />
+              </a>
+            </Button>
+            <Button className="px-0" variant="link" size="sm" asChild>
+              <a href="#/configuration-health">
+                {t("View configuration health")}
+                <ArrowRight data-icon="inline-end" />
+              </a>
+            </Button>
+          </div>
           {service?.status === ServiceStatus_Type.FATAL && (
             <p role="alert">
               {t(

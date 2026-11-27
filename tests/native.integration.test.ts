@@ -102,7 +102,7 @@ suite("official sing-box 1.14.0 native integration (not mock)", () => {
     proxyRequest?.destroy();
     target?.closeAllConnections();
     target?.close();
-    if (child && child.exitCode === null) {
+    if (child && child.exitCode === null && child.signalCode === null) {
       const exited = new Promise<void>((r) => child.once("exit", () => r()));
       child.kill("SIGTERM");
       await exited;
@@ -307,4 +307,61 @@ suite("official sing-box 1.14.0 native integration (not mock)", () => {
     });
     expect(denied.headers.get("access-control-allow-origin")).toBeNull();
   });
+  it.skipIf(process.platform === "win32")("observes runtime samples and records an official CLI reload", async () => {
+    const session = new InstanceSession(client, { ...defaultProfile, endpoint });
+    session.connect();
+    try {
+      await expect.poll(() => {
+        const { runtime, serviceActionsReady } = session.getSnapshot();
+        return serviceActionsReady && runtime.lastBoot !== undefined &&
+          runtime.lastFrameAt.service !== undefined && runtime.samples.length >= 2;
+      }, { timeout: 8_000 }).toBe(true);
+      const before = session.getSnapshot().runtime;
+      const nativeBoot = (await client.getStartedAt({}, { timeoutMs: 1_000 })).startedAt;
+      expect(before.lastBoot).toBe(nativeBoot);
+
+      await expect.poll(
+        () => session.getSnapshot().runtime.samples.length,
+        { timeout: 8_000 },
+      ).toBeGreaterThanOrEqual(before.samples.length + 4);
+      const quiet = session.getSnapshot();
+      const status = quiet.status;
+      const sample = quiet.runtime.samples.at(-1);
+      if (!status || !sample) throw new Error("Expected a native status observation");
+      expect(quiet.runtime.lastFrameAt.service).toBe(before.lastFrameAt.service);
+      expect(quiet.streamErrors.service).toBeUndefined();
+      expect(quiet.runtime.events.filter(({ kind }) => kind === "service"))
+        .toEqual([expect.objectContaining({ status: ServiceStatus_Type.STARTED })]);
+      expect(status.trafficAvailable).toBe(true);
+      expect(status.memory).toBeGreaterThan(0n);
+      expect(status.goroutines).toBeGreaterThan(0);
+      expect(status.uplinkTotal).toBeGreaterThanOrEqual(0n);
+      expect(status.downlinkTotal).toBeGreaterThanOrEqual(0n);
+      const intervalSeconds = defaultProfile.preferences.intervalMs / 1000;
+      expect(sample).toMatchObject({
+        memory: status.memory,
+        goroutines: status.goroutines,
+        connectionsIn: status.connectionsIn,
+        connectionsOut: status.connectionsOut,
+        up: Number(status.uplink) / intervalSeconds,
+        down: Number(status.downlink) / intervalSeconds,
+      });
+
+      expect(child.kill("SIGHUP")).toBe(true);
+      await expect.poll(() => {
+        const { runtime, serviceActionsReady } = session.getSnapshot();
+        return serviceActionsReady && (runtime.lastBoot ?? 0n) > nativeBoot &&
+          runtime.samples.some(({ time, gapBefore }) => time > sample.time && gapBefore);
+      }, { timeout: 12_000 }).toBe(true);
+      const after = session.getSnapshot().runtime;
+      const reloadedBoot = (await client.getStartedAt({}, { timeoutMs: 1_000 })).startedAt;
+      expect(after.lastBoot).toBe(reloadedBoot);
+      expect(after.events.filter(({ kind }) => kind === "restart"))
+        .toEqual([expect.objectContaining({ startedAt: reloadedBoot })]);
+      expect(after.samples.find(({ time, gapBefore }) => time > sample.time && gapBefore))
+        .toMatchObject({ up: undefined, down: undefined });
+    } finally {
+      session.disconnect();
+    }
+  }, 30_000);
 });

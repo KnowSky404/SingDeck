@@ -21,6 +21,7 @@ import type {
   STUNRequest,
 } from "./diagnostics";
 import { canRetry, canRetryCode, CloseAllUnavailable, delay, describeError } from "./errors";
+import { recordRuntimeEvent, recordRuntimeSample, runtimeStaleIntervals } from "./runtime";
 import {
   appendLogs,
   applyConnections,
@@ -151,6 +152,7 @@ export class InstanceSession {
   private bootScope?: AbortController;
   private checkingBoot = false;
   private lastBootMarker?: bigint;
+  private runtimeGapPending = false;
   private warningArchive?: DeprecatedWarning[];
   private provisionalWarnings = false;
   private warningsScope?: AbortController;
@@ -213,6 +215,7 @@ export class InstanceSession {
     this.streamsStarted = false;
     this.retainClosedOnResume = false;
     this.lastBootMarker = undefined;
+    this.runtimeGapPending = false;
     this.warningArchive = undefined;
     this.provisionalWarnings = false;
     this.cancelRevalidation();
@@ -490,6 +493,7 @@ export class InstanceSession {
             !this.profile.preferences.autoReconnect ||
             !canRetry(error)
           ) {
+            this.controller?.abort();
             this.update({
               phase: "error",
               checkingWarnings: false,
@@ -497,7 +501,6 @@ export class InstanceSession {
               authenticationFailed:
                 this.pending.authenticationFailed || ConnectError.from(error).code === Code.Unauthenticated,
             }, true);
-            this.controller?.abort();
             return;
           }
           try {
@@ -577,7 +580,16 @@ export class InstanceSession {
     this.lastBootMarker = startedAt;
     this.warningArchive = undefined;
     this.provisionalWarnings = false;
-    this.update({ startedAt });
+    const runtime = this.pending.runtime;
+    const restarted = runtime.lastBoot !== undefined && runtime.lastBoot !== startedAt;
+    if (restarted) this.runtimeGapPending = true;
+    this.update({
+      startedAt,
+      runtime: {
+        ...(restarted ? recordRuntimeEvent(runtime, { time: Date.now(), kind: "restart", startedAt }) : runtime),
+        lastBoot: startedAt,
+      },
+    });
   }
   private releaseBootCheck(parent: AbortSignal, unconfirmed = false) {
     if (!this.checkingBoot) return;
@@ -699,16 +711,22 @@ export class InstanceSession {
         };
         // Each stream keeps its generated message type inside its own loop.
         const received = () => {
+          const now = Date.now();
           attempt = 0;
           const capability = streamCapabilities[channel];
           if (capability) this.setCapability(capability, { status: "supported" });
           this.update({
+            runtime: {
+              ...this.pending.runtime,
+              lastFrameAt: { ...this.pending.runtime.lastFrameAt, [channel]: now },
+            },
             loaded: { ...this.pending.loaded, [channel]: true },
             streamErrors: {
               ...this.pending.streamErrors,
               [channel]: undefined,
             },
           });
+          return now;
         };
         if (channel === "status") {
           if (attempt > 0) {
@@ -726,34 +744,39 @@ export class InstanceSession {
           )) {
             if (parentSignal.aborted) return;
             refreshWatchdog();
-            received();
+            const resumed = first && Boolean(this.pending.streamErrors.status);
+            const previous = this.pending.status;
+            const lastStatusAt = this.pending.runtime.lastFrameAt.status;
+            const now = received();
             this.setCapability("trafficTracking", {
               status: status.trafficAvailable ? "supported" : "unavailable",
             });
-            const now = Date.now();
             const seconds = this.profile.preferences.intervalMs / 1000;
-            const traffic =
-              status.trafficAvailable && !first
-                ? [
-                    ...this.pending.traffic,
-                    {
-                      time: now,
-                      up: Number(status.uplink) / seconds,
-                      down: Number(status.downlink) / seconds,
-                    },
-                  ]
-                    .filter(
-                      (p) =>
-                        p.time >=
-                        now - this.profile.preferences.windowSeconds * 1000,
-                    )
-                    .slice(-300)
-                : [];
+            const resetTotals = status.trafficAvailable && previous?.trafficAvailable === true &&
+              (status.uplinkTotal < previous.uplinkTotal || status.downlinkTotal < previous.downlinkTotal);
+            const overdue = lastStatusAt !== undefined &&
+              now - lastStatusAt > this.profile.preferences.intervalMs * runtimeStaleIntervals;
+            const gap = first || this.runtimeGapPending || resetTotals || overdue;
+            this.runtimeGapPending = false;
+            const rate = status.trafficAvailable && previous?.trafficAvailable &&
+              !gap && status.uplink >= 0n && status.downlink >= 0n
+              ? { up: Number(status.uplink) / seconds, down: Number(status.downlink) / seconds }
+              : undefined;
+            const observations = resumed
+              ? recordRuntimeEvent(this.pending.runtime, { time: now, kind: "status-resumed" })
+              : this.pending.runtime;
             this.update({
               phase: "connected",
               error: undefined,
               status,
-              traffic,
+              runtime: recordRuntimeSample(
+                observations,
+                status,
+                now,
+                this.pending.service?.status === ServiceStatus_Type.STARTED,
+                gap,
+                rate,
+              ),
             });
             if (first) this.resumeServiceReads(parentSignal);
             first = false;
@@ -765,9 +788,15 @@ export class InstanceSession {
           )) {
             if (parentSignal.aborted) return;
             const recovering = Boolean(this.pending.streamErrors.service);
-            received();
+            const previous = this.pending.service?.status;
+            const now = received();
+            if (previous !== service.status) {
+              if (previous !== undefined) this.runtimeGapPending = true;
+              this.update({ runtime: recordRuntimeEvent(this.pending.runtime, {
+                time: now, kind: "service", status: service.status,
+              }) });
+            }
             if (service.status === ServiceStatus_Type.STARTED) {
-              const previous = this.pending.service?.status;
               this.update({ service });
               if (previous !== ServiceStatus_Type.STARTED) {
                 // A metadata read started before readiness cannot establish this boot timestamp.
@@ -886,8 +915,12 @@ export class InstanceSession {
           this.cancelRevalidation();
           this.cancelWarningRead();
         }
+        if (error instanceof CompatibilityError) this.controller?.abort();
         this.update(
           {
+            ...(channel === "status" && !this.pending.streamErrors.status && {
+              runtime: recordRuntimeEvent(this.pending.runtime, { time: Date.now(), kind: "status-lost" }),
+            }),
             streamErrors: { ...this.pending.streamErrors, [channel]: message },
             authenticationFailed:
               this.pending.authenticationFailed ||
@@ -899,7 +932,6 @@ export class InstanceSession {
           },
           true,
         );
-        if (error instanceof CompatibilityError) this.controller?.abort();
         if (!retry) return;
       } finally {
         clearTimeout(watchdog);
