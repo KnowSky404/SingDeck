@@ -64,11 +64,10 @@ describe("session lifecycle", () => {
     sessions.push(s);
     s.connect();
     await vi.advanceTimersByTimeAsync(300);
-    expect(s.getSnapshot().traffic).toHaveLength(0);
+    expect(s.getSnapshot().runtime.samples[0]?.down).toBeUndefined();
     await vi.advanceTimersByTimeAsync(2100);
     expect(interval).toBe(2_000_000_000n);
-    expect(s.getSnapshot().traffic).toHaveLength(1);
-    expect(s.getSnapshot().traffic[0]).toMatchObject({ up: 100, down: 2500 });
+    expect(s.getSnapshot().runtime.samples.at(-1)).toMatchObject({ up: 100, down: 2500 });
   });
   it("redacts credentials before any page or log export can consume a received message", async () => {
     vi.useFakeTimers();

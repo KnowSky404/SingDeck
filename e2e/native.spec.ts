@@ -182,6 +182,14 @@ test("browser uses the official native service through CORS and built-in dashboa
     const overviewLink = page
       .getByRole("link", { name: "Overview", exact: true })
       .first();
+    await overviewLink.click();
+    await page.getByRole("link", { name: "View runtime monitor" }).click();
+    const runtime = page.getByRole("main");
+    await expect(runtime.getByRole("heading", { name: "Runtime monitor" })).toBeVisible();
+    await expect(runtime.getByText("1.14.0", { exact: true })).toBeVisible();
+    await expect(runtime.getByRole("row", { name: /^Runtime status\b/ })).toContainText("Live");
+    await expect(runtime.getByRole("row", { name: /^Service lifecycle\b/ })).toContainText("Live");
+    await expect(runtime.getByText("Service: Running", { exact: true })).toBeVisible();
     const outboundsLink = page
       .getByRole("link", { name: "Outbounds", exact: true })
       .first();

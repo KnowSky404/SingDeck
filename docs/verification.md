@@ -35,6 +35,10 @@ A prefinal candidate and the `dfb16e8` baseline were measured with Chromium 159 
 
 Visual inspection of a prefinal candidate used desktop light and emulated mobile dark screenshots, plus 320–1440 CSS pixel checks for layout overflow. Screenshots used demo inputs without private instance data. Desktop and mobile browser tests distinguish demo interactions from real-core browser coverage.
 
+## Phase 2 — Runtime Monitor
+
+The official sing-box v1.14.0 Linux integration measures the received runtime counters and rate conversions. It waits across four status intervals while the lifecycle stream stays quiet, then sends SIGHUP and checks that the changed native service start time records one restart and a gap in the rate history. The mock unit tests cover the observation limits, counter resets, and gaps after late frames. Browser history is bounded to the current session.
+
 ## v0.3.0 local regression record
 
 Worktree feature validation on 2026-11-17: lint, typecheck, production build, frozen installation, actionlint, schema regeneration and license reproducibility pass. Unit tests: **26 pass**. Official sing-box 1.14.0 integration: **5 pass**, including download of a root-layout ZIP from a loopback HTTP fixture, extraction into a new directory and serving HTML/assets under `/dashboard/`. This proves core archive handling; it does not prove a user's GitHub download route.

@@ -15,6 +15,7 @@ import {
   type GroupItem,
   type DeprecatedWarning,
 } from "@/proto/daemon/started_service_pb";
+import type { RuntimeObservation } from "./runtime";
 
 export const LOG_LIMIT = 2000;
 export const CONNECTION_LIMIT = 10000;
@@ -24,11 +25,6 @@ export interface LogEntry {
   level: LogLevel;
   message: string;
   text: string;
-}
-export interface TrafficPoint {
-  time: number;
-  down: number;
-  up: number;
 }
 export type Channel = "service" | "status" | "groups" | "outbounds" | "logs" | "connections";
 export interface Snapshot {
@@ -56,7 +52,7 @@ export interface Snapshot {
   logs: LogEntry[];
   connections: ReadonlyMap<string, Connection>;
   connectionOverflow: boolean;
-  traffic: TrafficPoint[];
+  runtime: RuntimeObservation;
   streamErrors: Partial<Record<Channel, string>>;
   loaded: Partial<Record<Channel, boolean>>;
 }
@@ -68,7 +64,7 @@ export const initialSnapshot = (): Snapshot => ({
   logs: [],
   connections: new Map(),
   connectionOverflow: false,
-  traffic: [],
+  runtime: { samples: [], events: [], lastFrameAt: {} },
   streamErrors: {},
   loaded: {},
 });

@@ -50,6 +50,7 @@ import { version } from "../../package.json";
 import { cn } from "@/lib/utils";
 
 const Overview = lazy(() => import("@/features/dashboard/page"));
+const RuntimeMonitor = lazy(() => import("@/features/dashboard/runtime-monitor"));
 const Proxies = lazy(() => import("@/features/proxies/page"));
 const Connections = lazy(() => import("@/features/connections/page"));
 const Logs = lazy(() => import("@/features/logs/page"));
@@ -342,9 +343,11 @@ export default function App() {
             ? Diagnostics
             : path === "/configuration-health"
               ? ConfigurationHealth
-              : path === "/settings"
-                ? SettingsPage
-                : null;
+              : path === "/runtime-monitor"
+                ? RuntimeMonitor
+                : path === "/settings"
+                  ? SettingsPage
+                  : null;
   const partial = Object.entries(snapshot.streamErrors).filter(
     ([channel, error]) => channel !== "status" && error,
   );
