@@ -6,6 +6,7 @@ import {
   Cpu,
   Activity,
 } from "lucide-react";
+import { Fragment, useState, type ReactNode } from "react";
 import {
   AreaChart,
   Area,
@@ -31,9 +32,33 @@ import { ServiceStatus_Type } from "@/proto/daemon/started_service_pb";
 import { LogLevel } from "@/proto/daemon/started_service_pb";
 import { LogLine } from "@/features/logs/log-line";
 import { runtimeWindows, useRuntimeWindow } from "./use-runtime-window";
+import { OverviewCustomization } from "./overview-customization";
+import {
+  loadOverviewLayout,
+  overviewMetricLabels,
+  overviewPanelLabels,
+  saveOverviewLayout,
+  type OverviewLayout,
+  type OverviewPanel,
+} from "./overview-layout";
+
+function OverviewPanels({ order, ...panels }: Record<OverviewPanel, ReactNode> & {
+  order: OverviewLayout["panels"];
+}) {
+  return (
+    <div className="overview-grid">
+      {order.map((card) => <Fragment key={card}>{panels[card]}</Fragment>)}
+    </div>
+  );
+}
 
 export default function Dashboard() {
   const { profile, snapshot, t } = useWorkspace();
+  const [layout, setLayout] = useState(loadOverviewLayout);
+  function changeLayout(next: OverviewLayout) {
+    setLayout(next);
+    saveOverviewLayout(next);
+  }
   const { status, version, runtime, service } = snapshot;
   const latest = runtime.samples.at(-1);
   const { samples: traffic, windowSeconds, selectWindow } = useRuntimeWindow(runtime.samples, profile.preferences.windowSeconds);
@@ -42,27 +67,24 @@ export default function Dashboard() {
     .filter((entry) => entry.level <= LogLevel.INFO)
     .slice(-4);
   const available = status?.trafficAvailable;
-  const metrics = [
-    {
-      label: t("Download"),
+  const metrics = {
+    download: {
       value: available && latest?.down !== undefined ? `${bytes(latest.down)}/s` : "—",
       icon: ArrowDown,
       kind: "download",
     },
-    {
-      label: t("Upload"),
+    upload: {
       value: available && latest?.up !== undefined ? `${bytes(latest.up)}/s` : "—",
       icon: ArrowUp,
       kind: "upload",
     },
-    {
-      label: t("Active connections"),
+    connections: {
       value: (available ? latest?.connectionsIn : latest?.connectionsOut)?.toString() ?? "—",
       icon: Network,
       kind: "",
     },
-    { label: t("Memory"), value: bytes(status?.memory || undefined), icon: Cpu, kind: "" },
-  ];
+    memory: { value: bytes(status?.memory || undefined), icon: Cpu, kind: "" },
+  };
   const serviceName = service
     ? (["Idle", "Starting", "Running", "Stopping", "Fatal"][service.status] ??
       "Unknown")
@@ -70,22 +92,29 @@ export default function Dashboard() {
   return (
     <>
       <PageHeading title={t("Overview")} />
-      <div className="metrics-grid">
-        {metrics.map(({ label, value, icon: Icon, kind }) => (
-          <Card key={label} className="metric">
-            <CardHeader>
-              <CardTitle>{label}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Icon className={kind} />
-              <strong>{value}</strong>
-            </CardContent>
-          </Card>
-        ))}
+      <div className="flex justify-end">
+        <OverviewCustomization layout={layout} onChange={changeLayout} />
       </div>
-      <div className="overview-grid">
-        <Panel
-          title={t("Traffic activity")}
+      <div className="metrics-grid">
+        {layout.metrics.map((card) => {
+          const { value, icon: Icon, kind } = metrics[card];
+          return (
+            <Card key={card} className="metric">
+              <CardHeader>
+                <CardTitle>{t(overviewMetricLabels[card])}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Icon className={kind} />
+                <strong>{value}</strong>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+      <OverviewPanels
+        order={layout.panels}
+        traffic={<Panel
+          title={overviewPanelLabels.traffic}
           action={
             <Choice
               label="History window"
@@ -237,8 +266,8 @@ export default function Dashboard() {
               </span>
             </div>
           </ChannelState>
-        </Panel>
-        <Panel title={t("Instance details")}>
+        </Panel>}
+        instance={<Panel title={overviewPanelLabels.instance}>
           <dl className="detail-list">
             <div>
               <dt>{t("Instance")}</dt>
@@ -308,11 +337,9 @@ export default function Dashboard() {
               )}
             </p>
           )}
-        </Panel>
-      </div>
-      <div className="overview-bottom">
-        <Panel
-          title={t("Outbound groups")}
+        </Panel>}
+        outbounds={<Panel
+          title={overviewPanelLabels.outbounds}
           action={
             <Button variant="link" size="sm" asChild>
               <a href="#/proxies">
@@ -339,9 +366,9 @@ export default function Dashboard() {
               ))}
             </div>
           </ChannelState>
-        </Panel>
-        <Panel
-          title={t("Recent logs")}
+        </Panel>}
+        logs={<Panel
+          title={overviewPanelLabels.logs}
           action={
             <Button variant="link" size="sm" asChild>
               <a href="#/logs">
@@ -362,8 +389,8 @@ export default function Dashboard() {
               ))}
             </div>
           </ChannelState>
-        </Panel>
-      </div>
+        </Panel>}
+      />
     </>
   );
 }

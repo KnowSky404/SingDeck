@@ -185,7 +185,13 @@ Official sing-box 1.14.0 downloaded a root-layout ZIP over loopback and extracte
 
 On the same candidate, Firefox 159.0 and WebKit 27.2 opened explicit Demo at `/preview/` and rendered all 28 Connections rows under both CSP controls. With `manifest-src 'self'`, WebKit sent a native manifest request and received HTTP 200. With `manifest-src 'none'`, it produced a policy violation before sending the request. Firefox resolved the same-origin manifest link and made no manifest request in either desktop run.
 
-Runtime Monitor and the Overview Traffic activity chart offer 1, 3 and 5 minute history windows for the current visit. Both start with the configured profile window. Overview still has a fixed card layout. The existing hash route determines the initial page, with Overview as the default. Runtime history is bounded and held in the active session. Distinct manifest identities on one origin still share that origin's storage boundary. Persisted customization and retention controls depend on the instance preference and storage model. [Runtime Monitor](../src/features/dashboard/runtime-monitor.tsx) · [Overview](../src/features/dashboard/page.tsx) · [Architecture](architecture.md)
+Runtime Monitor and the Overview Traffic activity chart offer 1, 3 and 5 minute history windows for the current visit. Both start with the configured profile window. The existing hash route determines the initial page, with Overview as the default. Runtime history is bounded and held in the active session. Distinct manifest identities on one origin still share that origin's storage boundary. [Runtime Monitor](../src/features/dashboard/runtime-monitor.tsx) · [Overview](../src/features/dashboard/page.tsx) · [Architecture](architecture.md)
+
+### Overview card layout
+
+Customize Overview reorders the four metric cards and four detail panels in their respective groups. Detail panels can move between rows. Changes apply immediately and follow the browser origin. Reset layout restores the original order. The preference stores the card IDs. An unreadable or invalid preference uses the original order, and a write failure leaves the selected layout usable while this Overview is open.
+
+Chromium desktop and 320px emulated mobile verified visual and keyboard order, focus, reload, reset and a 250px-tall scrollable settings dialog. The chart continued rendering its selected history window after moving between panel slots. A Chromium session on the official sing-box 1.14.0 built-in dashboard measured real traffic before and after the reorder using the same status subscription. It restored the layout after a reload and new login.
 
 ### Overview traffic history window
 

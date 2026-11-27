@@ -546,19 +546,22 @@ h3 {
   color: var(--chart-2);
 }
 .overview-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.85fr) minmax(270px, 1fr);
-  gap: 20px;
-  align-items: stretch;
+  --overview-gap: 20px;
+  --overview-row-width: calc(100% - var(--overview-gap));
+  --overview-side-width: max(270px, calc(var(--overview-row-width) / 2.85));
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--overview-gap);
 }
-.overview-bottom {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 20px;
-}
-.overview-grid > *,
-.overview-bottom > * {
+.overview-grid > * {
+  flex: 0 0 calc(var(--overview-row-width) / 2);
   min-width: 0;
+}
+.overview-grid > :first-child {
+  flex-basis: calc(var(--overview-row-width) - var(--overview-side-width));
+}
+.overview-grid > :nth-child(2) {
+  flex-basis: var(--overview-side-width);
 }
 .chart-frame {
   width: 100%;
@@ -1220,10 +1223,10 @@ h3 {
     padding-inline: 18px;
   }
   .overview-grid {
-    grid-template-columns: minmax(0, 1.5fr) minmax(250px, 1fr);
+    --overview-side-width: max(250px, calc(var(--overview-row-width) / 2.5));
   }
-  .overview-bottom {
-    grid-template-columns: 1fr;
+  .overview-grid > * {
+    flex-basis: 100%;
   }
   .welcome-strip {
     align-items: flex-start;
@@ -1270,7 +1273,8 @@ h3 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .overview-grid {
-    grid-template-columns: 1fr;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
   }
   .settings-grid {
     grid-template-columns: 1fr;
@@ -1391,9 +1395,8 @@ h3 {
     width: 19px;
     height: 19px;
   }
-  .overview-grid,
-  .overview-bottom {
-    gap: 16px;
+  .overview-grid {
+    --overview-gap: 16px;
   }
   [data-slot="card"] {
     padding-block: 18px;
