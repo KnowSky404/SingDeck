@@ -16,6 +16,7 @@ import {
   ServiceStatus_Type,
   LogSchema,
   NotificationEventSchema,
+  USBIPServerStatusUpdateSchema,
 } from "@/proto/daemon/started_service_pb";
 import { CONNECTION_LIMIT } from "@/api/state";
 import { delay, describeError } from "@/api/errors";
@@ -252,6 +253,63 @@ describe("session lifecycle", () => {
     expect(s.getSnapshot().notifications).toHaveLength(0);
     expect(session().getSnapshot().notifications).toHaveLength(0);
   });
+  it("limits USB/IP snapshots to the open detail scope and distinguishes absence from an unsupported stream", async () => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    const connections = vi.fn(client.subscribeConnections);
+    const reflected = "fixture\tmarker";
+    let opens = 0;
+    const usbip = vi.fn<typeof client.subscribeUSBIPServerStatus>(async function* () {
+      opens++;
+      if (opens === 3) throw new ConnectError("untrusted core error", Code.NotFound);
+      yield create(USBIPServerStatusUpdateSchema, {
+        servers: opens === 1
+          ? [
+            { serverTag: `raw-${reflected}`, devices: [{ busId: "ignored-device-detail" }] },
+            { serverTag: encodeURIComponent(reflected) },
+          ]
+          : [],
+      });
+      await delay(1000, new AbortController().signal);
+      yield create(USBIPServerStatusUpdateSchema, { servers: [{ serverTag: "late" }] });
+    });
+    const s = new InstanceSession({
+      ...client,
+      subscribeConnections: connections,
+      subscribeUSBIPServerStatus: usbip,
+    }, mockProfile, reflected);
+    sessions.push(s);
+    s.connect();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(usbip).not.toHaveBeenCalled();
+
+    s.setDetailChannel("usbip");
+    await vi.advanceTimersByTimeAsync(200);
+    expect(connections.mock.calls.at(-1)?.[1]?.signal?.aborted).toBe(true);
+    const servers = s.getSnapshot().usbipServers;
+    expect(servers?.map(({ tag }) => tag === "[redacted]")).toEqual([true, true]);
+    expect(servers?.map(({ deviceCount }) => deviceCount)).toEqual([1, 0]);
+
+    s.setDetailChannel("connections");
+    expect(usbip.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(s.getSnapshot().usbipServers).toBeUndefined();
+    expect(s.getSnapshot().loaded.connections).toBe(true);
+
+    s.setDetailChannel("usbip");
+    await vi.advanceTimersByTimeAsync(200);
+    expect(s.getSnapshot().usbipServers).toEqual([]);
+    expect(s.getSnapshot().capabilities.usbip.status).toBe("supported");
+    s.setDetailChannel("connections");
+    s.setDetailChannel("usbip");
+    await vi.advanceTimersByTimeAsync(200);
+    expect(s.getSnapshot().usbipServers).toBeUndefined();
+    expect(s.getSnapshot().capabilities.usbip).toMatchObject({ status: "unavailable", code: Code.NotFound });
+    expect(s.getSnapshot().streamErrors.usbip).not.toContain("untrusted core error");
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(usbip).toHaveBeenCalledTimes(3);
+  });
+
   it("keeps the daemon notification subscription across service recovery", async () => {
     vi.useFakeTimers();
     const client = createMockClient();

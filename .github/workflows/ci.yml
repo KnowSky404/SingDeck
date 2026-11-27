@@ -125,7 +125,7 @@ jobs:
         if: steps.coverage.outputs.scope != 'docs'
       - name: Browser workspace regressions
         if: steps.coverage.outputs.scope != 'docs'
-        run: bun run test:e2e -- 'e2e/(?!native\.spec\.ts$)' --trace off
+        run: bun run test:e2e -- 'e2e/(?!(native|usbip)\.spec\.ts$)' --trace off
       - name: Obtain pinned official integration fixture
         if: steps.coverage.outputs.scope != 'docs'
         env:
@@ -139,9 +139,9 @@ jobs:
           echo "SING_BOX_BINARY=$RUNNER_TEMP/sing-box-1.14.0-linux-amd64/sing-box" >> "$GITHUB_ENV"
       - run: bun run test:integration
         if: steps.coverage.outputs.scope != 'docs'
-      - name: Official native browser transport and diagnostics
+      - name: Official native browser regressions
         if: steps.coverage.outputs.scope != 'docs'
-        run: bun run test:e2e -- 'e2e/native\.spec\.ts$' --project desktop --workers 1 --trace off
+        run: bun run test:e2e -- 'e2e/(native|usbip)\.spec\.ts$' --project desktop --workers 1 --trace off
       - name: Upload verified Pages build
         if: inputs.publish-pages
         uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4

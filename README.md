@@ -10,6 +10,7 @@ A web dashboard for **sing-box 1.14.0+ / native Service API 4**. Connect directl
 
 - Live traffic, outbound groups, connections, and ANSI-colored logs.
 - The current source adds live outbound inventory, native network quality and STUN tests, and configuration deprecations reported by the core.
+- Settings shows read-only USB/IP Server status for configured dynamic services on supported native instances.
 - English/简体中文 and light/dark/system themes. On a trusted device, choose **Remember this device** to reconnect when you reopen SingDeck in the same browser.
 
 ## Run locally

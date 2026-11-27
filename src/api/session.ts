@@ -40,6 +40,7 @@ import {
   dismissNotification,
   receiveLocalNotification,
   receiveNativeNotification,
+  safeNativeText,
   setNotificationRead,
   visibleNotifications,
   type LocalNotification,
@@ -119,10 +120,11 @@ const streamCapabilities: Partial<Record<Channel, CapabilityName>> = {
   groups: "groupManagement",
   status: "runtimeMonitoring",
   notifications: "notifications",
+  usbip: "usbip",
 };
 
 function usesServiceDetailScope(channel: DetailChannel) {
-  return channel === "outbounds" || channel === "clashMode";
+  return channel === "outbounds" || channel === "clashMode" || channel === "usbip";
 }
 
 function sameInventory(before: GroupItem[], after: GroupItem[]) {
@@ -221,6 +223,11 @@ export class InstanceSession {
   private update(patch: Partial<Snapshot>, immediate = false) {
     const previous = this.pending;
     this.pending = { ...this.pending, ...patch };
+    if (patch.phase === "error" && this.detailChannel === "usbip") {
+      this.detailScope?.abort();
+      this.pending.usbipServers = undefined;
+      this.pending.loaded = { ...this.pending.loaded, usbip: false };
+    }
     if ((patch.error && patch.error !== previous.error) || (patch.authenticationFailed && !previous.authenticationFailed))
       this.appendLocalNotification("apiConnection");
     if (patch.service?.status === ServiceStatus_Type.FATAL && previous.service?.status !== ServiceStatus_Type.FATAL)
@@ -339,6 +346,7 @@ export class InstanceSession {
       outbounds: undefined,
       clashModeOptions: undefined,
       currentClashMode: undefined,
+      usbipServers: undefined,
       ...(!keepWarnings && { warnings: undefined }),
       ...(!keepWarningRead && { checkingWarnings: undefined }),
       capabilities: {
@@ -346,12 +354,13 @@ export class InstanceSession {
         notifications: this.pending.capabilities.notifications,
         ...(keepWarnings && { deprecatedWarnings: this.pending.capabilities.deprecatedWarnings }),
       },
-      loaded: { ...this.pending.loaded, connections: false, groups: false, outbounds: false, clashMode: false },
+      loaded: { ...this.pending.loaded, connections: false, groups: false, outbounds: false, clashMode: false, usbip: false },
       streamErrors: {
         ...this.pending.streamErrors,
         groups: undefined,
         outbounds: undefined,
         clashMode: undefined,
+        usbip: undefined,
       },
     });
     if (this.detailChannel === "connections") this.startDetailStream();
@@ -378,13 +387,15 @@ export class InstanceSession {
     this.detailScope?.abort();
     this.update({
       outbounds: undefined,
-      loaded: { ...this.pending.loaded, connections: false, outbounds: false, clashMode: false, notifications: false },
+      usbipServers: undefined,
+      loaded: { ...this.pending.loaded, connections: false, outbounds: false, clashMode: false, notifications: false, usbip: false },
       streamErrors: {
         ...this.pending.streamErrors,
         connections: undefined,
         outbounds: undefined,
         clashMode: undefined,
         notifications: undefined,
+        usbip: undefined,
       },
     }, true);
     this.startDetailStream();
@@ -393,6 +404,7 @@ export class InstanceSession {
     const parent = this.signal;
     if (!parent || parent.aborted || !this.streamsStarted) return;
     const channel = this.detailChannel;
+    if (channel === "usbip" && this.pending.phase === "error") return;
     const service = usesServiceDetailScope(channel) ? this.serviceReadsScope?.signal : parent;
     if (!service || service.aborted) return;
     // Keep a request slot free on native HTTP/1.1 origins with a six-socket limit.
@@ -739,8 +751,14 @@ export class InstanceSession {
       outbounds: undefined,
       clashModeOptions: undefined,
       currentClashMode: undefined,
-      capabilities: { ...this.pending.capabilities, clashMode: { status: "unknown" } },
-      loaded: { ...this.pending.loaded, groups: false, outbounds: false, connections: false, clashMode: false },
+      usbipServers: undefined,
+      capabilities: {
+        ...this.pending.capabilities,
+        clashMode: { status: "unknown" },
+        usbip: { status: "unknown" },
+      },
+      loaded: { ...this.pending.loaded, groups: false, outbounds: false, connections: false, clashMode: false, usbip: false },
+      streamErrors: { ...this.pending.streamErrors, usbip: undefined },
     });
     if (this.detailChannel === "connections") this.startDetailStream();
   }
@@ -970,6 +988,18 @@ export class InstanceSession {
               loaded: { ...this.pending.loaded, clashMode: Boolean(mode) },
             });
           }
+        } else if (channel === "usbip") {
+          for await (const { servers } of this.client.subscribeUSBIPServerStatus({}, options)) {
+            if (parentSignal.aborted) return;
+            if (this.pending.streamErrors.service) continue;
+            received();
+            this.update({
+              usbipServers: servers.map(({ serverTag, devices }) => ({
+                tag: safeNativeText(serverTag, (value) => this.redactText(value), 160),
+                deviceCount: devices.length,
+              })),
+            });
+          }
         } else if (channel === "logs") {
           for await (const log of this.client.subscribeLog({}, options)) {
             if (parentSignal.aborted) return;
@@ -1072,6 +1102,10 @@ export class InstanceSession {
           {
             ...(channel === "status" && !this.pending.streamErrors.status && {
               runtime: recordRuntimeEvent(this.pending.runtime, { time: Date.now(), kind: "status-lost" }),
+            }),
+            ...((channel === "usbip" || channel === "service") && {
+              usbipServers: undefined,
+              loaded: { ...this.pending.loaded, usbip: false },
             }),
             streamErrors: { ...this.pending.streamErrors, [channel]: message },
             authenticationFailed:

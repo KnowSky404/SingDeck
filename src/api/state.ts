@@ -27,7 +27,7 @@ export interface LogEntry {
   message: string;
   text: string;
 }
-export type DetailChannel = "connections" | "outbounds" | "clashMode" | "notifications";
+export type DetailChannel = "connections" | "outbounds" | "clashMode" | "notifications" | "usbip";
 export type Channel = "service" | "status" | "groups" | "logs" | DetailChannel;
 export interface Snapshot {
   phase: "disconnected" | "connecting" | "connected" | "reconnecting" | "error";
@@ -46,6 +46,7 @@ export interface Snapshot {
   clashModeOptions?: string[];
   currentClashMode?: string;
   changingClashMode?: boolean;
+  usbipServers?: { tag: string; deviceCount: number }[];
   capabilities: Capabilities;
   warnings?: DeprecatedWarning[];
   checkingWarnings?: boolean;

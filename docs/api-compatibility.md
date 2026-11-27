@@ -49,6 +49,7 @@ Authorization and session redaction use the same effective Bearer token. Trailin
 | SubscribeClashMode | Empty | stream ClashMode; initial and changed mode, with an empty mode during a service stop |
 | SetClashMode | mode (field 3) | Empty; the core may acknowledge an unknown name without changing mode |
 | GetStartedAt | Empty | startedAt Unix **milliseconds**, used for uptime |
+| SubscribeUSBIPServerStatus | Empty | stream USBIPServerStatusUpdate with configured dynamic USB/IP servers and their shared devices |
 
 Status rates divide the native byte deltas by the requested interval in seconds. The initial sample, gaps, and counter resets leave the rate unavailable. Status frames carry no timestamps. Runtime Monitor uses browser receipt time for its observed history. Inbound counts and cumulative traffic require the core's traffic manager. The outbound count comes from the separate connection manager and is available on a running service even when traffic tracking is disabled. Memory is the process measurement exposed by the core's platform implementation. Zero memory is shown as unavailable. `GetStartedAt` measures service start time and can change after a reload in the same process. [Pinned status implementation](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/started_service.go#L463-L511) · [Core attachment](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/attached_service.go)
 
@@ -71,6 +72,8 @@ Filtered batch close sends one `CloseConnection` per confirmed active ID, sequen
 The v1.14.0 log stream carries only level and text. Its optional rendered context ID differs from the connection UUID, so the workspace cannot reliably join logs to connections. [Log context ID](https://github.com/SagerNet/sing-box/blob/v1.14.0/log/id.go) · [Connection tracker](https://github.com/SagerNet/sing-box/blob/v1.14.0/common/trafficcontrol/tracker.go)
 
 Settings shows Clash Mode when the native service reports a mode manager. The core supplies selectable names. SingDeck confirms changes only from the live subscription, which also reports changes made by other clients. On a `with_clash_api` core, configure `experimental.clash_api` and omit `external_controller` to use native mode control without opening a Clash REST listener.
+
+The USB/IP status view opens from Settings and shares the fifth streaming slot while open. The pinned core only lists configured dynamic USB/IP servers. An empty list means the core reported no dynamic servers. A named server can report zero shared devices. The build stub returns NotFound, which the dashboard presents as unavailable. The dashboard keeps only bounded and redacted service labels and the reported device counts. [Pinned status implementation](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/started_service_usbip.go) · [Build stub](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/started_service_usbip_stub.go)
 
 ## Native diagnostic semantics
 

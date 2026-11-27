@@ -58,6 +58,7 @@ const Logs = lazy(() => import("@/features/logs/page"));
 const Diagnostics = lazy(() => import("@/features/diagnostics/page"));
 const ConfigurationHealth = lazy(() => import("@/features/diagnostics/health"));
 const SettingsPage = lazy(() => import("@/features/settings/page"));
+const USBIPStatus = lazy(() => import("@/features/settings/usbip"));
 const Notifications = lazy(() => import("@/features/notifications/page"));
 const links = [
   {
@@ -334,7 +335,9 @@ export default function App() {
       ? "clashMode"
       : workspaceOpen && path === "/notifications"
         ? "notifications"
-        : "connections";
+        : workspaceOpen && path === "/settings/usbip" && profile.mode === "native"
+          ? "usbip"
+          : "connections";
   useEffect(() => {
     session.setDetailChannel(detailChannel);
   }, [detailChannel, session]);
@@ -356,7 +359,9 @@ export default function App() {
                 ? RuntimeMonitor
                 : path === "/settings"
                   ? SettingsPage
-                  : null;
+                  : path === "/settings/usbip"
+                    ? USBIPStatus
+                    : null;
   const partial = Object.entries(snapshot.streamErrors).filter(
     ([channel, error]) => channel !== "status" && error,
   );

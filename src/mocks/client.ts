@@ -405,6 +405,9 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
       logGeneration++;
       return empty();
     },
+    subscribeUSBIPServerStatus() {
+      throw new ConnectError("USB/IP status requires a native instance", Code.Unimplemented);
+    },
     async *subscribeNotifications(_, opts) {
       const signal = opts?.signal ?? new AbortController().signal;
       await delay(300, signal);
