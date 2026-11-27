@@ -1,24 +1,28 @@
 # Native API compatibility
 
 Research baseline: **sing-box v1.14.0**, commit `0b8995879f29a9b98ee027bc17b75e101445b238`.
-Research completed before business implementation. Independent UI; no upstream dashboard UI code copied.
+The dashboard uses an independent UI. The upstream dashboard was consulted for protocol behavior.
 
 ## Authoritative sources
 
 - [Service API documentation](https://sing-box.sagernet.org/configuration/service/api/)
 - [Pinned Protobuf](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/started_service.proto)
 - [Pinned implementation](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/started_service.go)
-- [HTTP bridge / CORS](https://github.com/SagerNet/sing-box/blob/v1.14.0/service/api/web_bridge.go)
+- [HTTP bridge and CORS](https://github.com/SagerNet/sing-box/blob/v1.14.0/service/api/web_bridge.go)
+- [WebSocket bridge](https://github.com/SagerNet/sing-box/blob/v1.14.0/service/api/web_bridge_websocket.go)
+- [Network quality implementation](https://github.com/SagerNet/sing-box/blob/v1.14.0/common/networkquality/networkquality.go)
+- [STUN implementation](https://github.com/SagerNet/sing-box/blob/v1.14.0/common/stun/stun.go)
+- [RPC inventory and verification matrix](native-api-capabilities.md)
 - [Dashboard hosting](https://github.com/SagerNet/sing-box/blob/v1.14.0/service/api/dashboard.go)
 - [Official dashboard transport reference](https://github.com/SagerNet/sing-box-dashboard/tree/main/src/api)
 
 ## Wire contract
 
-Service: `daemon.StartedService`; POST `/<service>/<RPC>`. Native HTTP/2 gRPC and HTTP gRPC-Web binary/text are accepted. The bridge flushes streaming responses and embeds trailers in gRPC-Web frames. Connect **protocol** is not accepted: use ConnectRPC's `createGrpcWebTransport`, binary Protobuf and browser fetch readable streams. No WebSocket adapter is needed for the unary/server streams in P0. Browser client/bidirectional streams are outside P0.
+Service: `daemon.StartedService`; POST `/<service>/<RPC>`. Native HTTP/2 gRPC and HTTP gRPC-Web binary/text are accepted. The bridge flushes streaming responses and embeds trailers in gRPC-Web frames. Connect **protocol** is not accepted: use ConnectRPC's `createGrpcWebTransport`, binary Protobuf and browser fetch readable streams. No WebSocket adapter is needed for the unary/server streams in P0. The official core also serves the `grpc-websockets` protocol. A loopback Chromium proof exercised authenticated bidirectional framing and client half-close. SingDeck currently uses fetch gRPC-Web. TLS trust, Origin enforcement, flow control and each feature's lifecycle need independent validation before adding a WebSocket client.
 
 Metadata: `authorization: Bearer <secret>`. No query credentials. Unary deadline 10s; subscription scope cancellation; status watchdog; bounded exponential reconnect for transient failures. Authentication, permission, unsupported API and malformed requests require correction, not an insecure retry/fallback.
 
-`GetVersion` returns core `version` and integer `apiVersion`; **v1.14.0 uses API version 4**, not 1. SingDeck gates on API 4 and core >=1.14.0 stable; other API revisions fail explicitly until verified.
+`GetVersion` returns core `version` and integer `apiVersion`; **v1.14.0 uses API version 4**, not 1. SingDeck gates on API 4 and core >=1.14.0 stable; other API revisions fail explicitly until verified. The vendored proto and API 4 are unchanged in the v1.14.5 stable and v1.15.0-alpha.14 sources. Stable v1.14.5 received a targeted STUN runtime check. Prereleases remain outside SingDeck's connection gate. [Upstream releases](https://github.com/SagerNet/sing-box/releases)
 
 | RPC | Input | Output / semantics |
 | --- | --- | --- |
@@ -26,8 +30,12 @@ Metadata: `authorization: Bearer <secret>`. No query credentials. Unary deadline
 | SubscribeServiceStatus | Empty | stream ServiceStatus; IDLE/STARTING/STARTED/STOPPING/FATAL, errorMessage |
 | SubscribeStatus | interval int64 **nanoseconds** | stream Status; memory bytes, connectionsIn/Out, trafficAvailable, interval byte deltas uplink/downlink, cumulative totals |
 | SubscribeGroups | Empty | stream Groups.group[]; tag/type/selectable/selected/items |
+| SubscribeOutbounds | Empty | stream OutboundList.outbounds[]; tag, type, URL-test timestamp/delay. Endpoint and outbound records share the same shape. |
+| GetDeprecatedWarnings | Empty | DeprecatedWarnings.warnings[]; message, description, impending, deprecatedVersion, scheduledVersion, migrationLink |
+| StartNetworkQualityTest | configURL, outboundTag, serial, maxRuntimeSeconds, http3 | stream NetworkQualityTestProgress. Capacity in bit/s, response count per minute, idle latency and elapsed time in milliseconds. |
+| StartSTUNTest | server, outboundTag | stream STUNTestProgress. Binding address, latency in milliseconds, NAT mapping and filtering, NAT support flag, final state. |
 | SelectOutbound | groupTag, outboundTag | Empty; await server response and groups subscription for selection |
-| URLTest | outboundTag | Empty; latency results arrive through groups, not this response |
+| URLTest | outboundTag | Empty; observed results arrive through groups and the inventory subscription |
 | SubscribeLog | Empty | stream Log.messages[] (level/message), reset flag; no server timestamp |
 | GetDefaultLogLevel | Empty | DefaultLogLevel.level |
 | SubscribeConnections | interval int64 nanoseconds | stream ConnectionEvents (reset + NEW/UPDATE/CLOSED); UPDATE deltas increment totals, CLOSED stores final counters/closedAt; Active/Closed filters use the timestamp |
@@ -38,6 +46,15 @@ Metadata: `authorization: Bearer <secret>`. No query credentials. Unary deadline
 | GetStartedAt | Empty | startedAt Unix **milliseconds**, used for uptime |
 
 Status rates must divide byte deltas by the selected interval in seconds. First status sample has no measured rate. Group urlTestTime is Unix **seconds**; 0 means no history; failed tests delete history, so missing history cannot distinguish untested from failed. A zero delay with a test timestamp is a valid sub-millisecond success truncated by the server and displays as 0 ms; negative delays are invalid data, not a fabricated timeout. Log receipt timestamps are local, clearly labeled. Missing/disabled traffic tracking is unavailable, never fabricated zero traffic.
+
+## Native diagnostic semantics
+
+- Both diagnostic RPCs use the core's configured outbound when the tag is empty. A missing selected outbound can yield `NotFound` before a test runs. Both report execution failures inside an `isFinal` message, even when the RPC trailers are OK. SingDeck requires a final done message with an empty error and a clean stream end. It treats cancellation and interruption as incomplete.
+- Network quality defaults to Apple's measurement configuration and a 20-second measurement budget. Configuration fetch and idle probing can extend wall-clock duration. The core accepts an explicit HTTP(S) URL or a bare host for `/.well-known/nq`. The core can follow redirects and configuration-defined measurement/dial targets. SingDeck requires explicit custom-target confirmation and bounds the measurement budget at 1–120 seconds. HTTP/3 additionally needs a QUIC build, an appropriate measurement service and a usable UDP path.
+- Network quality phase codes are Idle 0, Download 1, Upload 2 and Done 3. Confidence codes are Low 0, Medium 1 and High 2, independently reported for both capacities and both RPM values. The terminal result omits elapsed time. SingDeck retains the last measured elapsed sample when present.
+- STUN defaults to `stun.voipgate.com:3478`. The phase codes are Binding 0, Mapping 1, Filtering 2 and Done 3. Mapping codes are Unknown 0, reserved 1, Endpoint-independent 2, Address-dependent 3 and Address and port-dependent 4. Filtering codes are Unknown 0, Endpoint-independent 1, Address-dependent 2 and Address and port-dependent 3. A binding can report an external address without supporting RFC 5780 NAT behavior discovery. A successful binding establishes the tested path only.
+- The pinned v1.14.0 core can fail direct STUN to an IPv4 literal with a native UDP address error. A hostname resolved by the core worked in the same fixture. v1.14.5 passed the literal-address fixture after the upstream change. [Pinned STUN](https://github.com/SagerNet/sing-box/blob/v1.14.0/common/stun/stun.go) · [Stable STUN](https://github.com/SagerNet/sing-box/blob/v1.14.5/common/stun/stun.go)
+- The stock CLI's attached API may return an empty deprecation list because the context lacks the daemon's collector. Daemon collection is drained by reads. SingDeck retains reported warnings for the current core lifecycle and displays an empty result as no warnings reported. Run `sing-box check` or inspect the core logs for configuration validation. [Warning collector](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/deprecated.go)
 
 ## Browser security and deployment
 

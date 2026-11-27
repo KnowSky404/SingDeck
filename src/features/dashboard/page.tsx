@@ -269,7 +269,17 @@ export default function Dashboard() {
               <dt>{t("Cumulative upload")}</dt>
               <dd>{available ? bytes(status?.uplinkTotal) : "—"}</dd>
             </div>
+            <div>
+              <dt>{t("Deprecation warnings")}</dt>
+              <dd>{snapshot.warnings?.length ?? "—"}</dd>
+            </div>
           </dl>
+          <Button className="px-0" variant="link" size="sm" asChild>
+            <a href="#/configuration-health">
+              {t("View configuration health")}
+              <ArrowRight data-icon="inline-end" />
+            </a>
+          </Button>
           {service?.status === ServiceStatus_Type.FATAL && (
             <p role="alert">
               {t(
@@ -285,7 +295,7 @@ export default function Dashboard() {
           action={
             <Button variant="link" size="sm" asChild>
               <a href="#/proxies">
-                {t("View proxies")}
+                {t("View outbounds")}
                 <ArrowRight data-icon="inline-end" />
               </a>
             </Button>

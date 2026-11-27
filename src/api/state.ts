@@ -1,3 +1,4 @@
+import { initialCapabilities, type Capabilities } from "./capabilities";
 import { plainLog } from "@/lib/ansi";
 import { create } from "@bufbuild/protobuf";
 import {
@@ -11,6 +12,8 @@ import {
   type Status,
   type ServiceStatus,
   type Group,
+  type GroupItem,
+  type DeprecatedWarning,
 } from "@/proto/daemon/started_service_pb";
 
 export const LOG_LIMIT = 2000;
@@ -27,7 +30,7 @@ export interface TrafficPoint {
   down: number;
   up: number;
 }
-export type Channel = "service" | "status" | "groups" | "logs" | "connections";
+export type Channel = "service" | "status" | "groups" | "outbounds" | "logs" | "connections";
 export interface Snapshot {
   phase: "disconnected" | "connecting" | "connected" | "reconnecting" | "error";
   error?: string;
@@ -38,7 +41,12 @@ export interface Snapshot {
   startedAt?: bigint;
   defaultLogLevel?: LogLevel;
   groups?: Group[];
+  outbounds?: GroupItem[];
+  capabilities: Capabilities;
+  warnings?: DeprecatedWarning[];
+  checkingWarnings?: boolean;
   testingLatencies?: boolean;
+  stoppingLatencyTests?: boolean;
   testingManualLatency?: boolean;
   latencyTestError?: string;
   latencyTestSent?: boolean;
@@ -51,6 +59,7 @@ export interface Snapshot {
 }
 export const initialSnapshot = (): Snapshot => ({
   phase: "disconnected",
+  capabilities: initialCapabilities(),
   logs: [],
   connections: new Map(),
   connectionOverflow: false,

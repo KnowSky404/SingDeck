@@ -15,7 +15,7 @@ Use Bun 1.4.4 and Node 24+. `bun install --frozen-lockfile` installs the exact c
 | `bun run proto:generate` | Local Buf/protoc-gen-es generation from pinned schema |
 | `bun run test:integration` | Optional official-binary integration, skips without binary |
 
-Install browser runtime once with `bunx playwright install chromium`; on a new Linux CI host use `bunx playwright install --with-deps chromium`. Playwright starts a dev server at `http://127.0.0.1:4173` unless one already exists. No Browser plugin is available in the implementation environment, so browser validation uses regular Playwright.
+Install browser runtime once with `bunx playwright install chromium`; on a new Linux CI host use `bunx playwright install --with-deps chromium`. Playwright starts its own dev server at `http://127.0.0.1:4173`. Set `SINGDECK_E2E_PORT` to a free port if 4173 is already in use. No Browser plugin is available in the implementation environment, so browser validation uses regular Playwright.
 
 ## Mock workflow
 

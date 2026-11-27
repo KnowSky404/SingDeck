@@ -9,6 +9,10 @@ import {
   ServiceStatus_Type,
   StatusSchema,
   GroupsSchema,
+  OutboundListSchema,
+  DeprecatedWarningsSchema,
+  NetworkQualityTestProgressSchema,
+  STUNTestProgressSchema,
   GroupSchema,
   GroupItemSchema,
   LogSchema,
@@ -81,7 +85,11 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
     }),
   ];
   const groupsByTag = new Map(groups.map((group) => [group.tag, group]));
-  const items = groups.flatMap((group) => group.items);
+  const independent = create(GroupItemSchema, {
+    tag: "Independent direct",
+    type: "direct",
+  });
+  const items = [...groups.flatMap((group) => group.items), independent];
   const connections = new Map(
     Array.from({ length: 28 }, (_, i) => {
       const id = `mock-${i + 1}`;
@@ -221,6 +229,90 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
         }
         await delay(150, signal);
       }
+    },
+    async *subscribeOutbounds(_, opts) {
+      const signal = opts?.signal ?? new AbortController().signal;
+      let seen = -1;
+      while (!signal.aborted) {
+        check();
+        if (seen !== revision) {
+          seen = revision;
+          const unique = new Map(items.map((item) => [item.tag, item]));
+          for (const group of groups) {
+            const selected = unique.get(group.selected);
+            unique.set(group.tag, create(GroupItemSchema, {
+              tag: group.tag,
+              type: group.type,
+              urlTestTime: selected?.urlTestTime,
+              urlTestDelay: selected?.urlTestDelay,
+            }));
+          }
+          yield clone(OutboundListSchema, create(OutboundListSchema, {
+            outbounds: [...unique.values()],
+          }));
+        }
+        await delay(150, signal);
+      }
+    },
+    async getDeprecatedWarnings(_, opts) {
+      await delay(220, opts?.signal ?? new AbortController().signal);
+      check();
+      return create(DeprecatedWarningsSchema, {
+        warnings: [
+          {
+            message: "Demo routine deprecation",
+            description: "Example of a warning without an imminent removal.",
+            deprecatedVersion: "1.14.0",
+            scheduledVersion: "1.17.0",
+            migrationLink: "https://sing-box.sagernet.org.invalid/migration/",
+          },
+          {
+            message: "Demo deprecation warning",
+            description: "Example of a warning reported by a sing-box core.",
+            deprecatedVersion: "1.13.0",
+            scheduledVersion: "1.15.0",
+            migrationLink: "https://sing-box.sagernet.org/migration/",
+            impending: true,
+          },
+        ],
+      });
+    },
+    async *startNetworkQualityTest(_, opts) {
+      const signal = opts?.signal ?? new AbortController().signal;
+      for (let sample = 0; sample <= 10; sample++) {
+        check();
+        const elapsedMs = BigInt(sample * 300);
+        yield create(NetworkQualityTestProgressSchema, {
+          phase: sample === 10 ? 3 : sample < 5 ? 1 : 2,
+          downloadCapacity: 18_000_000n + elapsedMs * 4000n,
+          uploadCapacity: 4_000_000n + elapsedMs * 1100n,
+          downloadRPM: 610,
+          uploadRPM: 430,
+          idleLatencyMs: 31,
+          elapsedMs: sample === 10 ? 0n : elapsedMs,
+          downloadCapacityAccuracy: sample >= 5 ? 2 : 0,
+          uploadCapacityAccuracy: sample >= 8 ? 2 : 0,
+          downloadRPMAccuracy: 1,
+          uploadRPMAccuracy: 1,
+          isFinal: sample === 10,
+        });
+        if (sample < 10) await delay(300, signal);
+      }
+    },
+    async *startSTUNTest(_, opts) {
+      const signal = opts?.signal ?? new AbortController().signal;
+      yield create(STUNTestProgressSchema, { phase: 0 });
+      await delay(500, signal);
+      check();
+      yield create(STUNTestProgressSchema, {
+        phase: 3,
+        externalAddr: "203.0.113.24:42424",
+        latencyMs: 48,
+        natMapping: 2,
+        natFiltering: 2,
+        natTypeSupported: true,
+        isFinal: true,
+      });
     },
     async selectOutbound(request, opts) {
       await mutation(opts?.signal);

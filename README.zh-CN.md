@@ -8,8 +8,8 @@
 
 ![SingDeck 演示概览，显示实时流量、活跃连接和服务状态](docs/screenshots/overview-zh-CN.png)
 
-- 实时流量、代理组、连接和 ANSI 彩色日志。
-- 代理组／节点独立卡片布局，连接状态和出站筛选。
+- 实时流量、出站组、连接和 ANSI 彩色日志。
+- 当前源码新增全量出站清单、原生网络质量及 STUN 测试，以及核心上报的配置弃用警告。
 - 支持中英文及浅色、深色和系统主题。在信任的设备上勾选「记住此设备」，用同一浏览器重新打开面板时可自动重连。
 
 ## 本地使用
@@ -33,6 +33,6 @@
 
 ## 文档
 
-[中文 Wiki](https://github.com/KnowSky404/SingDeck/wiki/Home-zh-CN) · [English Wiki](https://github.com/KnowSky404/SingDeck/wiki) · [开发文档](docs/development.md) · [贡献指南](CONTRIBUTING.md)
+[原生 API 能力矩阵](docs/native-api-capabilities.md) · [验证记录](docs/verification.md) · [中文 Wiki](https://github.com/KnowSky404/SingDeck/wiki/Home-zh-CN) · [English Wiki](https://github.com/KnowSky404/SingDeck/wiki) · [开发文档](docs/development.md) · [贡献指南](CONTRIBUTING.md)
 
 [AGPL-3.0-or-later](LICENSE)。分发时保留[第三方声明](THIRD_PARTY_NOTICES.md)和对应源码。

@@ -1,10 +1,24 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import {
   ServiceStatus_Type,
+  type Version,
   type Group,
   type GroupItem,
 } from "@/proto/daemon/started_service_pb";
 import type { SingBoxClient } from "./client";
+import {
+  capabilityFailure,
+  initialCapabilities,
+  type Capability,
+  type CapabilityName,
+} from "./capabilities";
+import { DiagnosticExecutionError } from "./diagnostics";
+import type {
+  DiagnosticName,
+  DiagnosticProgress,
+  NetworkQualityRequest,
+  STUNRequest,
+} from "./diagnostics";
 import { canRetry, delay, describeError } from "./errors";
 import {
   appendLogs,
@@ -72,6 +86,19 @@ function hasStaleProbeHistory(
   return hadHistory;
 }
 
+const streamCapabilities: Partial<Record<Channel, CapabilityName>> = {
+  outbounds: "outboundInventory",
+  groups: "groupManagement",
+  status: "runtimeMonitoring",
+};
+
+function sameInventory(before: GroupItem[], after: GroupItem[]) {
+  if (before === after) return true;
+  if (before.length !== after.length) return false;
+  const types = new Map(after.map(({ tag, type }) => [tag, type]));
+  return before.every(({ tag, type }) => types.get(tag) === type);
+}
+
 function sameGroupTopology(before: Group[], after: Group[]) {
   if (before === after) return true;
   if (before.length !== after.length) return false;
@@ -93,10 +120,20 @@ export class InstanceSession {
   private flushTimer?: ReturnType<typeof setTimeout>;
   private pending = initialSnapshot();
   private logSequence = { value: 0 };
-  private latencyTest?: { controller: AbortController; promise: Promise<void> };
-  private manualLatencyTests = 0;
+  private latencyTest?: {
+    controller: AbortController;
+    promise: Promise<void>;
+    source: "groups" | "outbounds";
+  };
+  private manualLatencyTests = new Set<string>();
   private latencyCooldown = new AbortController();
-  private groupsScope?: AbortController;
+  private serviceReadsScope?: AbortController;
+  private detailScope?: AbortController;
+  private inventoryEnabled = false;
+  private streamsStarted = false;
+  private revalidation?: Promise<void>;
+  private warningsScope?: AbortController;
+  private diagnosticScope?: AbortController;
 
   constructor(
     readonly client: SingBoxClient,
@@ -112,8 +149,9 @@ export class InstanceSession {
   };
   private update(patch: Partial<Snapshot>, immediate = false) {
     this.pending = { ...this.pending, ...patch };
-    if (this.latencyTest && !this.canTestLatencies())
+    if (this.latencyTest && !this.canTestLatencies(this.latencyTest.source))
       this.latencyTest.controller.abort();
+    if (!this.canRunServiceAction()) this.interruptDiagnostic();
     if (immediate) this.flush();
     else this.flushTimer ??= setTimeout(() => this.flush(), 100);
   }
@@ -136,6 +174,12 @@ export class InstanceSession {
   };
   disconnect = () => {
     this.controller?.abort();
+    this.streamsStarted = false;
+    this.revalidation = undefined;
+    this.detailScope = undefined;
+    this.warningsScope = undefined;
+    this.serviceReadsScope = undefined;
+    this.diagnosticScope = undefined;
     this.resetLatencyTests();
     clearTimeout(this.flushTimer);
     this.flushTimer = undefined;
@@ -147,7 +191,150 @@ export class InstanceSession {
     this.latencyCooldown.abort();
     this.latencyCooldown = new AbortController();
     this.latencyTest = undefined;
-    this.manualLatencyTests = 0;
+    this.manualLatencyTests.clear();
+  }
+  private setCapability(name: CapabilityName, next: Capability) {
+    const current = this.pending.capabilities[name];
+    if (current.status === next.status && current.code === next.code) return;
+    this.update({ capabilities: { ...this.pending.capabilities, [name]: next } });
+  }
+  private canRunServiceAction() {
+    return (
+      this.pending.phase === "connected" &&
+      this.pending.service?.status === ServiceStatus_Type.STARTED &&
+      !this.pending.streamErrors.service
+    );
+  }
+  private interruptDiagnostic() {
+    this.diagnosticScope?.abort(new ConnectError("Service interrupted", Code.Unavailable));
+  }
+  private invalidateServiceReads() {
+    this.serviceReadsScope?.abort();
+    this.serviceReadsScope = undefined;
+    this.warningsScope = undefined;
+    this.interruptDiagnostic();
+    this.update({
+      groups: undefined,
+      outbounds: undefined,
+      warnings: undefined,
+      checkingWarnings: undefined,
+      capabilities: initialCapabilities(),
+      loaded: { ...this.pending.loaded, groups: false, outbounds: false },
+      streamErrors: {
+        ...this.pending.streamErrors,
+        groups: undefined,
+        outbounds: undefined,
+      },
+    });
+  }
+  private async refreshServiceReads(parent: AbortSignal) {
+    const scope = new AbortController();
+    this.serviceReadsScope = scope;
+    const signal = AbortSignal.any([parent, scope.signal]);
+    if (this.inventoryEnabled) this.startDetailStream();
+    await Promise.all([
+      this.stream("groups", signal),
+      this.refreshWarnings(),
+      this.probeClashMode(signal),
+    ]);
+  }
+  setInventoryEnabled = (enabled: boolean) => {
+    if (enabled === this.inventoryEnabled) return;
+    this.inventoryEnabled = enabled;
+    this.detailScope?.abort();
+    this.update({
+      outbounds: undefined,
+      loaded: { ...this.pending.loaded, connections: false, outbounds: false },
+      streamErrors: {
+        ...this.pending.streamErrors,
+        connections: undefined,
+        outbounds: undefined,
+      },
+    });
+    this.startDetailStream();
+  };
+  private startDetailStream() {
+    const parent = this.signal;
+    if (!parent || parent.aborted || !this.streamsStarted) return;
+    const channel = this.inventoryEnabled ? "outbounds" : "connections";
+    const service = this.inventoryEnabled ? this.serviceReadsScope?.signal : parent;
+    if (!service || service.aborted) return;
+    // Keep a request slot free on native HTTP/1.1 origins with a six-socket limit.
+    this.detailScope?.abort();
+    const scope = new AbortController();
+    this.detailScope = scope;
+    void this.stream(channel, AbortSignal.any([parent, service, scope.signal]));
+  }
+  private redactText(value: string) {
+    return this.secret ? value.replaceAll(this.secret, "[redacted]") : value;
+  }
+  refreshWarnings = async () => {
+    const parent = this.signal;
+    const service = this.serviceReadsScope?.signal;
+    if (!parent || parent.aborted || !service || service.aborted || this.warningsScope) return;
+    const scope = new AbortController();
+    this.warningsScope = scope;
+    const signal = AbortSignal.any([parent, service, scope.signal]);
+    this.update({ checkingWarnings: true });
+    try {
+      const data = await this.runUnary(
+        (options) => this.client.getDeprecatedWarnings({}, options),
+        signal,
+      );
+      if (signal.aborted) return;
+      const redact = (value: string) => this.redactText(value);
+      const key = (warning: { message: string; deprecatedVersion: string }) =>
+        JSON.stringify([warning.message, warning.deprecatedVersion]);
+      // Daemon mode drains its warning collector on read; retain reports for this core lifecycle.
+      const warnings = new Map(this.pending.warnings?.map((warning) => [key(warning), warning]));
+      for (const warning of data.warnings) {
+        const redacted = {
+          ...warning,
+          message: redact(warning.message),
+          description: redact(warning.description),
+          deprecatedVersion: redact(warning.deprecatedVersion),
+          scheduledVersion: redact(warning.scheduledVersion),
+          migrationLink: redact(warning.migrationLink),
+        };
+        // Some cores may send escaped fragments. The view rejects a redacted or nonofficial URL.
+        try {
+          const decoded = decodeURIComponent(redacted.migrationLink);
+          if (redact(decoded) !== decoded) redacted.migrationLink = "";
+        } catch {
+          redacted.migrationLink = "";
+        }
+        warnings.set(key(redacted), redacted);
+      }
+      this.update({ warnings: [...warnings.values()] });
+      this.setCapability("deprecatedWarnings", { status: "supported" });
+    } catch (error) {
+      if (!signal.aborted)
+        this.setCapability("deprecatedWarnings", capabilityFailure(error));
+    } finally {
+      if (this.warningsScope === scope) {
+        this.warningsScope = undefined;
+        if (!signal.aborted) this.update({ checkingWarnings: false }, true);
+      }
+    }
+  };
+  private async probeClashMode(signal: AbortSignal) {
+    try {
+      await this.runUnary((options) => this.client.getClashModeStatus({}, options), signal);
+      if (!signal.aborted)
+        this.setCapability("clashMode", { status: "supported" });
+    } catch (error) {
+      if (!signal.aborted) this.setCapability("clashMode", capabilityFailure(error));
+    }
+  }
+  private coreChanged(metadata: { version: Version; startedAt?: bigint }) {
+    const { version, startedAt } = this.pending;
+    return (
+      version?.version !== metadata.version.version ||
+      version?.apiVersion !== metadata.version.apiVersion ||
+      (startedAt !== undefined &&
+        metadata.startedAt !== undefined &&
+        startedAt !== metadata.startedAt)
+    );
   }
   clearLogs = () => this.update({ logs: [] }, true);
   private async readMetadata(signal: AbortSignal) {
@@ -169,6 +356,39 @@ export class InstanceSession {
         level.status === "fulfilled" ? level.value.level : undefined,
     };
   }
+  private revalidateMetadata(signal: AbortSignal) {
+    if (this.revalidation) return this.revalidation;
+    const revalidation = this.readMetadata(signal)
+      .then((metadata) => {
+        if (signal.aborted) return;
+        const changed = this.coreChanged(metadata);
+        this.update(metadata);
+        if (changed) this.invalidateServiceReads();
+      })
+      .finally(() => {
+        if (this.revalidation === revalidation) this.revalidation = undefined;
+      });
+    this.revalidation = revalidation;
+    return revalidation;
+  }
+  private async recoverServiceReads(signal: AbortSignal) {
+    try {
+      await this.revalidateMetadata(signal);
+    } catch (error) {
+      if (signal.aborted) return;
+      if (error instanceof CompatibilityError) {
+        this.update({ phase: "error", error: error.message }, true);
+        this.controller?.abort();
+        return;
+      }
+    }
+    if (
+      !signal.aborted &&
+      !this.serviceReadsScope &&
+      this.pending.service?.status === ServiceStatus_Type.STARTED
+    )
+      void this.refreshServiceReads(signal);
+  }
   private async start(signal: AbortSignal) {
     let attempt = 0;
     while (!signal.aborted) {
@@ -176,13 +396,12 @@ export class InstanceSession {
         const metadata = await this.readMetadata(signal);
         if (signal.aborted) return;
         this.update({ ...metadata, error: undefined });
+        this.streamsStarted = true;
+        void this.refreshServiceReads(signal);
+        if (!this.inventoryEnabled) this.startDetailStream();
         await Promise.all(
-          (
-            ["service", "status", "groups", "logs", "connections"] as Channel[]
-          ).map((channel) =>
-            channel === "groups"
-              ? this.restartGroups(signal)
-              : this.stream(channel, signal),
+          (["service", "status", "logs"] as const).map(
+            (channel) => this.stream(channel, signal),
           ),
         );
         return;
@@ -217,19 +436,6 @@ export class InstanceSession {
       }
     }
   }
-  private async restartGroups(parentSignal: AbortSignal) {
-    this.groupsScope?.abort();
-    const scope = new AbortController();
-    this.groupsScope = scope;
-    const stop = () => scope.abort();
-    parentSignal.addEventListener("abort", stop, { once: true });
-    try {
-      await this.stream("groups", scope.signal);
-    } finally {
-      parentSignal.removeEventListener("abort", stop);
-      if (this.groupsScope === scope) this.groupsScope = undefined;
-    }
-  }
   private async stream(channel: Channel, parentSignal: AbortSignal) {
     let attempt = 0;
     while (!parentSignal.aborted) {
@@ -253,6 +459,8 @@ export class InstanceSession {
         // Each stream keeps its generated message type inside its own loop.
         const received = () => {
           attempt = 0;
+          const capability = streamCapabilities[channel];
+          if (capability) this.setCapability(capability, { status: "supported" });
           this.update({
             loaded: { ...this.pending.loaded, [channel]: true },
             streamErrors: {
@@ -263,9 +471,10 @@ export class InstanceSession {
         };
         if (channel === "status") {
           if (attempt > 0) {
-            const metadata = await this.readMetadata(scope.signal);
+            await this.revalidateMetadata(parentSignal);
             if (parentSignal.aborted) return;
-            this.update(metadata);
+            if (!this.serviceReadsScope && this.pending.service?.status === ServiceStatus_Type.STARTED)
+              void this.refreshServiceReads(parentSignal);
           }
           refreshWatchdog();
           let first = true;
@@ -276,6 +485,9 @@ export class InstanceSession {
             if (parentSignal.aborted) return;
             refreshWatchdog();
             received();
+            this.setCapability("trafficTracking", {
+              status: status.trafficAvailable ? "supported" : "unavailable",
+            });
             const now = Date.now();
             const seconds = this.profile.preferences.intervalMs / 1000;
             const traffic =
@@ -313,24 +525,17 @@ export class InstanceSession {
             received();
             if (service.status === ServiceStatus_Type.STARTED) {
               const previous = this.pending.service?.status;
-              if (
-                recovering ||
-                (previous !== undefined && previous !== ServiceStatus_Type.STARTED)
-              ) {
-                this.update({
-                  groups: undefined,
-                  loaded: { ...this.pending.loaded, groups: false },
-                });
-                void this.restartGroups(parentSignal);
-              }
               this.update({ service });
+              if (recovering || (previous !== undefined && previous !== ServiceStatus_Type.STARTED))
+                void this.recoverServiceReads(parentSignal);
             } else {
+              if (this.pending.service?.status !== service.status)
+                this.invalidateServiceReads();
               this.resetLatencyTests();
               this.update({
                 service,
-                groups: undefined,
-                loaded: { ...this.pending.loaded, groups: false },
                 testingLatencies: undefined,
+                stoppingLatencyTests: undefined,
                 testingManualLatency: undefined,
                 latencyTestSent: undefined,
                 latencyTestError: undefined,
@@ -342,6 +547,12 @@ export class InstanceSession {
             if (parentSignal.aborted) return;
             received();
             this.update({ groups: groups.group });
+          }
+        } else if (channel === "outbounds") {
+          for await (const inventory of this.client.subscribeOutbounds({}, options)) {
+            if (parentSignal.aborted) return;
+            received();
+            this.update({ outbounds: inventory.outbounds });
           }
         } else if (channel === "logs") {
           for await (const log of this.client.subscribeLog({}, options)) {
@@ -396,9 +607,12 @@ export class InstanceSession {
           error instanceof CompatibilityError
             ? error.message
             : describeError(error);
+        const capability = streamCapabilities[channel];
+        if (capability) this.setCapability(capability, capabilityFailure(error));
+        if (channel === "status") this.setCapability("trafficTracking", capabilityFailure(error));
         const retry =
           this.profile.preferences.autoReconnect &&
-          canRetry(error) &&
+          (canRetry(error) || ConnectError.from(error).code === Code.Canceled) &&
           !(error instanceof CompatibilityError);
         this.update(
           {
@@ -486,26 +700,35 @@ export class InstanceSession {
       }
     });
   };
-  urlTest = (outboundTag: string, signal = this.signal) =>
-    this.runUnary(
-      (options) => this.client.uRLTest({ outboundTag }, options),
-      signal,
-    );
-  private canTestLatencies() {
+  urlTest = async (outboundTag: string, signal = this.signal) => {
+    try {
+      await this.runUnary(
+        (options) => this.client.uRLTest({ outboundTag }, options),
+        signal,
+      );
+      if (!signal?.aborted) this.setCapability("urlTest", { status: "supported" });
+    } catch (error) {
+      const { code } = ConnectError.from(error);
+      if (!signal?.aborted && code !== Code.NotFound && code !== Code.Canceled)
+        this.setCapability("urlTest", capabilityFailure(error));
+      throw error;
+    }
+  };
+  private canTestLatencies(source: "groups" | "outbounds") {
     return (
-      this.pending.phase === "connected" &&
-      this.pending.service?.status === ServiceStatus_Type.STARTED &&
-      this.pending.groups !== undefined &&
-      !this.pending.streamErrors.service &&
-      !this.pending.streamErrors.groups
+      this.canRunServiceAction() &&
+      this.pending[source] !== undefined &&
+      !this.pending.streamErrors[source] &&
+      this.pending.capabilities.urlTest.status !== "unsupported"
     );
   }
-  testLatency = (tag: string, windows: number) => {
+  testLatency = (tag: string, windows: number, source: "groups" | "outbounds" = "groups") => {
     const signal = this.signal;
-    if (!signal || signal.aborted || !this.canTestLatencies() || this.latencyTest)
+    if (!signal || signal.aborted || !this.canTestLatencies(source) ||
+        this.latencyTest || this.manualLatencyTests.has(tag))
       return Promise.reject(new ConnectError("Test unavailable", Code.Canceled));
     const cooldown = this.latencyCooldown.signal;
-    this.manualLatencyTests++;
+    this.manualLatencyTests.add(tag);
     this.update({ testingManualLatency: true }, true);
     const request = this.urlTest(tag, cooldown);
     void request
@@ -517,20 +740,38 @@ export class InstanceSession {
       .catch(() => undefined)
       .finally(() => {
         if (cooldown.aborted) return;
-        if (--this.manualLatencyTests === 0)
+        this.manualLatencyTests.delete(tag);
+        if (this.manualLatencyTests.size === 0)
           this.update({ testingManualLatency: undefined }, true);
       });
     return request;
   };
+  testInventory = (tags: string[], plannedOutbounds: GroupItem[]) => {
+    const inventory = new Set(plannedOutbounds.map(({ tag }) => tag));
+    const groups = new Set(this.pending.groups?.map(({ tag }) => tag));
+    const queue = [...new Set(tags)].filter((tag) => inventory.has(tag) && !groups.has(tag));
+    const waves: LatencyTestWave[] = [];
+    for (let index = 0; index < queue.length; index += 10)
+      waves.push({ tags: queue.slice(index, index + 10), windows: 3 });
+    return this.testLatencies(waves, this.snapshot.groups ?? [], plannedOutbounds);
+  };
+  cancelLatencyTests = () => {
+    const active = this.latencyTest;
+    if (!active || active.controller.signal.aborted) return;
+    active.controller.abort();
+    this.update({ stoppingLatencyTests: true }, true);
+  };
   testLatencies = (
     waves: LatencyTestWave[],
     plannedGroups = this.snapshot.groups ?? [],
+    plannedOutbounds?: GroupItem[],
   ) => {
     if (this.latencyTest) return this.latencyTest.promise;
     const sessionSignal = this.signal;
     if (!sessionSignal || sessionSignal.aborted)
       return Promise.reject(new ConnectError("Disconnected", Code.Canceled));
-    if (!this.canTestLatencies() || this.manualLatencyTests)
+    const source = plannedOutbounds === undefined ? "groups" : "outbounds";
+    if (!this.canTestLatencies(source) || this.manualLatencyTests.size)
       return Promise.reject(new ConnectError("Service unavailable", Code.Canceled));
     const controller = new AbortController();
     const stop = () => controller.abort(sessionSignal.reason);
@@ -540,6 +781,7 @@ export class InstanceSession {
       plannedGroups,
       controller.signal,
       this.latencyCooldown.signal,
+      plannedOutbounds,
     )
       .then(() => {
         if (
@@ -549,7 +791,10 @@ export class InstanceSession {
           this.update({ latencyTestSent: true }, true);
       })
       .catch((error: unknown) => {
-        if (this.latencyTest?.controller === controller)
+        if (
+          this.latencyTest?.controller === controller &&
+          !this.pending.stoppingLatencyTests
+        )
           this.update({ latencyTestError: describeError(error) }, true);
         throw error;
       })
@@ -557,9 +802,9 @@ export class InstanceSession {
         sessionSignal.removeEventListener("abort", stop);
         if (this.latencyTest?.controller !== controller) return;
         this.latencyTest = undefined;
-        this.update({ testingLatencies: undefined }, true);
+        this.update({ testingLatencies: undefined, stoppingLatencyTests: undefined }, true);
       });
-    this.latencyTest = { controller, promise };
+    this.latencyTest = { controller, promise, source };
     this.update(
       {
         testingLatencies: true,
@@ -575,13 +820,17 @@ export class InstanceSession {
     plannedGroups: Group[],
     signal: AbortSignal,
     cooldown: AbortSignal,
+    plannedOutbounds?: GroupItem[],
   ) {
     let failure: PromiseRejectedResult | undefined;
     const native = this.profile.mode === "native";
     const dispatch = async (tags: string[], windows: number) => {
       signal.throwIfAborted();
-      if (!sameGroupTopology(plannedGroups, this.pending.groups ?? []))
-        throw new ConnectError("Proxy groups changed", Code.Canceled);
+      if (
+        !sameGroupTopology(plannedGroups, this.pending.groups ?? []) ||
+        (plannedOutbounds && !sameInventory(plannedOutbounds, this.pending.outbounds ?? []))
+      )
+        throw new ConnectError("Outbound topology changed", Code.Canceled);
       const results = await Promise.allSettled(
         tags.map((tag) => this.urlTest(tag, signal)),
       );
@@ -604,7 +853,7 @@ export class InstanceSession {
       return results;
     };
     for (const { tags, windows } of waves) {
-      const before = native ? this.pending.groups : undefined;
+      const before = native && !plannedOutbounds ? this.pending.groups : undefined;
       const results = await dispatch(tags, windows);
       if (!before) continue;
       const beforeByTag = new Map(before.map((group) => [group.tag, group]));
@@ -621,6 +870,72 @@ export class InstanceSession {
     }
     signal.throwIfAborted();
     if (failure) throw failure.reason;
+  }
+  runNetworkQuality = (
+    request: NetworkQualityRequest,
+    signal: AbortSignal,
+    progress: (value: DiagnosticProgress<"networkQuality">) => void,
+  ) => this.runDiagnostic("networkQuality", signal, progress, (options) =>
+    this.client.startNetworkQualityTest(request, options),
+  );
+  runSTUN = (
+    request: STUNRequest,
+    signal: AbortSignal,
+    progress: (value: DiagnosticProgress<"stun">) => void,
+  ) => this.runDiagnostic("stun", signal, progress, (options) =>
+    this.client.startSTUNTest(request, options),
+  );
+  private async runDiagnostic<K extends DiagnosticName>(
+    name: K,
+    pageSignal: AbortSignal,
+    progress: (value: DiagnosticProgress<K>) => void,
+    stream: (options: { signal: AbortSignal; timeoutMs: number }) => AsyncIterable<DiagnosticProgress<K>>,
+  ): Promise<DiagnosticProgress<K>> {
+    const parent = this.signal;
+    if (!parent || parent.aborted || !this.canRunServiceAction() || this.diagnosticScope)
+      throw new ConnectError("Diagnostic unavailable", Code.Canceled);
+    if (this.pending.capabilities[name].status === "unsupported")
+      throw new ConnectError("Diagnostic unsupported", Code.Unimplemented);
+    const scope = new AbortController();
+    this.diagnosticScope = scope;
+    const signal = AbortSignal.any([parent, scope.signal, pageSignal]);
+    let final: DiagnosticProgress<K> | undefined;
+    try {
+      signal.throwIfAborted();
+      for await (const message of stream({ signal, timeoutMs: 180_000 })) {
+        signal.throwIfAborted();
+        this.setCapability(name, { status: "supported" });
+        if (final) throw new ConnectError("Unexpected data after final result", Code.DataLoss);
+        // In-band errors may contain dial addresses or credentials.
+        const safe = {
+          ...message,
+          error: message.error ? new DiagnosticExecutionError().message : "",
+          ...(message.$typeName === "daemon.STUNTestProgress" && {
+            externalAddr: this.redactText(message.externalAddr),
+          }),
+        };
+        if (safe.isFinal) final = safe;
+        else progress(safe);
+      }
+      signal.throwIfAborted();
+      if (!final) throw new ConnectError("Diagnostic ended before final result", Code.Unavailable);
+      if (final.error) throw new DiagnosticExecutionError();
+      if (final.phase !== 3) throw new ConnectError("Diagnostic ended before completion", Code.Unavailable);
+      return final;
+    } catch (error) {
+      if (signal.aborted) {
+        if (scope.signal.reason instanceof ConnectError) throw scope.signal.reason;
+        throw new ConnectError("Diagnostic canceled", Code.Canceled);
+      }
+      const { code } = ConnectError.from(error);
+      if (code === Code.Unauthenticated) this.update({ authenticationFailed: true }, true);
+      // A missing selected tag is scoped to the request, not the whole RPC.
+      if (!final && code !== Code.NotFound) this.setCapability(name, capabilityFailure(error));
+      throw error;
+    } finally {
+      if (this.diagnosticScope === scope) this.diagnosticScope = undefined;
+      scope.abort();
+    }
   }
   closeConnection = (id: string) =>
     this.runUnary((options) => this.client.closeConnection({ id }, options));

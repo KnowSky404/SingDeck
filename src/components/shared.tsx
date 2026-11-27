@@ -183,7 +183,8 @@ export function ChannelState({
               {
                 service: "Service",
                 status: "Overview",
-                groups: "Proxies",
+                groups: "Groups",
+                outbounds: "Outbounds",
                 logs: "Logs",
                 connections: "Connections",
               }[channel],

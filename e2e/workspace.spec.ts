@@ -96,7 +96,7 @@ test("mock workspace supports server-confirmed selection, filtering, log control
   page.on("pageerror", (error) => errors.push(error.message));
   await demo(page);
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
-  await navigate(page, "Proxies");
+  await navigate(page, "Outbounds");
   const primary = page
     .locator('[data-slot="card"]')
     .filter({ has: page.getByText("Primary route", { exact: true }) });
@@ -320,7 +320,7 @@ test("responsive layout, dark/light/system themes, routes and console health", a
     page.getByRole("heading", { name: "Overview", exact: true }),
   ).toBeVisible();
   for (const name of [
-    "Proxies",
+    "Outbounds",
     "Connections",
     "Logs",
     "Settings",
@@ -345,7 +345,7 @@ test("responsive layout, dark/light/system themes, routes and console health", a
   });
   for (const label of [
     "Overview",
-    "Proxies",
+    "Outbounds",
     "Connections",
     "Logs",
     "Settings",
@@ -587,7 +587,7 @@ test("group cards and node cards are independent and settings stay read-only", a
       "Your network, at a glance.",
     );
   }
-  await navigate(page, "Proxies");
+  await navigate(page, "Outbounds");
   await expect(page.getByRole("radio", { name: "Group cards" })).toBeChecked();
   await expect(page.getByRole("radio", { name: "List view" })).toBeChecked();
   await expect(page.locator(".proxy-group-grid > div")).toHaveCount(2);
@@ -937,7 +937,7 @@ test("language and theme controls work without replacing the session and persist
     await collapse.click();
     await page.getByRole("button", { name: "展开侧栏", exact: true }).click();
   }
-  for (const name of ["代理", "连接", "日志", "设置", "概览"]) {
+  for (const name of ["出站", "连接", "日志", "设置", "概览"]) {
     await navigate(page, name);
     await expect(page.getByRole("heading", { name, exact: true })).toHaveClass(
       "sr-only",

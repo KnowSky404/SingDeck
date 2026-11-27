@@ -94,6 +94,14 @@ If force reload does not help, compare a private window and the server response.
 
 Local HTTP SDK/browser tests prove baseline transport, CORS, streaming and built-in hosting. They do **not** establish external VPS TLS/PNA correctness. Verify those policies in your target browser and network before using remote management. See [verification](verification.md).
 
+## Native diagnostics and configuration health
+
+Open **Diagnostics** after a core connects. Network quality and STUN traffic originates at the core and follows the selected outbound or core default. The network quality test can use substantial data. For a custom configuration URL, use a trusted measurement service. The core can follow redirects and contact endpoints specified by the configuration. A custom STUN address requires UDP access from the selected outbound. If pinned sing-box 1.14.0 fails a direct STUN test against an IP literal, try the server's hostname through the core's DNS path. [Diagnostic semantics](api-compatibility.md#native-diagnostic-semantics)
+
+Open **Configuration health** from Overview for deprecations the API reported. Stock CLI deployments can report an empty list even when the core logs a deprecation. Check the logs and run `sing-box check` for validation. Reports, clipboard writes and browser downloads require a user action. STUN reports include the external address.
+
+The underlying core has an official WebSocket transport alongside HTTP gRPC-Web. If exposing WebSocket routes on a reverse proxy, verify its Origin policy separately. The core's HTTP CORS allowlist does not enforce WebSocket Origins. SingDeck currently uses binary gRPC-Web over HTTP fetch. [Pinned WebSocket bridge](https://github.com/SagerNet/sing-box/blob/v1.14.0/service/api/web_bridge_websocket.go)
+
 ## Source and licenses
 
 Distribute the corresponding SingDeck source and retain `LICENSE`, `proto/LICENSE.sing-box`, `THIRD_PARTY_NOTICES.md` and bundled license notices when redistributing the dashboard. Public hosting does not remove applicable source obligations. The footer links to the upstream source repository; downstream deployments must offer their actual corresponding modified source and update that link. The static build also includes AGPL and upstream GPL license texts. Build artifacts contain no access credentials.

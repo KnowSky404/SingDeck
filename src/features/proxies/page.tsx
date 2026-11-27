@@ -5,11 +5,11 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Circle,
-  Info,
   LayoutGrid,
   List,
   Search,
   Zap,
+  X,
   LockKeyhole,
   LoaderCircle,
 } from "lucide-react";
@@ -25,18 +25,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   type Group,
-  type GroupItem,
   ServiceStatus_Type,
 } from "@/proto/daemon/started_service_pb";
 
@@ -46,99 +37,8 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { latency, latencyTestWaves, latencyTone } from "./latency";
-
-function OutboundDetails({
-  item,
-  referencedGroup,
-}: {
-  item: GroupItem;
-  referencedGroup?: Group;
-}) {
-  const { t } = useWorkspace();
-  const isGroup =
-    Boolean(referencedGroup) ||
-    item.type === "selector" ||
-    item.type === "urltest";
-  const label = t(
-    isGroup ? "Group details for {name}" : "Node details for {name}",
-    { name: item.tag },
-  );
-  return (
-    <Dialog>
-      <DialogTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          className="proxy-outbound-details"
-          aria-label={label}
-          title={label}
-        >
-          <Info aria-hidden="true" />
-        </Button>
-      </DialogTrigger>
-      <DialogContent
-        closeLabel={t("Close")}
-        className="max-h-[calc(100dvh-2rem)] overflow-y-auto"
-      >
-        <DialogHeader>
-          <DialogTitle className="pr-8 wrap-anywhere">{item.tag}</DialogTitle>
-          <DialogDescription>
-            {t(
-              isGroup
-                ? "Referenced proxy group"
-                : "Server and transport settings are stored in the sing-box configuration file.",
-            )}
-          </DialogDescription>
-        </DialogHeader>
-        <OutboundFacts item={item} referencedGroup={referencedGroup} />
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function OutboundFacts({
-  item,
-  referencedGroup,
-}: {
-  item: GroupItem;
-  referencedGroup?: Group;
-}) {
-  const { language, t } = useWorkspace();
-  const measuredAt = new Date(Number(item.urlTestTime) * 1000);
-  const tested = item.urlTestTime > 0n && Number.isFinite(measuredAt.valueOf());
-  return (
-    <dl className="detail-list">
-      <div>
-        <dt>{t("Outbound type")}</dt>
-        <dd>{referencedGroup?.type || item.type}</dd>
-      </div>
-      {referencedGroup && (
-        <div>
-          <dt>{t("Selected member")}</dt>
-          <dd>{referencedGroup.selected || "—"}</dd>
-        </div>
-      )}
-      <div>
-        <dt>{t("Latency")}</dt>
-        <dd className="proxy-latency" data-latency={latencyTone(item)}>
-          {t(latency(item))}
-        </dd>
-      </div>
-      <div>
-        <dt>{t("Last tested")}</dt>
-        <dd>
-          {tested ? (
-            <time dateTime={measuredAt.toISOString()}>
-              {measuredAt.toLocaleString(language)}
-            </time>
-          ) : (
-            "—"
-          )}
-        </dd>
-      </div>
-    </dl>
-  );
-}
+import { OutboundDetails } from "./outbound-details";
+import { OutboundInventory } from "./inventory";
 
 function ProxyGroup({
   group,
@@ -163,7 +63,10 @@ function ProxyGroup({
   const selection = useAction(),
     testing = useAction();
   const testingDisabled =
-    !enabled || Boolean(snapshot.testingLatencies) || testing.pending;
+    !enabled ||
+    snapshot.capabilities.urlTest.status === "unsupported" ||
+    Boolean(snapshot.testingLatencies) ||
+    testing.pending;
   const test = (tag: string) =>
     void testing.run(() =>
       session.testLatency(tag, latencyTestWaves(groupsByTag, tag)[0].windows),
@@ -321,6 +224,7 @@ function ProxyGroup({
                         <OutboundDetails
                           item={item}
                           referencedGroup={groupsByTag.get(item.tag)}
+                          groupsByTag={groupsByTag}
                         />
                         <Button
                           variant="ghost"
@@ -352,7 +256,41 @@ function ProxyGroup({
     </Collapsible>
   );
 }
-export default function Proxies() {
+export default function Outbounds() {
+  const { snapshot, t } = useWorkspace();
+  const [view, setView] = useState("groups");
+  const probe = snapshot.capabilities.urlTest;
+  return (
+    <>
+      <PageHeading title="Outbounds" />
+      <ToggleGroup
+        type="single"
+        variant="outline"
+        aria-label={t("Outbound view")}
+        className="proxy-toolbar"
+        value={view}
+        onValueChange={(value) => value && setView(value)}
+      >
+        <ToggleGroupItem value="groups">{t("Groups")}</ToggleGroupItem>
+        <ToggleGroupItem value="inventory">{t("All outbounds")}</ToggleGroupItem>
+      </ToggleGroup>
+      {probe.status === "unsupported" && (
+        <Notice title={t("Latency testing unavailable")}>{probe.error}</Notice>
+      )}
+      {snapshot.latencyTestError && (
+        <Notice title="Latency test status">{snapshot.latencyTestError}</Notice>
+      )}
+      {snapshot.stoppingLatencyTests && (
+        <p role="status" className="text-sm text-muted-foreground">
+          {t("Queued tests stopped. The core may finish probes already sent.")}
+        </p>
+      )}
+      {view === "groups" ? <OutboundGroups /> : <OutboundInventory />}
+    </>
+  );
+}
+
+function OutboundGroups() {
   const { session, snapshot, t } = useWorkspace();
   const [search, setSearch] = useState(""),
     [type, setType] = useState("all"),
@@ -408,7 +346,6 @@ export default function Proxies() {
 
   return (
     <>
-      <PageHeading title={t("Proxies")} />
       <div className="toolbar proxy-toolbar">
         <div className="search-field">
           <Search />
@@ -471,6 +408,7 @@ export default function Proxies() {
             title={testAllLabel}
             disabled={
               !enabled ||
+              snapshot.capabilities.urlTest.status === "unsupported" ||
               !groups.length ||
               Boolean(snapshot.testingManualLatency) ||
               testing
@@ -487,6 +425,18 @@ export default function Proxies() {
               <Zap aria-hidden="true" />
             )}
           </Button>
+          {testing && (
+            <Button
+              variant="outline"
+              size="icon"
+              aria-label={t("Stop queued tests")}
+              title={t("Stop queued tests")}
+              disabled={snapshot.stoppingLatencyTests}
+              onClick={session.cancelLatencyTests}
+            >
+              <X aria-hidden="true" />
+            </Button>
+          )}
           <Button
             variant="outline"
             size="icon"
@@ -508,9 +458,6 @@ export default function Proxies() {
           </Button>
         </div>
       </div>
-      {snapshot.latencyTestError && (
-        <Notice title={t("Test failed")}>{t(snapshot.latencyTestError)}</Notice>
-      )}
       <ChannelState channel="groups" empty={snapshot.groups?.length === 0}>
         <div
           className={

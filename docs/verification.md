@@ -2,6 +2,38 @@
 
 Implementation validation: 2026-11-17, Linux x86_64, Bun 1.4.4, Node 26.13.0, TypeScript 6.0.3, Playwright Chromium 159. CI targets Node 24 and the same Bun version. This file distinguishes mock evidence from real native Service API evidence.
 
+## Phase 1 — Native Diagnostics
+
+Validation runs on Linux x86_64 with Bun 1.4.4, official sing-box v1.14.0 release revision `0b8995879f29a9b98ee027bc17b75e101445b238`, and Playwright Chromium. The released SingDeck v0.8.1 checkout at `dfb16e8` is the comparison baseline. Browser plugin was unavailable, so browser checks used Playwright directly.
+
+| Check | Result and scope |
+| --- | --- |
+| Frozen install, lint, typecheck, and production build | Pass |
+| Proto and license regeneration | Pass with no generated diff. The pinned schema is unchanged. |
+| Unit tests | 64 pass, including capability classification, side-effect-free active test discovery, drained warning retention and redaction, request slot switching, stream recovery, diagnostic terminal semantics, and cancellation. |
+| Official v1.14.0 integration | 12 pass across native SDK, diagnostics and built-in hosting suites. Fixtures used loopback API, HTTP and UDP endpoints, including a local dashboard archive download. No production services were accessed. |
+| Chromium desktop and emulated mobile | 28 pass in the workspace and new Phase 1 suites. Feature interactions use the explicit demo. Connection failure and credential persistence checks are separately scoped in the suite. |
+| Chromium with official v1.14.0 | 2 desktop cases pass. Covered cross-origin diagnostics and inventory, real selector confirmation, navigation and reload under the built-in dashboard, credential behavior and viewport-safe latency feedback. |
+
+The native integration tests streamed inventory including an ungrouped direct outbound and measured network quality using a paced HTTP fixture. STUN used loopback UDP responders with and without RFC 5780 support. The suite covered a missing outbound, an in-band diagnostic failure and an abort that closed a pending core HTTP request. The pinned CLI fixture emitted a DNS deprecation in logs and returned an empty warning list. [Native integration](../tests/native.integration.test.ts) · [Diagnostic integration](../tests/diagnostics.integration.test.ts)
+
+Additional controlled local checks against official binaries:
+
+- The official v1.14.0 SFL Linux daemon returned a nonempty deprecation warning, including its version fields and migration anchor. A second unary returned an empty list, confirming drain semantics. Chromium rendered the warning, preserved it across refresh in the same core lifetime, and recovered after a managed reload with a new start time and a different warning. A same-origin production rerun delayed delivery of the new warning by 2.5 seconds. The browser made one warning request and retained its result.
+- Chromium confirmed the API used HTTP/1.1. Six permanent subscriptions queued additional calls. The shared fifth stream slot allowed the warning-refresh unary to run, and retrying server-canceled subscriptions restored live monitoring after reload.
+- The v1.14.0 QUIC build negotiated HTTP/3 with a loopback Caddy measurement fixture using a trusted temporary certificate. Both capacities completed with positive native values. The v1.14.0 direct outbound failed the literal-IP STUN case. The v1.14.5 official binary completed it with the same UDP fixture.
+- Chromium exchanged interleaved authenticated USB-provider messages and a client half-close with the official WebSocket bridge. Missing credentials returned Unauthenticated. The server accepted an Origin outside the HTTP CORS list. The proof used an absent service tag without hardware and does not verify USB operations or production TLS and reverse proxies. [Transport notes](api-compatibility.md)
+
+Phase 1 trust checks verified that explicit diagnostics wait for a user action, require consent for a custom core-side destination, suppress raw RPC error details, reject nonofficial migration links, and omit the custom configuration URL from exports. Report and comparison history remain in memory. STUN reports intentionally include the external address when the user copies or exports one. Credential persistence and TLS policy retain the existing scope. Full browser/proxy compatibility, broader security review and high-volume performance remain later gates.
+
+### Browser performance and rendering
+
+In the final production build, initial HTML-declared JavaScript and CSS, including preloads, grew from 210,795 to 216,819 gzip bytes (+2.86%). Total emitted JavaScript and CSS grew from 330,777 to 352,550 bytes (+6.58%). These totals were measured by compressing each emitted asset separately at gzip level 9 and exclude HTML and fonts. Diagnostics and Configuration Health are lazy routes.
+
+A prefinal candidate and the `dfb16e8` baseline were measured with Chromium 159 at 1280×800 on a Linux x86_64 2-vCPU workstation, using unthrottled loopback static hosting. The median first animation frame with **Explore demo** visible moved from 197 to 242 ms with a cold cache and from 103 to 103 ms with a warm cache. The click-to-**Connected** and Overview median moved from 471 to 312 ms cold and from 442 to 262 ms warm. Each build had 12 interleaved samples after one warmup. Host workload and timing varied, so these are local observations. Workload, long-run and real network measurements are Phase 5 gates.
+
+Visual inspection used desktop light and emulated mobile dark screenshots, plus 320–1440 CSS pixel checks for layout overflow. Screenshots used demo inputs without private instance data. Desktop and mobile browser tests distinguish demo interactions from real-core browser coverage.
+
 ## v0.3.0 local regression record
 
 Worktree feature validation on 2026-11-17: lint, typecheck, production build, frozen installation, actionlint, schema regeneration and license reproducibility pass. Unit tests: **26 pass**. Official sing-box 1.14.0 integration: **5 pass**, including download of a root-layout ZIP from a loopback HTTP fixture, extraction into a new directory and serving HTML/assets under `/dashboard/`. This proves core archive handling; it does not prove a user's GitHub download route.
