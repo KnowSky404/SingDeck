@@ -62,6 +62,10 @@ The inspector displays per-connection UPDATE byte deltas and keeps cumulative to
 
 The connection JSON download includes the retained records that match the current filters across all pages. It annotates retention truncation and preserves exact counters and timestamps as decimal strings. Native text fields go through the inspector's redaction. The file can contain network and process metadata.
 
+The demo stream starts with a reset and cumulative counters. Subsequent UPDATE events carry per-interval byte changes for active connections. CLOSED events carry final totals and a closing timestamp.
+
+Filtered batch close sends one `CloseConnection` per confirmed active ID, sequentially. The selection covers all matching pages and is available with a narrowing filter and a current, untruncated connection list. It skips IDs already marked closed and stops queueing requests when the records reset, the instance becomes unavailable, a request fails, or the user stops the batch. Only the subscription confirms closed state. A request already in flight when stopped may still take effect.
+
 The v1.14.0 log stream carries only level and text. Its optional rendered context ID differs from the connection UUID, so the workspace cannot reliably join logs to connections. [Log context ID](https://github.com/SagerNet/sing-box/blob/v1.14.0/log/id.go) · [Connection tracker](https://github.com/SagerNet/sing-box/blob/v1.14.0/common/trafficcontrol/tracker.go)
 
 ## Native diagnostic semantics

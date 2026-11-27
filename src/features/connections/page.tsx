@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useRef, useState } from "react";
+import { useDeferredValue, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowDownToLine,
@@ -11,6 +11,7 @@ import {
   Info,
 } from "lucide-react";
 import { useWorkspace } from "@/app/context";
+import type { ConnectionBatchResult, ConnectionBatchSelection, InstanceSession } from "@/api/session";
 import { hasCurrentConnections } from "@/api/state";
 import { useAction } from "@/hooks/use-action";
 import {
@@ -43,6 +44,7 @@ import { serializeConnectionExport } from "./export";
 import {
   connectionMatcher,
   defaultConnectionFilters,
+  hasNarrowingConnectionFilter,
   type ConnectionFilters,
 } from "./filters";
 import { ConnectionInspector } from "./inspector";
@@ -101,9 +103,14 @@ export default function Connections() {
   );
   const [detailId, setDetailId] = useState<string | null>(null),
     [confirm, setConfirm] = useState(false);
+  const [batch, setBatch] = useState<{ session: InstanceSession; selection: ConnectionBatchSelection }>();
+  const [batchResult, setBatchResult] = useState<{ session: InstanceSession; result: ConnectionBatchResult }>();
+  const batchController = useRef<AbortController | null>(null);
+  const batchTrigger = useRef<HTMLButtonElement>(null);
   const detailTrigger = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
   const action = useAction();
+  useLayoutEffect(() => () => batchController.current?.abort(), [session]);
   const query = useDeferredValue(search);
   const rows = useMemo(
     () =>
@@ -143,6 +150,13 @@ export default function Connections() {
   const enabled = current && !action.pending;
   const closeAllEnabled = enabled && activeCount > 0;
   const canExport = current && query === search && rows.length > 0;
+  const batchAvailable = current && !snapshot.connectionOverflow && !snapshot.authenticationFailed;
+  const canSelectBatch = batchAvailable && !action.pending && query === search &&
+    hasNarrowingConnectionFilter(filters, query) && rows.some((row) => row.closedAt === 0n);
+  const batchCurrent = batchAvailable && batch?.session === session &&
+    batch.selection.topologyGeneration === snapshot.topologyGeneration &&
+    batch.selection.connectionGeneration === snapshot.connectionGeneration;
+  const result = batchResult?.session === session ? batchResult.result : undefined;
 
   function updateFilter<Key extends keyof ConnectionFilters>(key: Key, value: ConnectionFilters[Key]) {
     setFilters((previous) => ({ ...previous, [key]: value }));
@@ -171,6 +185,33 @@ export default function Connections() {
     link.download = `singdeck-connections-${exportedAt.getTime()}.json`;
     link.click();
     window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+  }
+
+  function selectBatch() {
+    if (!canSelectBatch) return;
+    setBatch({
+      session,
+      selection: {
+        ids: rows.filter((row) => row.closedAt === 0n).map((row) => row.id),
+        topologyGeneration: snapshot.topologyGeneration,
+        connectionGeneration: snapshot.connectionGeneration,
+      },
+    });
+  }
+
+  function confirmBatch() {
+    if (!batchCurrent || action.pending) return;
+    void action.run(async () => {
+      const controller = new AbortController();
+      batchController.current = controller;
+      try {
+        const result = await session.closeConnectionBatch(batch.selection, controller.signal);
+        setBatchResult({ session, result });
+      } finally {
+        batchController.current = null;
+        setBatch(undefined);
+      }
+    });
   }
 
   return (
@@ -224,14 +265,14 @@ export default function Connections() {
             })),
           ]}
         />
-        <Button
-          variant="outline"
-          className="toolbar-actions"
-          disabled={!closeAllEnabled}
-          onClick={() => setConfirm(true)}
-        >
-          {t("Close all connections")}
-        </Button>
+        <div className="button-row toolbar-actions">
+          <Button ref={batchTrigger} variant="outline" disabled={!canSelectBatch} onClick={selectBatch}>
+            {t("Close matching connections")}
+          </Button>
+          <Button variant="outline" disabled={!closeAllEnabled} onClick={() => setConfirm(true)}>
+            {t("Close all connections")}
+          </Button>
+        </div>
       </div>
       <Collapsible>
         <div className="button-row">
@@ -288,6 +329,20 @@ export default function Connections() {
       </Collapsible>
       {action.error && (
         <Notice title={t("Connection action failed")}>{t(action.error)}</Notice>
+      )}
+      {result && (
+        <Notice title={t("Batch close result")}>
+          <p>{t("Requests acknowledged {acknowledged} · Already closed {skipped} · Requests unsent {unsent}", {
+            acknowledged: result.acknowledged,
+            skipped: result.skipped,
+            unsent: result.unsent,
+          })}</p>
+          {result.unacknowledged > 0 && (
+            <p>{t("One attempted request had no acknowledgement.")}</p>
+          )}
+          {result.error && <p>{t(result.error)}</p>}
+          <p>{t("The live connection list confirms which connections closed.")}</p>
+        </Notice>
       )}
       {snapshot.connectionOverflow && (
         <Notice title={t("Display limit reached")}>
@@ -495,6 +550,44 @@ export default function Connections() {
               onClick={confirmCloseAll}
             >
               {t(action.pending ? "Closing…" : "Close all")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={Boolean(batch)} onOpenChange={(open) => {
+        if (!open && !batchController.current) setBatch(undefined);
+      }}>
+        <DialogContent
+          closeLabel={t("Close")}
+          showCloseButton={!action.pending}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            (batchTrigger.current?.disabled ? searchInput.current : batchTrigger.current)?.focus();
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>{t("Close matching active connections?")}</DialogTitle>
+            <DialogDescription>
+              {t("This interrupts traffic on {count} active connections matching the current filters across all pages. Only this fixed set will be requested.", {
+                count: batch?.selection.ids.length ?? 0,
+              })}
+            </DialogDescription>
+          </DialogHeader>
+          {!batchCurrent && !action.pending && (
+            <p>{t("Connection records changed. Review the current filters and try again.")}</p>
+          )}
+          <DialogFooter>
+            {action.pending ? (
+              <Button variant="outline" onClick={() => batchController.current?.abort()}>
+                {t("Stop closing connections")}
+              </Button>
+            ) : (
+              <DialogClose asChild>
+                <Button variant="outline">{t("Cancel")}</Button>
+              </DialogClose>
+            )}
+            <Button variant="destructive" disabled={!batchCurrent || action.pending} onClick={confirmBatch}>
+              {t(action.pending ? "Closing…" : "Close matching connections")}
             </Button>
           </DialogFooter>
         </DialogContent>

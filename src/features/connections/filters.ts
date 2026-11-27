@@ -18,6 +18,12 @@ export type ConnectionFilters = typeof defaultConnectionFilters;
 const metadataFilters = ["inbound", "protocol", "domain", "rule", "user"] as const;
 const normalize = (value: string) => value.trim().toLowerCase();
 
+export function hasNarrowingConnectionFilter(filters: ConnectionFilters, search: string) {
+  return Boolean(search.trim() || filters.network !== "all" || filters.outbound !== null ||
+    filters.ipVersion !== "all" || filters.process.trim() ||
+    metadataFilters.some((field) => filters[field].trim()));
+}
+
 export function connectionMatcher(filters: ConnectionFilters, search: string) {
   const { status, network, outbound, ipVersion } = filters;
   const metadata = metadataFilters.flatMap((field) => {

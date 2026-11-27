@@ -42,6 +42,19 @@ type LatencyTestWave = {
   tags: string[];
   windows: number;
 };
+type ConnectionBatchGeneration = Pick<Snapshot, "connectionGeneration" | "topologyGeneration">;
+export type ConnectionBatchSelection = Readonly<ConnectionBatchGeneration> & {
+  readonly ids: readonly string[];
+};
+export type ConnectionBatchResult = {
+  acknowledged: number;
+  skipped: number;
+  unacknowledged: number;
+  unsent: number;
+  error?: string;
+};
+
+const connectionBatchStale = "Connection records changed. Review the current filters and try again.";
 
 function probeMembers(group: Group, groups: ReadonlyMap<string, Group>) {
   const pending = new Map(group.items.map((item) => [item.tag, item]));
@@ -160,6 +173,7 @@ export class InstanceSession {
   private archivedWarningScope?: AbortController;
   private retryWarningsAfterCurrent = false;
   private diagnosticScope?: AbortController;
+  private connectionBatch?: ConnectionBatchGeneration & { scope: AbortController };
 
   private readonly secret: string;
 
@@ -189,6 +203,8 @@ export class InstanceSession {
     this.pending = { ...this.pending, ...patch };
     if (this.latencyTest && !this.canTestLatencyBatch(this.latencyTest.source))
       this.latencyTest.controller.abort();
+    if (this.connectionBatch && !this.canCloseConnectionBatch(this.connectionBatch))
+      this.connectionBatch.scope.abort();
     if (!this.canRunServiceAction()) this.interruptDiagnostic();
     if (immediate) this.flush();
     else this.flushTimer ??= setTimeout(() => this.flush(), 100);
@@ -892,6 +908,7 @@ export class InstanceSession {
               connections.delete(connections.keys().next().value!);
             this.update({
               connections,
+              connectionGeneration: this.pending.connectionGeneration + Number(events.reset),
               connectionOverflow: events.reset
                 ? overflow || (resume && this.pending.connectionOverflow)
                 : this.pending.connectionOverflow || overflow,
@@ -1271,6 +1288,55 @@ export class InstanceSession {
     if (!this.canRunServiceAction() || !hasCurrentConnections(this.pending))
       throw new ConnectError("Connection list unavailable", Code.Unavailable);
     return this.runUnary((options) => this.client.closeConnection({ id }, options));
+  };
+  private canCloseConnectionBatch(selection: ConnectionBatchGeneration) {
+    return this.topologyGeneration === selection.topologyGeneration &&
+      this.pending.connectionGeneration === selection.connectionGeneration &&
+      !this.pending.connectionOverflow && !this.pending.authenticationFailed &&
+      this.canRunServiceAction() && hasCurrentConnections(this.pending);
+  }
+  closeConnectionBatch = async (
+    { ids, topologyGeneration, connectionGeneration }: ConnectionBatchSelection,
+    caller?: AbortSignal,
+  ): Promise<ConnectionBatchResult> => {
+    const targets = new Set(ids);
+    const result = { acknowledged: 0, skipped: 0, unacknowledged: 0, unsent: targets.size };
+    const parent = this.signal;
+    const canceled = () => ({ ...result, error: "The request was canceled." });
+    if (!parent || parent.aborted || caller?.aborted) return canceled();
+    const scope = new AbortController();
+    const batch = { scope, topologyGeneration, connectionGeneration };
+    if (!targets.size || this.connectionBatch || !this.canCloseConnectionBatch(batch))
+      return { ...result, error: connectionBatchStale };
+
+    this.connectionBatch = batch;
+    const signal = AbortSignal.any(caller ? [parent, scope.signal, caller] : [parent, scope.signal]);
+    try {
+      for (const id of targets) {
+        if (parent.aborted || caller?.aborted) return canceled();
+        const connection = this.pending.connections.get(id);
+        if (scope.signal.aborted || !this.canCloseConnectionBatch(batch) || !id || !connection)
+          return { ...result, error: connectionBatchStale };
+        result.unsent--;
+        if (connection.closedAt !== 0n) {
+          result.skipped++;
+          continue;
+        }
+        result.unacknowledged++;
+        await this.runUnary((options) => this.client.closeConnection({ id }, options), signal);
+        result.unacknowledged--;
+        result.acknowledged++;
+      }
+      return result;
+    } catch (error) {
+      if (parent.aborted || caller?.aborted) return canceled();
+      if (scope.signal.aborted && ConnectError.from(error).code !== Code.Unauthenticated)
+        return { ...result, error: connectionBatchStale };
+      return { ...result, error: describeError(error) };
+    } finally {
+      this.connectionBatch = undefined;
+      scope.abort();
+    }
   };
   closeAllConnections = async () => {
     const snapshot = this.pending;

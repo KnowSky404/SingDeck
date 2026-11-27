@@ -8,6 +8,7 @@ import { mockProfile } from "@/features/instances/profiles";
 import {
   ConnectionSchema,
   ConnectionEventsSchema,
+  ConnectionEventType,
   GroupsSchema,
   VersionSchema,
   StatusSchema,
@@ -158,9 +159,11 @@ describe("session lifecycle", () => {
   it("bounds connection history and evicts closed records before active connections", async () => {
     vi.useFakeTimers();
     const client = createMockClient();
+    const closeConnection = vi.fn(client.closeConnection);
     const s = session(new MockControl(), {
       ...client,
-      async *subscribeConnections() {
+      closeConnection,
+      async *subscribeConnections(_, options) {
         yield create(ConnectionEventsSchema, {
           reset: true,
           events: [
@@ -184,6 +187,7 @@ describe("session lifecycle", () => {
             },
           ],
         });
+        await delay(60_000, options!.signal!);
       },
     });
     s.connect();
@@ -193,6 +197,9 @@ describe("session lifecycle", () => {
     expect(snapshot.connections.has("active-0")).toBe(true);
     expect(snapshot.connections.has("closed-1")).toBe(false);
     expect(snapshot.connectionOverflow).toBe(true);
+    expect(snapshot.serviceActionsReady).toBe(true);
+    await expect(s.closeConnectionBatch({ ...snapshot, ids: ["active-0"] })).resolves.toMatchObject({ unsent: 1 });
+    expect(closeConnection).not.toHaveBeenCalled();
   });
   it("does not close all from a published view that still shows stale active rows", async () => {
     vi.useFakeTimers();
@@ -222,6 +229,89 @@ describe("session lifecycle", () => {
     s.setInventoryEnabled(true);
     await expect(s.closeAllConnections().catch(describeError)).resolves.toBe("Wait for the connection list to refresh, then try again.");
     expect(closeAllConnections).not.toHaveBeenCalled();
+  });
+  it("closes only selected active IDs in order and reports partial acknowledgements", async () => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    const closeConnection = vi.fn<typeof client.closeConnection>(async ({ id }, options) => {
+      if (id === "rejected") throw new ConnectError("private-error-detail", Code.PermissionDenied);
+      await delay(200, options!.signal!);
+      return create(EmptySchema);
+    });
+    const closeAllConnections = vi.fn(client.closeAllConnections);
+    const ids = ["first", "closing", "rejected", "unsent"];
+    const s = session(undefined, {
+      ...client, closeConnection, closeAllConnections,
+      async *subscribeConnections(_, options) {
+        const signal = options!.signal!;
+        yield create(ConnectionEventsSchema, {
+          reset: true,
+          events: ids.map((id) => ({ id, connection: create(ConnectionSchema, { id }) })),
+        });
+        await delay(500, signal);
+        yield create(ConnectionEventsSchema, {
+          events: [
+            { id: "closing", type: ConnectionEventType.CONNECTION_EVENT_CLOSED, closedAt: 1n },
+            { id: "new-match", connection: create(ConnectionSchema, { id: "new-match" }) },
+          ],
+        });
+        await delay(60_000, signal);
+      },
+    });
+    s.connect();
+    await vi.advanceTimersByTimeAsync(400);
+    const batch = s.closeConnectionBatch({ ...s.getSnapshot(), ids });
+    expect(closeConnection.mock.calls.map(([request]) => request.id)).toEqual(["first"]);
+    await vi.advanceTimersByTimeAsync(250);
+    await expect(batch).resolves.toEqual({
+      acknowledged: 1, skipped: 1, unacknowledged: 1, unsent: 1,
+      error: "This instance denied access. Check its access policy.",
+    });
+    expect(closeConnection.mock.calls.map(([request]) => request.id)).toEqual(["first", "rejected"]);
+    expect(closeAllConnections).not.toHaveBeenCalled();
+    expect(s.getSnapshot().connections.get("first")?.closedAt).toBe(0n);
+    expect(s.getSnapshot().connections.has("new-match")).toBe(true);
+  });
+  it.each(["caller cancellation", "disconnect", "connection reset"])("cancels a pending request on %s", async (stop) => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    const closeConnection = vi.fn<typeof client.closeConnection>(async (_, options) => {
+      await delay(10_000, options!.signal!);
+      return create(EmptySchema);
+    });
+    const ids = ["first", "second"];
+    const s = session(undefined, {
+      ...client, closeConnection,
+      async *subscribeConnections(_, options) {
+        const signal = options!.signal!;
+        const snapshot = create(ConnectionEventsSchema, {
+          reset: true,
+          events: ids.map((id) => ({ id, connection: create(ConnectionSchema, { id }) })),
+        });
+        yield snapshot;
+        if (stop === "connection reset") {
+          await delay(500, signal);
+          yield snapshot;
+        }
+        await delay(60_000, signal);
+      },
+    });
+    s.connect();
+    await vi.advanceTimersByTimeAsync(400);
+    const selection = { ...s.getSnapshot(), ids };
+    const caller = new AbortController();
+    const result = s.closeConnectionBatch(selection, caller.signal);
+    expect(closeConnection).toHaveBeenCalledTimes(1);
+    if (stop === "caller cancellation") caller.abort();
+    else if (stop === "disconnect") s.disconnect();
+    else await vi.advanceTimersByTimeAsync(100);
+    await expect(result).resolves.toMatchObject({ acknowledged: 0, unacknowledged: 1, unsent: 1 });
+    expect(closeConnection.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    if (stop === "connection reset") {
+      expect(s.getSnapshot().connectionGeneration).toBe(selection.connectionGeneration);
+      await expect(s.closeConnectionBatch(selection)).resolves.toMatchObject({ unsent: 2 });
+    }
+    expect(closeConnection).toHaveBeenCalledTimes(1);
   });
   it("rechecks API compatibility after an outage and stops incompatible streams", async () => {
     vi.useFakeTimers();

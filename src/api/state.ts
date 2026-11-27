@@ -51,6 +51,7 @@ export interface Snapshot {
   latencyTestSent?: boolean;
   logs: LogEntry[];
   connections: ReadonlyMap<string, Connection>;
+  connectionGeneration: number;
   connectionOverflow: boolean;
   runtime: RuntimeObservation;
   streamErrors: Partial<Record<Channel, string>>;
@@ -63,6 +64,7 @@ export const initialSnapshot = (): Snapshot => ({
   capabilities: initialCapabilities(),
   logs: [],
   connections: new Map(),
+  connectionGeneration: 0,
   connectionOverflow: false,
   runtime: { samples: [], events: [], lastFrameAt: {} },
   streamErrors: {},
