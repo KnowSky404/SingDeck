@@ -9,11 +9,11 @@ import {
   createServer,
   request,
   type Server,
-  type ClientRequest,
 } from "node:http";
 import { createNativeClient, type SingBoxClient } from "@/api/client";
 import { Code } from "@connectrpc/connect";
 import {
+  ConnectionEventType,
   ServiceStatus_Type,
   type ConnectionEvent,
 } from "@/proto/daemon/started_service_pb";
@@ -32,7 +32,7 @@ suite("official sing-box 1.14.0 native integration (not mock)", () => {
     client: SingBoxClient,
     endpoint: string,
     secret: string;
-  let target: Server, proxyRequest: ClientRequest | undefined;
+  let target: Server;
   let cliDeprecationReported = false;
   const scopes: AbortController[] = [];
   const scope = () => {
@@ -99,7 +99,6 @@ suite("official sing-box 1.14.0 native integration (not mock)", () => {
   });
   afterAll(async () => {
     scopes.forEach((c) => c.abort());
-    proxyRequest?.destroy();
     target?.closeAllConnections();
     target?.close();
     if (child && child.exitCode === null && child.signalCode === null) {
@@ -250,7 +249,7 @@ suite("official sing-box 1.14.0 native integration (not mock)", () => {
     if (!addr || typeof addr === "string")
       throw new Error("Missing target port");
     await client.selectOutbound({ groupTag: "Primary route", outboundTag: "direct" });
-    proxyRequest = request(
+    const proxyRequest = request(
       {
         hostname: "127.0.0.1",
         port: 19080,
@@ -261,49 +260,54 @@ suite("official sing-box 1.14.0 native integration (not mock)", () => {
     proxyRequest.on("error", () => {});
     proxyRequest.end();
     const s = scope();
-    let active: ConnectionEvent["connection"];
-    for await (const batch of client.subscribeConnections(
-      { interval: 100_000_000n },
-      { signal: s.signal },
-    )) {
-      const created = batch.events.find(
-        (e) =>
-          e.connection?.destination === `127.0.0.1:${addr.port}` &&
-          e.connection.closedAt === 0n,
-      );
-      if (created?.connection) {
-        active = created.connection;
-        break;
+    const signal = AbortSignal.any([s.signal, AbortSignal.timeout(5000)]);
+    try {
+      let active: ConnectionEvent["connection"];
+      let closed: ConnectionEvent | undefined;
+      let initial = true;
+      for await (const batch of client.subscribeConnections(
+        { interval: 100_000_000n },
+        { signal },
+      )) {
+        expect(batch.reset).toBe(initial);
+        initial = false;
+        if (active) {
+          const { id } = active;
+          // A ticker can report CLOSED without metadata before the live tracker event.
+          closed = batch.events.find((event) =>
+            event.type === ConnectionEventType.CONNECTION_EVENT_CLOSED &&
+            event.id === id && event.connection !== undefined,
+          );
+          if (closed) break;
+          continue;
+        }
+        active = batch.events.find((event) =>
+          event.type === ConnectionEventType.CONNECTION_EVENT_NEW &&
+            event.connection?.destination === `127.0.0.1:${addr.port}` &&
+            event.connection.closedAt === 0n,
+        )?.connection;
+        if (!active) continue;
+        expect(active).toMatchObject({
+          outbound: "direct",
+          outboundType: "direct",
+          chainList: ["direct", "Primary route"],
+          inbound: "mixed-in",
+          inboundType: "mixed",
+          network: "tcp",
+          ipVersion: 4,
+        });
+        expect(active.createdAt).toBeGreaterThan(0n);
+        await client.closeConnection({ id: active.id }, { signal });
       }
+      if (!active || !closed) throw new Error("Expected a live native connection close");
+      const { id, chainList, createdAt } = active;
+      expect(closed.closedAt).toBeGreaterThanOrEqual(createdAt);
+      expect(closed.connection).toMatchObject({ id, chainList, createdAt, closedAt: closed.closedAt });
+      await client.closeAllConnections({}, { signal });
+    } finally {
+      s.abort();
+      proxyRequest.destroy();
     }
-    s.abort();
-    if (!active) throw new Error("Expected a native connection");
-    expect(active).toMatchObject({
-      outbound: "direct",
-      outboundType: "direct",
-      chainList: ["direct", "Primary route"],
-      inbound: "mixed-in",
-      inboundType: "mixed",
-      network: "tcp",
-      ipVersion: 4,
-    });
-    expect(active.createdAt).toBeGreaterThan(0n);
-    const { id, chainList, createdAt } = active;
-    await client.closeConnection({ id });
-    // The unary can return before the tracker records the closed row.
-    await expect.poll(async () => {
-      const verify = new AbortController();
-      const signal = AbortSignal.any([verify.signal, AbortSignal.timeout(1000)]);
-      try {
-        const snapshot = await first(client.subscribeConnections({}, { signal }));
-        if (snapshot.done || !snapshot.value.reset) return;
-        const closed = snapshot.value.events.find((event) => event.id === id)?.connection;
-        return closed && closed.closedAt >= createdAt ? closed : undefined;
-      } finally {
-        verify.abort();
-      }
-    }, { timeout: 5000 }).toMatchObject({ chainList, createdAt });
-    await client.closeAllConnections({});
   });
   it("serves production assets and hash routes under /dashboard/ and enforces configured CORS", async () => {
     const html = await fetch(`${endpoint}/dashboard/`);
