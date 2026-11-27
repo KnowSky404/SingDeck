@@ -10,7 +10,7 @@ Validation on 2026-11-27 used Linux x86_64, Bun 1.4.4, official sing-box v1.14.0
 | --- | --- |
 | Frozen install, lint, typecheck, and production build | Pass |
 | Proto and license regeneration | Pass with no generated diff. The pinned schema is unchanged. |
-| Unit tests | 101 pass, including capability discovery, warning retention and redaction, request slot switching, stream recovery, duplicate inventory rows, per-tag latency cooldown, diagnostic terminal semantics, and cancellation. |
+| Unit tests | 111 pass, including capability discovery, warning retention and redaction, request slot switching, recovery action gating, duplicate inventory rows, pending cross-stream latency history, per-tag cooldown, diagnostic terminal semantics, and cancellation. |
 | Official v1.14.0 integration | 12 pass across native SDK, diagnostics and built-in hosting suites. Fixtures used loopback API, HTTP and UDP endpoints, including a local dashboard archive download. No production services were accessed. |
 | Chromium desktop and emulated mobile | 28 pass in the workspace and new Phase 1 suites, including Close all gating while the Connections subscription resumes. Feature interactions use the explicit demo. Four native fixture cases skip in this run because the native binary is excluded. Connection failure and credential persistence checks are separately scoped in the suite. |
 | Chromium with official v1.14.0 | 2 pass in a separate desktop-only run. Covered cross-origin diagnostics and inventory, real selector confirmation, per-tag latency cooldown, navigation and reload under the built-in dashboard, credential behavior and viewport-safe latency feedback. |
@@ -29,7 +29,7 @@ Phase 1 trust checks verified that explicit diagnostics wait for a user action, 
 
 ### Browser performance and rendering
 
-In the final production build, initial HTML-declared JavaScript and CSS, including preloads, grew from 210,795 to 218,330 gzip bytes (+3.57%). Total emitted JavaScript and CSS grew from 330,777 to 354,823 bytes (+7.27%). These totals were measured by compressing each emitted asset separately at gzip level 9 and exclude HTML and fonts. Diagnostics and Configuration Health are lazy routes.
+In the final production build, initial HTML-declared JavaScript and CSS, including preloads, grew from 210,795 to 219,140 gzip bytes (+3.96%). Total emitted JavaScript and CSS grew from 330,777 to 356,392 bytes (+7.74%). These totals were measured by compressing each emitted asset separately at gzip level 9 and exclude HTML and fonts. Diagnostics and Configuration Health are lazy routes.
 
 A prefinal candidate and the `dfb16e8` baseline were measured with Chromium 159 at 1280×800 on a Linux x86_64 2-vCPU workstation, using unthrottled loopback static hosting. The median first animation frame with **Explore demo** visible moved from 197 to 242 ms with a cold cache and from 103 to 103 ms with a warm cache. The click-to-**Connected** and Overview median moved from 471 to 312 ms cold and from 442 to 262 ms warm. Each build had 12 interleaved samples after one warmup. Host workload and timing varied, so these are local observations. Workload, long-run and real network measurements are Phase 5 gates.
 

@@ -5,6 +5,16 @@ export function testedAt(item: GroupItem): Date | undefined {
   if (item.urlTestTime > 0n && Number.isFinite(time.valueOf())) return time;
 }
 
+export function hasFreshLatency(previous: GroupItem, current: GroupItem): boolean {
+  const { urlTestTime, urlTestDelay } = current;
+  return (
+    urlTestDelay >= 0 &&
+    (urlTestTime > previous.urlTestTime ||
+      (urlTestTime === previous.urlTestTime && urlTestDelay !== previous.urlTestDelay)) &&
+    Boolean(testedAt(current))
+  );
+}
+
 export function selectedRoute(
   root: Group,
   groups: ReadonlyMap<string, Group>,
@@ -16,6 +26,135 @@ export function selectedRoute(
     tag = groups.get(tag)?.selected ?? "";
   }
   return [...visited];
+}
+
+type InventoryLatencyHistory = {
+  path: string;
+  item: GroupItem;
+  samples?: GroupItem[];
+  matchesReportedHistory: boolean;
+};
+
+type InventoryLatencyBaseline = {
+  path: string;
+  samples: GroupItem[];
+  reportedSamples: ReadonlyMap<string, GroupItem[]>;
+};
+
+function reportedIdentity({ tag, type }: GroupItem) {
+  return JSON.stringify([tag, type]);
+}
+
+function inventoryHistorySamples(
+  leaf: GroupItem,
+  inventory: ReadonlyMap<string, GroupItem | undefined>,
+  groups: ReadonlyMap<string, Group>,
+) {
+  const aliasesByMember = new Map<string, { group: Group; memberType: string }[]>();
+  for (const group of groups.values()) {
+    const selected = group.items.find(({ tag }) => tag === group.selected);
+    if (!selected) continue;
+    const aliases = aliasesByMember.get(selected.tag) ?? [];
+    aliases.push({ group, memberType: selected.type });
+    aliasesByMember.set(selected.tag, aliases);
+  }
+
+  // Every known alias of the leaf may report a result before its own inventory row.
+  const related = new Map([[leaf.tag, leaf.type]]);
+  for (const [tag, type] of related) {
+    for (const { group, memberType } of aliasesByMember.get(tag) ?? []) {
+      if (memberType === type) related.set(group.tag, group.type);
+    }
+  }
+  const samples: GroupItem[] = [];
+  for (const [tag, type] of related) {
+    const item = inventory.get(tag);
+    if (item?.type === type) samples.push(item);
+  }
+  for (const { items } of groups.values()) {
+    for (const item of items) {
+      const target = related.get(item.tag);
+      if (target === undefined) continue;
+      if (item.type !== target) return;
+      samples.push(item);
+    }
+  }
+  return samples;
+}
+
+export function inventoryLatencyHistory(
+  tag: string,
+  inventory: ReadonlyMap<string, GroupItem | undefined>,
+  groups?: ReadonlyMap<string, Group>,
+): InventoryLatencyHistory | undefined {
+  const reported = inventory.get(tag);
+  if (!reported || !groups) return;
+  const root = groups.get(tag);
+  const route = root ? selectedRoute(root, groups) : [tag];
+  const path: [string, string][] = [];
+  let expectedType = reported.type;
+  for (const member of route) {
+    const item = inventory.get(member);
+    if (!item || item.type !== expectedType) return;
+    path.push([item.tag, item.type]);
+
+    const group = groups.get(member);
+    if (!group) {
+      if (item.type === "selector" || item.type === "urltest") return;
+      const samples = inventoryHistorySamples(item, inventory, groups);
+      return {
+        path: JSON.stringify(path),
+        item,
+        samples,
+        matchesReportedHistory: samples?.every(({ urlTestTime, urlTestDelay }) =>
+          item.urlTestTime === urlTestTime && item.urlTestDelay === urlTestDelay,
+        ) ?? false,
+      };
+    }
+    if (group.type !== item.type) return;
+    const selected = group.items.find(({ tag }) => tag === group.selected);
+    if (!selected) return;
+    expectedType = selected.type;
+  }
+}
+
+export function captureInventoryLatencyHistory(
+  tag: string,
+  inventory: ReadonlyMap<string, GroupItem | undefined>,
+  outbounds: readonly GroupItem[],
+  groups?: ReadonlyMap<string, Group>,
+): InventoryLatencyBaseline | undefined {
+  const history = inventoryLatencyHistory(tag, inventory, groups);
+  if (!history?.samples || !groups) return;
+
+  const reportedSamples = new Map<string, GroupItem[]>();
+  const capture = (item: GroupItem) => {
+    const identity = reportedIdentity(item);
+    const samples = reportedSamples.get(identity) ?? [];
+    samples.push(item);
+    reportedSamples.set(identity, samples);
+  };
+  for (const item of outbounds) capture(item);
+  for (const { items } of groups.values()) {
+    for (const item of items) capture(item);
+  }
+  return { path: history.path, samples: history.samples, reportedSamples };
+}
+
+export function confirmedInventoryLatency(
+  baseline: InventoryLatencyBaseline,
+  observed: InventoryLatencyHistory | undefined,
+  confirmed: boolean,
+): boolean {
+  if (observed && observed.path !== baseline.path) return false;
+  if (confirmed) return true;
+  if (!observed?.matchesReportedHistory || !observed.samples) return false;
+
+  const fresher = (sample: GroupItem) => hasFreshLatency(sample, observed.item);
+  const observedIdentities = new Set(observed.samples.map(reportedIdentity));
+  return baseline.samples.every(fresher) && [...observedIdentities].every((identity) =>
+    baseline.reportedSamples.get(identity)?.every(fresher) ?? true,
+  );
 }
 
 export function latency(item: GroupItem): string {

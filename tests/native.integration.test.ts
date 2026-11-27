@@ -179,7 +179,12 @@ suite("official sing-box 1.14.0 native integration (not mock)", () => {
     });
     session.connect();
     try {
-      await expect.poll(() => session.getSnapshot().phase).toBe("connected");
+      await expect
+        .poll(() => {
+          const { serviceActionsReady, loaded, streamErrors } = session.getSnapshot();
+          return serviceActionsReady && loaded.groups && !streamErrors.groups;
+        })
+        .toBe(true);
       await session.selectOutbound("Primary route", "direct-backup");
       expect(session.getSnapshot().groups?.[0].selected).toBe("direct-backup");
       await expect(

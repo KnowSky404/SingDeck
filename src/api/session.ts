@@ -140,6 +140,7 @@ export class InstanceSession {
   };
   private latencyCooldown = new AbortController();
   private serviceReadsScope?: AbortController;
+  private topologyGeneration = 0;
   private detailScope?: AbortController;
   private inventoryEnabled = false;
   private retainClosedOnResume = false;
@@ -163,6 +164,14 @@ export class InstanceSession {
     private readonly secret = "",
   ) {}
   getSnapshot = () => this.snapshot;
+  getOutboundTopology() {
+    const { groups, outbounds, streamErrors } = this.pending;
+    return {
+      groups: streamErrors.groups ? undefined : groups,
+      outbounds: streamErrors.outbounds ? undefined : outbounds,
+      topologyGeneration: this.topologyGeneration,
+    };
+  }
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => {
@@ -180,7 +189,11 @@ export class InstanceSession {
   private flush() {
     clearTimeout(this.flushTimer);
     this.flushTimer = undefined;
-    this.snapshot = this.pending;
+    this.snapshot = {
+      ...this.pending,
+      serviceActionsReady: this.canRunServiceAction(),
+      topologyGeneration: this.topologyGeneration,
+    };
     this.listeners.forEach((listener) => listener());
   }
   connect = () => {
@@ -196,6 +209,7 @@ export class InstanceSession {
   };
   disconnect = () => {
     this.controller?.abort();
+    this.topologyGeneration++;
     this.streamsStarted = false;
     this.retainClosedOnResume = false;
     this.lastBootMarker = undefined;
@@ -227,13 +241,15 @@ export class InstanceSession {
     return (
       this.pending.phase === "connected" &&
       this.pending.service?.status === ServiceStatus_Type.STARTED &&
-      !this.pending.streamErrors.service
+      !this.pending.streamErrors.service &&
+      !this.revalidation && this.serviceRecoveryGeneration === undefined && !this.checkingBoot
     );
   }
   private interruptDiagnostic() {
     this.diagnosticScope?.abort(new ConnectError("Service interrupted", Code.Unavailable));
   }
   private invalidateServiceReads(keepWarnings = false) {
+    this.topologyGeneration++;
     this.lastBootMarker = undefined;
     this.warningArchive = undefined;
     this.provisionalWarnings = false;
@@ -274,7 +290,10 @@ export class InstanceSession {
   setInventoryEnabled = (enabled: boolean) => {
     if (enabled === this.inventoryEnabled) return;
     this.inventoryEnabled = enabled;
-    if (enabled && this.pending.loaded.connections) this.retainClosedOnResume = true;
+    if (enabled) {
+      this.retainClosedOnResume = (this.retainClosedOnResume || this.pending.loaded.connections === true) &&
+        this.lastBootMarker !== undefined && this.canRunServiceAction();
+    }
     this.detailScope?.abort();
     this.update({
       outbounds: undefined,
@@ -311,10 +330,7 @@ export class InstanceSession {
     void this.probeClashMode(AbortSignal.any([parent, service]));
   }
   get canRefreshWarnings() {
-    return this.pending.phase === "connected" &&
-      this.pending.service?.status === ServiceStatus_Type.STARTED &&
-      !this.pending.streamErrors.service && !this.revalidation && !this.checkingBoot &&
-      this.serviceRecoveryGeneration === undefined;
+    return this.canRunServiceAction();
   }
   refreshWarnings = async () => {
     if (!this.canRefreshWarnings) return;
@@ -566,15 +582,31 @@ export class InstanceSession {
   private releaseBootCheck(parent: AbortSignal, unconfirmed = false) {
     if (!this.checkingBoot) return;
     this.checkingBoot = false;
-    if (unconfirmed && !this.provisionalWarnings) {
-      this.archiveWarnings();
-      this.provisionalWarnings = true;
-      this.update({ startedAt: undefined });
+    if (unconfirmed) {
+      if (!this.provisionalWarnings) {
+        this.archiveWarnings();
+        this.provisionalWarnings = true;
+        this.update({ startedAt: undefined });
+      }
+      this.requireFreshTopology();
     }
+    if (this.warningsScope) this.retryWarningsAfterCurrent = true;
     if (!this.serviceReadsScope) void this.refreshServiceReads(parent);
-    else if (this.warningsScope) this.retryWarningsAfterCurrent = true;
-    else if (this.warningReadNeedsRetry()) void this.refreshWarnings();
+    else if (!this.warningsScope && this.warningReadNeedsRetry()) void this.refreshWarnings();
     this.update({});
+  }
+  private requireFreshTopology() {
+    // The replacement snapshot establishes the connection history after an uncertain gap.
+    this.topologyGeneration++;
+    this.serviceReadsScope?.abort();
+    this.serviceReadsScope = undefined;
+    this.retainClosedOnResume = false;
+    this.update({
+      groups: undefined,
+      outbounds: undefined,
+      loaded: { ...this.pending.loaded, groups: false, outbounds: false, connections: false },
+    });
+    if (!this.inventoryEnabled) this.startDetailStream();
   }
   private archiveWarnings() {
     if (this.pending.warnings)
@@ -741,7 +773,10 @@ export class InstanceSession {
                 // A metadata read started before readiness cannot establish this boot timestamp.
                 this.cancelRevalidation();
                 void this.recoverServiceReads(parentSignal);
-              } else if (recovering) void this.recoverServiceReads(parentSignal);
+              } else if (recovering) {
+                this.requireFreshTopology();
+                void this.recoverServiceReads(parentSignal);
+              }
             } else {
               if (this.pending.service?.status !== service.status) {
                 this.cancelRevalidation();
@@ -836,6 +871,8 @@ export class InstanceSession {
         const capability = streamCapabilities[channel];
         if (capability) this.setCapability(capability, capabilityFailure(error));
         if (channel === "status") this.setCapability("trafficTracking", capabilityFailure(error));
+        if (channel === "status" || channel === "service") this.retainClosedOnResume = false;
+        if (channel === "service") this.topologyGeneration++;
         if (channel === "service" && this.provisionalWarnings) {
           // Only the lifecycle subscription can establish continuity across status reconnects.
           this.archiveWarnings();
@@ -899,6 +936,8 @@ export class InstanceSession {
     const signal = this.signal;
     if (!signal || signal.aborted)
       throw new ConnectError("Disconnected", Code.Canceled);
+    if (!this.canRunServiceAction() || !this.pending.groups || this.pending.streamErrors.groups)
+      throw new ConnectError("Group state unavailable", Code.Unavailable);
     await this.runUnary((options) =>
       this.client.selectOutbound({ groupTag, outboundTag }, options),
     );
@@ -937,6 +976,8 @@ export class InstanceSession {
     });
   };
   urlTest = async (outboundTag: string, signal = this.signal) => {
+    if (!this.canRunServiceAction())
+      throw new ConnectError("Service unavailable", Code.Canceled);
     try {
       await this.runUnary(
         (options) => this.client.uRLTest({ outboundTag }, options),
@@ -1178,11 +1219,15 @@ export class InstanceSession {
       scope.abort();
     }
   }
-  closeConnection = (id: string) =>
-    this.runUnary((options) => this.client.closeConnection({ id }, options));
+  closeConnection = async (id: string) => {
+    if (!this.canRunServiceAction() || !hasCurrentConnections(this.pending))
+      throw new ConnectError("Connection list unavailable", Code.Unavailable);
+    return this.runUnary((options) => this.client.closeConnection({ id }, options));
+  };
   closeAllConnections = async () => {
     const snapshot = this.pending;
-    if (!hasCurrentConnections(snapshot)) throw new CloseAllUnavailable("stale");
+    if (!this.canRunServiceAction() || !hasCurrentConnections(snapshot))
+      throw new CloseAllUnavailable("stale");
     if (!Array.from(snapshot.connections.values()).some(({ closedAt }) => closedAt === 0n))
       throw new CloseAllUnavailable("empty");
     return this.runUnary((options) => this.client.closeAllConnections({}, options));

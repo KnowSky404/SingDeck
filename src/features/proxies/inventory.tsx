@@ -1,4 +1,5 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { Code, ConnectError } from "@connectrpc/connect";
 import { Check, LayoutGrid, List, Search, X, Zap } from "lucide-react";
 import { useWorkspace } from "@/app/context";
 import type { InstanceSession } from "@/api/session";
@@ -7,19 +8,36 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { useAction } from "@/hooks/use-action";
+import type { GroupItem } from "@/proto/daemon/started_service_pb";
 import {
-  type GroupItem,
-  ServiceStatus_Type,
-} from "@/proto/daemon/started_service_pb";
-import { latency, latencyTestWaves, latencyTone, testedAt } from "./latency";
+  captureInventoryLatencyHistory,
+  confirmedInventoryLatency,
+  inventoryLatencyHistory,
+  latency,
+  latencyTestWaves,
+  latencyTone,
+  testedAt,
+} from "./latency";
 import { OutboundDetails } from "./outbound-details";
 
 const pageSize = 60;
 const recentForMs = 5 * 60 * 1000;
 
+function indexInventory(outbounds?: GroupItem[]) {
+  const unique = new Map<string, GroupItem | undefined>();
+  for (const item of outbounds ?? []) {
+    unique.set(item.tag, unique.has(item.tag) ? undefined : item);
+  }
+  return unique;
+}
+
 type SentTest = {
   session: InstanceSession;
+  topologyGeneration: number;
   item: GroupItem;
+  history: ReturnType<typeof captureInventoryLatencyHistory>;
+  acknowledged: boolean;
+  confirmed: boolean;
 };
 
 export function OutboundInventory() {
@@ -52,15 +70,7 @@ export function OutboundInventory() {
     if (type) reported.add(type);
     return [...reported].sort();
   }, [outbounds, type]);
-  const duplicateTags = useMemo(() => {
-    const seen = new Set<string>();
-    const duplicates = new Set<string>();
-    for (const { tag } of outbounds ?? []) {
-      if (seen.has(tag)) duplicates.add(tag);
-      seen.add(tag);
-    }
-    return duplicates;
-  }, [outbounds]);
+  const inventoryByTag = useMemo(() => indexInventory(outbounds), [outbounds]);
   const rows = useMemo(() => {
     const matches = (outbounds ?? [])
       .filter((item) =>
@@ -93,40 +103,79 @@ export function OutboundInventory() {
   const activePage = Math.min(page, Math.max(0, totalPages - 1));
   const pageRows = rows.slice(activePage * pageSize, (activePage + 1) * pageSize);
   const canTest =
-    snapshot.phase === "connected" &&
-    snapshot.service?.status === ServiceStatus_Type.STARTED &&
-    !snapshot.streamErrors.service &&
+    snapshot.serviceActionsReady && snapshot.outbounds !== undefined &&
     !snapshot.streamErrors.outbounds &&
     snapshot.capabilities.urlTest.status !== "unsupported";
   const testing = Boolean(
     snapshot.testingLatencies || snapshot.testingManualLatencies || action.pending,
   );
   const groupsReady = !!groups && !snapshot.streamErrors.groups;
+  const readyGroups = groupsReady ? groupsByTag : undefined;
   const canBatch = canTest && groupsReady && query === normalizedSearch;
   const eligible = useMemo(
     () => rows.filter(({ item }) =>
-      !duplicateTags.has(item.tag) &&
+      inventoryByTag.get(item.tag) &&
       !groupsByTag.has(item.tag) &&
       item.type !== "selector" &&
       item.type !== "urltest",
     ),
-    [duplicateTags, groupsByTag, rows],
+    [inventoryByTag, groupsByTag, rows],
   );
-  const currentSent = sent?.session === session ? sent.item : undefined;
-  const sentResult = currentSent && outbounds?.find(({ tag }) => tag === currentSent.tag);
-  const resultObserved =
-    currentSent && sentResult &&
-    sentResult.urlTestTime > currentSent.urlTestTime &&
-    sentResult.urlTestDelay >= 0 && testedAt(sentResult);
+  const tracked = sent?.session === session &&
+    sent.topologyGeneration === snapshot.topologyGeneration ? sent : undefined;
+  const original = tracked?.history;
+  const canObserve = readyGroups !== undefined && outbounds !== undefined &&
+    !snapshot.streamErrors.outbounds;
+  const observed = useMemo(
+    () => original && tracked && canObserve
+      ? inventoryLatencyHistory(tracked.item.tag, inventoryByTag, readyGroups)
+      : undefined,
+    [original, tracked, canObserve, inventoryByTag, readyGroups],
+  );
+  const pathChanged = original && canObserve && observed?.path !== original.path;
+  const resultObserved = tracked && original && !pathChanged &&
+    confirmedInventoryLatency(original, canTest ? observed : undefined, tracked.confirmed);
+  if (tracked && original) {
+    if (pathChanged) setSent({ ...tracked, history: undefined, confirmed: false });
+    else if (!tracked.confirmed && resultObserved) setSent({ ...tracked, confirmed: true });
+  }
+  const currentSent = tracked?.acknowledged ? tracked.item : undefined;
   const capability = snapshot.capabilities.outboundInventory;
 
   async function test(item: GroupItem) {
-    setSent(undefined);
-    const windows = latencyTestWaves(groupsByTag, item.tag)[0].windows;
-    const acknowledged = await action.run(() =>
-      session.testLatency(item.tag, windows, "outbounds"),
+    let dispatched = false;
+    const acknowledged = await action.run(() => {
+      setSent(undefined);
+      const topology = session.getOutboundTopology();
+      const inventory = indexInventory(topology.outbounds);
+      const currentGroups = new Map(topology.groups?.map((group) => [group.tag, group]));
+      const isGroup = item.type === "selector" || item.type === "urltest";
+      if (inventory.get(item.tag)?.type !== item.type || (isGroup && !currentGroups.has(item.tag)))
+        throw new ConnectError("Outbound topology changed", Code.Canceled);
+      const history = captureInventoryLatencyHistory(
+        item.tag,
+        inventory,
+        topology.outbounds ?? [],
+        topology.groups ? currentGroups : undefined,
+      );
+      const windows = latencyTestWaves(currentGroups, item.tag)[0].windows;
+      setSent({
+        session,
+        topologyGeneration: topology.topologyGeneration,
+        item,
+        history,
+        acknowledged: false,
+        confirmed: false,
+      });
+      dispatched = true;
+      return session.testLatency(item.tag, windows, "outbounds");
+    });
+    if (!dispatched) return;
+    setSent((current) =>
+      current?.session === session && current.item === item
+        ? (acknowledged ? { ...current, acknowledged } : undefined)
+        : current,
     );
-    if (acknowledged) setSent({ session, item });
   }
 
   return (
@@ -218,7 +267,7 @@ export function OutboundInventory() {
           {t(
             resultObserved
               ? "Fresh latency observed for {name}."
-              : snapshot.testingManualLatencies?.has(currentSent.tag)
+              : original && snapshot.testingManualLatencies?.has(currentSent.tag)
                 ? "Test requested for {name}. Waiting for new latency history."
                 : "Test requested for {name}. A new result could not be confirmed.",
             { name: session.redactText(currentSent.tag) },
@@ -237,7 +286,7 @@ export function OutboundInventory() {
               className={view === "cards" ? "proxy-items proxy-cards" : "proxy-items"}
             >
               {pageRows.map(({ item, index, measuredAt }) => {
-                const duplicate = duplicateTags.has(item.tag);
+                const duplicate = !inventoryByTag.get(item.tag);
                 const group = duplicate ? undefined : groupsByTag.get(item.tag);
                 const selected = !duplicate && selectedTags.has(item.tag);
                 const isGroup = group || item.type === "selector" || item.type === "urltest";

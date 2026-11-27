@@ -12,6 +12,7 @@ import {
   ConnectionEventsSchema,
   ConnectionEventType,
   DeprecatedWarningsSchema,
+  GroupsSchema,
   NetworkQualityTestProgressSchema,
   ServiceStatusSchema,
   ServiceStatus_Type,
@@ -152,29 +153,33 @@ describe("native diagnostic state", () => {
     expect(session.getSnapshot().capabilities.deprecatedWarnings.status).toBe("supported");
   });
 
-  it("keeps previously observed closed rows when resuming the same core", async () => {
+  it("keeps previously observed closed rows across rapid view changes on the same core", async () => {
     const client = createMockClient();
-    const subscribe = vi.spyOn(client, "subscribeConnections");
-    for (const rows of [
-      [{ id: "old-closed", closedAt: 5n }, { id: "old-active", closedAt: 0n }],
-      [{ id: "new-closed", closedAt: 8n }, { id: "new-active", closedAt: 0n }],
-    ]) {
-      subscribe.mockImplementationOnce(async function* (_, options) {
-        yield create(ConnectionEventsSchema, {
-          reset: true,
-          events: rows.map((connection) => ({
-            id: connection.id,
-            type: ConnectionEventType.CONNECTION_EVENT_NEW,
-            connection,
-          })),
-        });
-        await delay(60_000, options!.signal!);
+    let reads = 0;
+    vi.spyOn(client, "subscribeConnections").mockImplementation(async function* (_, options) {
+      const signal = options!.signal!;
+      const first = ++reads === 1;
+      if (!first) await delay(100, signal);
+      const rows = first
+        ? [{ id: "old-closed", closedAt: 5n }, { id: "old-active", closedAt: 0n }]
+        : [{ id: "new-closed", closedAt: 8n }, { id: "new-active", closedAt: 0n }];
+      yield create(ConnectionEventsSchema, {
+        reset: true,
+        events: rows.map((connection) => ({
+          id: connection.id,
+          type: ConnectionEventType.CONNECTION_EVENT_NEW,
+          connection,
+        })),
       });
-    }
+      await delay(60_000, signal);
+    });
     const session = await connect(client);
     session.setInventoryEnabled(false);
     await vi.advanceTimersByTimeAsync(200);
     expect([...session.getSnapshot().connections.keys()]).toEqual(["old-closed", "old-active"]);
+    session.setInventoryEnabled(true);
+    session.setInventoryEnabled(false);
+    await vi.advanceTimersByTimeAsync(20);
     session.setInventoryEnabled(true);
     session.setInventoryEnabled(false);
     await vi.advanceTimersByTimeAsync(200);
@@ -445,6 +450,91 @@ describe("native diagnostic state", () => {
     expect(session.getSnapshot().startedAt).toBeGreaterThan(0n);
   });
 
+  it("holds core actions until lifecycle recovery verifies compatibility", async () => {
+    const client = createMockClient();
+    const version = create(VersionSchema, { version: "1.14.0", apiVersion: 4 });
+    vi.spyOn(client, "getVersion")
+      .mockResolvedValueOnce(version)
+      .mockResolvedValueOnce(version)
+      .mockImplementation(async (_, options) => {
+        await delay(600, options!.signal!);
+        return create(VersionSchema, { version: "1.14.0", apiVersion: 5 });
+      });
+    vi.spyOn(client, "subscribeServiceStatus").mockImplementationOnce(async function* (_, options) {
+      yield create(ServiceStatusSchema, { status: ServiceStatus_Type.STARTED });
+      await delay(500, options!.signal!);
+      throw new ConnectError("Lifecycle interrupted", Code.Unavailable);
+    });
+    const test = vi.spyOn(client, "uRLTest");
+    const select = vi.spyOn(client, "selectOutbound");
+    const close = vi.spyOn(client, "closeConnection");
+    const closeAll = vi.spyOn(client, "closeAllConnections");
+    const stun = vi.spyOn(client, "startSTUNTest");
+    const session = await connect(client);
+    session.setInventoryEnabled(false);
+    expect(session.getSnapshot().serviceActionsReady).toBe(true);
+    await vi.advanceTimersByTimeAsync(1450);
+    const snapshot = session.getSnapshot();
+    expect(snapshot).toMatchObject({ phase: "connected", serviceActionsReady: false });
+    expect(snapshot.streamErrors.service).toBeUndefined();
+    expect(snapshot.loaded.connections).toBe(true);
+    expect([...snapshot.connections.values()].some(({ closedAt }) => closedAt === 0n)).toBe(true);
+    await expect(session.testLatency("Direct", 1)).rejects.toMatchObject({ code: Code.Canceled });
+    await expect(session.selectOutbound("Primary route", "Direct")).rejects.toMatchObject({ code: Code.Unavailable });
+    await expect(session.closeConnection("active")).rejects.toMatchObject({ code: Code.Unavailable });
+    await expect(session.closeAllConnections()).rejects.toThrow("Wait for the connection list to refresh");
+    await expect(session.runSTUN({}, new AbortController().signal, vi.fn())).rejects.toMatchObject({ code: Code.Canceled });
+    expect(test).not.toHaveBeenCalled();
+    expect(select).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+    expect(closeAll).not.toHaveBeenCalled();
+    expect(stun).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(600);
+    expect(session.getSnapshot().error).toContain("Unsupported API");
+  });
+
+  it.each([
+    ["confirmed restart", 400, 2n],
+    ["unavailable timestamp", 1050, undefined],
+  ] as const)("waits for fresh groups after recovery with %s", async (_, wait, marker) => {
+    const client = createMockClient();
+    vi.spyOn(client, "getStartedAt")
+      .mockResolvedValueOnce(create(StartedAtSchema, { startedAt: 1n }))
+      .mockImplementation(async (_, options) => {
+        if (marker === undefined) throw new ConnectError("Timestamp unavailable", Code.Unavailable);
+        await delay(400, options!.signal!);
+        return create(StartedAtSchema, { startedAt: marker });
+      });
+    vi.spyOn(client, "subscribeServiceStatus").mockImplementationOnce(async function* (_, options) {
+      yield create(ServiceStatusSchema, { status: ServiceStatus_Type.STARTED });
+      await delay(500, options!.signal!);
+      throw new ConnectError("Lifecycle interrupted", Code.Unavailable);
+    });
+    vi.spyOn(client, "subscribeGroups")
+      .mockImplementationOnce(async function* (_, options) {
+        yield create(GroupsSchema);
+        await delay(60_000, options!.signal!);
+      })
+      .mockImplementation(async function* (_, options) {
+        await delay(800, options!.signal!);
+        yield create(GroupsSchema);
+        await delay(60_000, options!.signal!);
+      });
+    const test = vi.spyOn(client, "uRLTest");
+    const session = await connect(client);
+    await vi.advanceTimersByTimeAsync(1450);
+    expect(session.getSnapshot().serviceActionsReady).toBe(false);
+    expect(session.getSnapshot().groups).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(wait);
+    expect(session.getSnapshot().startedAt).toBe(marker);
+    expect(session.getSnapshot().groups).toBeUndefined();
+    await expect(session.testLatency("Direct", 1)).rejects.toMatchObject({ code: Code.Canceled });
+    expect(test).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(900);
+    expect(session.getSnapshot().serviceActionsReady).toBe(true);
+    expect(session.getSnapshot().groups).toBeDefined();
+  });
+
   it("retries transient boot timestamp failures within the current generation", async () => {
     const client = createMockClient();
     const startedAt = vi.spyOn(client, "getStartedAt")
@@ -581,12 +671,12 @@ describe("native diagnostic state", () => {
     expect(session.getSnapshot().startedAt).toBeUndefined();
     expect(session.canRefreshWarnings).toBe(true);
     expect(warnings).toHaveBeenCalledTimes(2);
-    expect(connections).toHaveBeenCalledTimes(1);
+    expect(connections).toHaveBeenCalledTimes(2);
     expect(session.getSnapshot().connections.get("mock-closed-1")?.closedAt).toBeGreaterThan(0n);
     await vi.advanceTimersByTimeAsync(1800);
     expect(startedAt).toHaveBeenCalledTimes(4);
     expect(session.getSnapshot().startedAt).toBe(2n);
-    expect(connections).toHaveBeenCalledTimes(2);
+    expect(connections).toHaveBeenCalledTimes(3);
     expect(session.getSnapshot().groups?.length).toBeGreaterThan(0);
     expect(session.getSnapshot().warnings).toBeDefined();
     expect(warnings).toHaveBeenCalledTimes(2);
@@ -708,15 +798,80 @@ describe("native diagnostic state", () => {
       await delay(1700, options!.signal!);
       throw unavailable;
     });
+    const subscribeGroups = client.subscribeGroups;
+    const groups = vi.spyOn(client, "subscribeGroups")
+      .mockImplementationOnce(subscribeGroups)
+      .mockImplementationOnce(subscribeGroups)
+      .mockImplementation(async function* (_, options) {
+        await delay(600, options!.signal!);
+        yield create(GroupsSchema);
+        await delay(60_000, options!.signal!);
+      });
     const session = await connect(client);
     await vi.advanceTimersByTimeAsync(1100);
     expect(session.getSnapshot().startedAt).toBeUndefined();
     expect(warnings).toHaveBeenCalledTimes(1);
-    await vi.advanceTimersByTimeAsync(3100);
+    expect(session.getSnapshot().groups).toBeDefined();
+    await vi.advanceTimersByTimeAsync(1600);
     expect(session.getSnapshot().startedAt).toBe(2n);
+    expect(groups).toHaveBeenCalledTimes(3);
+    expect(session.getSnapshot().groups).toBeUndefined();
+    await expect(session.testLatency("Direct", 1)).rejects.toMatchObject({ code: Code.Canceled });
+    await vi.advanceTimersByTimeAsync(1500);
     expect(session.getSnapshot().checkingWarnings).toBe(false);
     expect(session.getSnapshot().warnings).toMatchObject([{ message: "Current boot" }]);
     expect(warnings).toHaveBeenCalledTimes(2);
+    expect(session.getSnapshot().groups).toBeDefined();
+  });
+
+  it("refreshes topology when the first confirmed marker arrives during a lifecycle gap", async () => {
+    const client = createMockClient();
+    const unavailable = new ConnectError("Temporarily unavailable", Code.Unavailable);
+    vi.spyOn(client, "getStartedAt")
+      .mockRejectedValueOnce(unavailable)
+      .mockRejectedValueOnce(unavailable)
+      .mockResolvedValue(create(StartedAtSchema, { startedAt: 2n }));
+    vi.spyOn(client, "subscribeServiceStatus").mockImplementationOnce(async function* (_, options) {
+      yield create(ServiceStatusSchema, { status: ServiceStatus_Type.STARTED });
+      await delay(2400, options!.signal!);
+      throw unavailable;
+    });
+    const subscribeGroups = client.subscribeGroups;
+    const groups = vi.spyOn(client, "subscribeGroups")
+      .mockImplementationOnce(subscribeGroups)
+      .mockImplementationOnce(subscribeGroups)
+      .mockImplementation(async function* (_, options) {
+        await delay(800, options!.signal!);
+        yield create(GroupsSchema);
+        await delay(60_000, options!.signal!);
+      });
+    let connectionSubscriptions = 0;
+    vi.spyOn(client, "subscribeConnections").mockImplementation(async function* (_, options) {
+      const events = ++connectionSubscriptions < 3
+        ? [{ id: "previous-closed", connection: { id: "previous-closed", closedAt: 1n } }]
+        : [];
+      yield create(ConnectionEventsSchema, { reset: true, events });
+      await delay(60_000, options!.signal!);
+    });
+    const session = await connect(client);
+    session.setInventoryEnabled(false);
+    await vi.advanceTimersByTimeAsync(1500);
+    const beforeGap = session.getSnapshot().topologyGeneration;
+    await vi.advanceTimersByTimeAsync(1600);
+    expect(session.getSnapshot().startedAt).toBe(2n);
+    expect(session.getSnapshot().topologyGeneration).toBeGreaterThan(beforeGap);
+    expect(session.getSnapshot().streamErrors.service).toBeDefined();
+    expect(groups).toHaveBeenCalledTimes(2);
+    expect(session.getSnapshot().connections.has("previous-closed")).toBe(true);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(session.getSnapshot().streamErrors.service).toBeUndefined();
+    expect(session.getSnapshot().groups).toBeUndefined();
+    expect(groups).toHaveBeenCalledTimes(3);
+    expect(connectionSubscriptions).toBe(3);
+    expect(session.getSnapshot().connections.has("previous-closed")).toBe(false);
+    await expect(session.testLatency("Direct", 1)).rejects.toMatchObject({ code: Code.Canceled });
+    await vi.advanceTimersByTimeAsync(900);
+    expect(session.getSnapshot().groups).toBeDefined();
   });
 
   it("keeps ownership of an in-flight new warning read across restart confirmation", async () => {
