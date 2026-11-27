@@ -471,7 +471,6 @@ export default function Connections() {
       </Dialog>
       <ConnectionInspector
         connectionId={detailId}
-        dateFormat={startTimeFormat}
         onClose={() => setDetailId(null)}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
