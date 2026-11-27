@@ -63,13 +63,20 @@ const trafficColumns = [
   { key: "uplinkTotal", label: "Upload" },
   { key: "downlinkTotal", label: "Download" },
 ] as const;
-const sortColumns = [{ key: "createdAt", label: "Start time" }, ...trafficColumns] as const;
+const closedTimeColumn = { key: "closedAt", label: "Closed at" } as const;
+const sortColumns = [
+  { key: "createdAt", label: "Start time" },
+  closedTimeColumn,
+  ...trafficColumns,
+] as const;
 const optionalColumns = [
   { key: "network", label: "Network" },
   { key: "outbound", label: "Outbound" },
+  closedTimeColumn,
   ...trafficColumns,
 ] as const;
 type OptionalColumn = (typeof optionalColumns)[number]["key"];
+const defaultHiddenColumns: ReadonlySet<OptionalColumn> = new Set(["closedAt"]);
 const advancedTextFilters = [
   ["inbound", "Inbound"],
   ["protocol", "Protocol"],
@@ -84,7 +91,7 @@ type ConnectionSort = {
 };
 const defaultSort: ConnectionSort = { column: "createdAt", direction: "descending" };
 
-function hasStartTime(timestamp: bigint) {
+function hasConnectionTime(timestamp: bigint) {
   return timestamp > 0n && timestamp <= 8_640_000_000_000_000n;
 }
 
@@ -95,8 +102,10 @@ export default function Connections({ onInspectOutbound }: {
   const [filters, setFilters] = useState(defaultConnectionFilters);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState(defaultSort);
-  const [hiddenColumns, setHiddenColumns] = useState<ReadonlySet<OptionalColumn>>(() => new Set());
+  const [hiddenColumns, setHiddenColumns] = useState(defaultHiddenColumns);
   const [page, setPage] = useState(0);
+  const closedView = filters.status === "closed";
+  const showClosedTime = closedView && !hiddenColumns.has("closedAt");
   const startTimeFormat = useMemo(
     () =>
       new Intl.DateTimeFormat(language, {
@@ -106,6 +115,26 @@ export default function Connections({ onInspectOutbound }: {
       }),
     [language],
   );
+  const closedTimeFormat = useMemo(() => {
+    if (!showClosedTime) return null;
+    return new Intl.DateTimeFormat(language, {
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      fractionalSecondDigits: 3,
+      hour12: false,
+    });
+  }, [language, showClosedTime]);
+
+  function resetSortForColumn(column: OptionalColumn) {
+    if (sort.column !== column) return;
+    setSort(defaultSort);
+    setPage(0);
+  }
+
   function setColumnVisible(column: OptionalColumn, visible: boolean) {
     setHiddenColumns((current) => {
       const next = new Set(current);
@@ -113,10 +142,7 @@ export default function Connections({ onInspectOutbound }: {
       else next.add(column);
       return next;
     });
-    if (!visible && sort.column === column) {
-      setSort(defaultSort);
-      setPage(0);
-    }
+    if (!visible) resetSortForColumn(column);
   }
   const { outbound } = filters;
   const outbounds = useMemo(
@@ -146,11 +172,16 @@ export default function Connections({ onInspectOutbound }: {
         .filter(connectionMatcher(filters, query))
         .sort((a, b) => {
           const missing =
-            Number(hasStartTime(b.createdAt)) -
-            Number(hasStartTime(a.createdAt));
+            Number(hasConnectionTime(b.createdAt)) -
+            Number(hasConnectionTime(a.createdAt));
           if (sort.column === "createdAt" && missing) return missing;
-          if (a[sort.column] !== b[sort.column]) {
-            const order = a[sort.column] < b[sort.column] ? -1 : 1;
+          const aValue = a[sort.column];
+          const bValue = b[sort.column];
+          const aRecorded = sort.column !== "closedAt" || hasConnectionTime(aValue);
+          const bRecorded = sort.column !== "closedAt" || hasConnectionTime(bValue);
+          if (aRecorded !== bRecorded) return aRecorded ? -1 : 1;
+          if (aRecorded && aValue !== bValue) {
+            const order = aValue < bValue ? -1 : 1;
             return sort.direction === "ascending" ? order : -order;
           }
           const newestFirst = b.createdAt - a.createdAt;
@@ -187,6 +218,7 @@ export default function Connections({ onInspectOutbound }: {
   const result = batchResult?.session === session ? batchResult.result : undefined;
 
   function updateFilter<Key extends keyof ConnectionFilters>(key: Key, value: ConnectionFilters[Key]) {
+    if (key === "status" && value !== "closed") resetSortForColumn("closedAt");
     setFilters((previous) => ({ ...previous, [key]: value }));
     setPage(0);
   }
@@ -310,6 +342,7 @@ export default function Connections({ onInspectOutbound }: {
           <Button
             variant="ghost"
             onClick={() => {
+              resetSortForColumn("closedAt");
               setFilters(defaultConnectionFilters);
               setSearch("");
               setPage(0);
@@ -393,7 +426,7 @@ export default function Connections({ onInspectOutbound }: {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuGroup>
-                {optionalColumns.map(({ key, label }) => (
+                {optionalColumns.filter(({ key }) => key !== "closedAt" || closedView).map(({ key, label }) => (
                   <DropdownMenuCheckboxItem
                     key={key}
                     checked={!hiddenColumns.has(key)}
@@ -406,7 +439,13 @@ export default function Connections({ onInspectOutbound }: {
               </DropdownMenuGroup>
               <DropdownMenuSeparator />
               <DropdownMenuGroup>
-                <DropdownMenuItem disabled={hiddenColumns.size === 0} onSelect={() => setHiddenColumns(new Set())}>
+                <DropdownMenuItem
+                  disabled={hiddenColumns.size === 1 && hiddenColumns.has("closedAt")}
+                  onSelect={() => {
+                    setHiddenColumns(defaultHiddenColumns);
+                    resetSortForColumn("closedAt");
+                  }}
+                >
                   {t("Reset columns")}
                 </DropdownMenuItem>
               </DropdownMenuGroup>
@@ -416,7 +455,7 @@ export default function Connections({ onInspectOutbound }: {
       >
         <ChannelState channel="connections" empty={!rows.length}>
           <div className="connection-table-wrap">
-            <table className="connection-table">
+            <table className="connection-table" data-closed-time={showClosedTime || undefined}>
               <thead>
                 <tr>
                   <th scope="col">{t("Destination")}</th>
@@ -425,6 +464,7 @@ export default function Connections({ onInspectOutbound }: {
                   <th scope="col">{t("Status")}</th>
                   {sortColumns.map(({ key, label }) => {
                     if (key !== "createdAt" && hiddenColumns.has(key)) return null;
+                    if (key === "closedAt" && !showClosedTime) return null;
                     const direction =
                       sort.column === key ? sort.direction : undefined;
                     const Icon =
@@ -468,8 +508,11 @@ export default function Connections({ onInspectOutbound }: {
               </thead>
               <tbody>
                 {visible.map((c) => {
-                  const started = hasStartTime(c.createdAt)
+                  const started = hasConnectionTime(c.createdAt)
                     ? new Date(Number(c.createdAt))
+                    : null;
+                  const closed = closedTimeFormat && hasConnectionTime(c.closedAt)
+                    ? new Date(Number(c.closedAt))
                     : null;
                   return (
                     <tr key={c.id}>
@@ -499,6 +542,11 @@ export default function Connections({ onInspectOutbound }: {
                         </Badge>
                       </td>
                       <td className="connection-time">
+                        {showClosedTime && (
+                          <div className="connection-time-label" aria-hidden="true">
+                            {t("Start time")}
+                          </div>
+                        )}
                         {started ? (
                           <time dateTime={started.toISOString()}>
                             {startTimeFormat.format(started)}
@@ -507,6 +555,18 @@ export default function Connections({ onInspectOutbound }: {
                           "—"
                         )}
                       </td>
+                      {closedTimeFormat && (
+                        <td className="connection-time">
+                          <div className="connection-time-label" aria-hidden="true">
+                            {t("Closed at")}
+                          </div>
+                          {closed ? (
+                            <time dateTime={closed.toISOString()}>
+                              {closedTimeFormat.format(closed)}
+                            </time>
+                          ) : "—"}
+                        </td>
+                      )}
                       {!hiddenColumns.has("uplinkTotal") && (
                         <td className="connection-upload">{bytes(c.uplinkTotal)}</td>
                       )}

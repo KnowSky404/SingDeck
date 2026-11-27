@@ -241,3 +241,112 @@ test("configures connection columns by keyboard and keeps a visible sort", async
   await expect(menu).toBeHidden();
   await expectLayout(allColumns);
 });
+
+test("shows and sorts exact close times only in Closed history", async ({ page, isMobile }) => {
+  if (isMobile) await page.setViewportSize({ width: 320, height: 740 });
+  const firstClose = new Date("2025-03-14T13:00:00.123Z");
+  const secondClose = new Date(firstClose.getTime() + 1);
+  await page.clock.setFixedTime(new Date(firstClose.getTime() - 5000));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Explore demo", exact: true }).click();
+  await page.getByRole("link", { name: "Connections", exact: true }).first().click();
+
+  const table = page.locator(".connection-table");
+  const details = (id: string) => page.getByRole("button", { name: `Details for ${id}`, exact: true });
+  const comparedRows = table.locator("tbody tr").filter({
+    has: page.getByRole("button", { name: /^Details for mock-[12]$/ }),
+  });
+  const expectOrder = async (ids: string[]) => {
+    await expect(comparedRows).toHaveCount(ids.length);
+    for (const [index, id] of ids.entries()) {
+      await expect(comparedRows.nth(index).getByRole("button", { name: `Details for ${id}`, exact: true })).toBeVisible();
+    }
+  };
+  const expectSort = (label: string, direction = "descending") =>
+    expect(table.locator(`thead th[aria-sort="${direction}"]`)).toHaveText(label);
+  const closedAt = table.getByRole("button", { name: "Closed at", exact: true });
+  const columns = page.getByRole("button", { name: "Columns", exact: true });
+  const menu = page.getByRole("menu");
+  const closedOption = menu.getByRole("menuitemcheckbox", { name: "Closed at", exact: true });
+  const chooseStatus = async (name: string) => {
+    await page.getByRole("combobox", { name: "Status filter", exact: true }).click();
+    await page.getByRole("option", { name, exact: true }).click();
+  };
+  const closeMenu = async () => {
+    await page.keyboard.press("Escape");
+    await expect(columns).toBeFocused();
+  };
+  const toggleClosedColumn = async () => {
+    await columns.press("Enter");
+    await closedOption.press("Enter");
+    await closeMenu();
+  };
+  const resetColumns = async () => {
+    await columns.press("Enter");
+    await menu.getByRole("menuitem", { name: "Reset columns", exact: true }).press("Enter");
+  };
+
+  await expectOrder(["mock-1", "mock-2"]);
+  await columns.press("Enter");
+  await expect(menu).toBeVisible();
+  await expect(closedOption).toHaveCount(0);
+  await closeMenu();
+  for (const [id, time] of [["mock-1", firstClose], ["mock-2", secondClose]] as const) {
+    await page.clock.setFixedTime(time);
+    await page.getByRole("button", { name: `Close ${id}`, exact: true }).click();
+    await expect(details(id)).toHaveCount(0);
+  }
+
+  await chooseStatus("Closed");
+  await expectSort("Start time");
+  await expectOrder(["mock-1", "mock-2"]);
+  await expect(closedAt).toHaveCount(0);
+  await columns.press("Enter");
+  await expect(closedOption).toHaveAttribute("aria-checked", "false");
+  await closedOption.press("Enter");
+  await expect(closedOption).toHaveAttribute("aria-checked", "true");
+  await closeMenu();
+  const closeColumnIndex = await closedAt.locator("..").evaluate((cell: HTMLTableCellElement) => cell.cellIndex);
+  for (const [id, time] of [["mock-1", firstClose], ["mock-2", secondClose]] as const) {
+    const cell = comparedRows.filter({ has: details(id) }).locator("td").nth(closeColumnIndex);
+    await expect(cell.locator("time")).toHaveAttribute("datetime", time.toISOString());
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    (await page.viewportSize())!.width,
+  );
+
+  await closedAt.press("Enter");
+  await expectSort("Closed at");
+  await expectOrder(["mock-2", "mock-1"]);
+  await closedAt.press("Enter");
+  await expectSort("Closed at", "ascending");
+  await expectOrder(["mock-1", "mock-2"]);
+
+  await toggleClosedColumn();
+  await expect(closedAt).toHaveCount(0);
+  await expectSort("Start time");
+  await toggleClosedColumn();
+  await closedAt.press("Enter");
+  await resetColumns();
+  await expect(closedAt).toHaveCount(0);
+  await expectSort("Start time");
+
+  await toggleClosedColumn();
+  await table.getByRole("button", { name: "Upload", exact: true }).press("Enter");
+  await resetColumns();
+  await expect(closedAt).toHaveCount(0);
+  await expectSort("Upload");
+
+  await toggleClosedColumn();
+  await closedAt.press("Enter");
+  await chooseStatus("All statuses");
+  await expect(closedAt).toHaveCount(0);
+  await expectSort("Start time");
+  await columns.press("Enter");
+  await expect(menu).toBeVisible();
+  await expect(closedOption).toHaveCount(0);
+  await closeMenu();
+  await chooseStatus("Closed");
+  await expect(closedAt).toBeVisible();
+  await expectSort("Start time");
+});

@@ -68,6 +68,10 @@ At `ccb84bd`, official sing-box 1.14.0/API 4 and Chromium 159.0.8154.6 observed 
 
 In a separate controlled connection with the same build and core, an explicit inbound rule selected an outer group, an inner group and a direct leaf. The native chain ran from leaf to inner to outer, and native `outbound` identified the leaf. Inspector showed Inbound, Matched rule, Outbound chain in outer-to-leaf order, and Destination. The Outbound field identified the leaf. The core omitted `fromOutbound`, so the field displayed Unavailable. The exact rule matched one row, a different rule matched none, and clearing restored the row without opening another browser subscription.
 
+### Closed connection history
+
+The **Closed** view offers an optional **Closed at** column with millisecond precision. It starts hidden, and the default remains **Start time** descending. In Chromium 159.0.8154.6 using the official 1.14.0/API 4 built-in dashboard in a loopback-only namespace, two real connections closed in reverse creation order, 146 ms apart within the same second. Both rendered timestamps matched the native milliseconds, and both close-time sort directions gave the expected order. Hiding or resetting the column, selecting **All statuses**, and clearing filters each restored the default from the close-time sort. The browser used one live Connections subscription throughout. Desktop and 320px mobile Demo coverage separately verified keyboard controls and records with close times 1 ms apart.
+
 ## Phase 2 — Native notifications
 
 At `ccb84bd`, Chromium 159.0.8154.6 used a source-built `v1.14.0` fixture with a synthetic in-process producer. The upstream daemon observer and authenticated gRPC-Web served the notifications page in an isolated loopback-only namespace. A wrong Bearer was rejected. The browser kept two events with the same identifier and different types separate. A type-mismatched cancel affected neither. A matching cancel marked only its target canceled and read, and the other item remained unread.

@@ -1094,6 +1094,9 @@ h3 {
 .connection-time {
   white-space: nowrap;
 }
+.connection-time-label {
+  display: none;
+}
 .connection-table td {
   padding: 15px 12px;
   border-bottom: 1px solid var(--border);
@@ -1535,6 +1538,10 @@ h3 {
     grid-auto-columns: minmax(0, 1fr);
     gap: 4px;
   }
+  .connection-table[data-closed-time] thead tr {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-flow: row;
+  }
   .connection-table thead th:not(.connection-sort) {
     position: absolute;
     clip-path: inset(50%);
@@ -1577,6 +1584,11 @@ h3 {
   .connection-time {
     white-space: normal;
     overflow-wrap: anywhere;
+  }
+  .connection-time-label {
+    display: block;
+    color: var(--muted-foreground);
+    font-size: 10px;
   }
   .connection-upload::before {
     content: "↑ ";
