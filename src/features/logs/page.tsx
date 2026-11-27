@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useRef, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Download, Pause, Play, Search, Trash2 } from "lucide-react";
 import { useWorkspace } from "@/app/context";
 import { hasCurrentLogs, LOG_LIMIT, type LogEntry } from "@/api/state";
@@ -29,6 +29,8 @@ import { LogLevel } from "@/proto/daemon/started_service_pb";
 import { levelName } from "@/lib/format";
 import { useAction } from "@/hooks/use-action";
 
+const logPageSize = 200;
+
 export default function Logs() {
   const { snapshot, session, t } = useWorkspace();
   const [search, setSearch] = useState(""),
@@ -36,23 +38,38 @@ export default function Logs() {
     [source, setSource] = useState("all"),
     [autoScroll, setAutoScroll] = useState(true);
   const [paused, setPaused] = useState<LogEntry[] | null>(null);
+  const [requestedPage, setLogPage] = useState(0);
   const [feedback, setFeedback] = useState("");
   const [confirmClear, setConfirmClear] = useState(false);
   const coreClear = useAction();
   const canClearCore = hasCurrentLogs(snapshot) && !coreClear.pending;
   const viewport = useRef<HTMLDivElement>(null);
   const query = useDeferredValue(search.toLowerCase());
-  const entries = (paused ?? snapshot.logs).filter(
-    (log) =>
-      (level === "all" || log.level <= Number(level)) &&
-      log.text.toLowerCase().includes(query) &&
-      (source === "all" || logSource(log.text) === source),
-  );
-  const endId = entries.at(-1)?.id;
+  const logs = paused ?? snapshot.logs;
+  const entries = useMemo(() => {
+    const threshold = level === "all" ? Infinity : Number(level);
+    return logs.filter(
+      (log) =>
+        log.level <= threshold &&
+        (!query || log.text.toLowerCase().includes(query)) &&
+        (source === "all" || logSource(log.text) === source),
+    );
+  }, [logs, level, query, source]);
+  const logPage = Math.min(requestedPage, Math.max(0, Math.ceil(entries.length / logPageSize) - 1));
+  const pageEnd = entries.length - logPage * logPageSize;
+  const pageStart = Math.max(0, pageEnd - logPageSize);
+  const visibleEntries = entries.slice(pageStart, pageEnd);
+  const endId = visibleEntries.at(-1)?.id;
   useEffect(() => {
     if (autoScroll && !paused && viewport.current)
       viewport.current.scrollTop = viewport.current.scrollHeight;
   }, [endId, autoScroll, paused]);
+  function showLogPage(page: number) {
+    // Hold the current buffer so incoming logs cannot move the rows being read.
+    if (!paused && page > 0) setPaused(logs);
+    setLogPage(page);
+    if (viewport.current) viewport.current.scrollTop = 0;
+  }
   const text = () =>
     entries
       .map(
@@ -83,6 +100,7 @@ export default function Logs() {
     if (await coreClear.run(session.clearCoreLogs)) {
       setConfirmClear(false);
       setPaused(null);
+      setLogPage(0);
       setFeedback("Core log buffer clear requested.");
     }
   }
@@ -96,13 +114,19 @@ export default function Logs() {
             aria-label={t("Search logs")}
             placeholder={t("Search log messages…")}
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setLogPage(0);
+            }}
           />
         </div>
         <Choice
           label={t("Log level")}
           value={level}
-          onChange={setLevel}
+          onChange={(value) => {
+            setLevel(value);
+            setLogPage(0);
+          }}
           options={[
             { value: "all", label: t("All levels") },
             ...Array.from({ length: 7 }, (_, i) => ({
@@ -114,7 +138,10 @@ export default function Logs() {
         <Choice
           label={t("Log source")}
           value={source}
-          onChange={setSource}
+          onChange={(value) => {
+            setSource(value);
+            setLogPage(0);
+          }}
           options={[
             { value: "all", label: t("All sources") },
             { value: "dns", label: "DNS" },
@@ -127,7 +154,10 @@ export default function Logs() {
         <div className="button-row toolbar-actions">
           <Button
             variant="outline"
-            onClick={() => setPaused(paused ? null : [...snapshot.logs])}
+            onClick={() => {
+              setPaused(paused ? null : logs);
+              setLogPage(0);
+            }}
           >
             {paused ? (
               <Play data-icon="inline-start" />
@@ -191,6 +221,7 @@ export default function Logs() {
               onClick={() => {
                 session.clearLogs();
                 if (paused) setPaused([]);
+                setLogPage(0);
               }}
             >
               <Trash2 />
@@ -248,7 +279,7 @@ export default function Logs() {
             aria-label={t("Log messages")}
           >
             <div>
-              {entries.map((entry) => (
+              {visibleEntries.map((entry) => (
                 <LogLine
                   receiptLabel={t("Local receipt time")}
                   key={entry.id}
@@ -262,9 +293,36 @@ export default function Logs() {
           <span>
             {t(
               "{count} shown · {limit} entry limit · 16K characters per message",
-              { count: entries.length, limit: LOG_LIMIT.toLocaleString() },
+              { count: visibleEntries.length, limit: LOG_LIMIT.toLocaleString() },
             )}
           </span>
+          {entries.length > logPageSize && (
+            <div className="button-row" role="group" aria-label={t("Log history pages")}>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={pageStart === 0}
+                onClick={() => showLogPage(logPage + 1)}
+              >
+                {t("Older logs")}
+              </Button>
+              <span aria-live="polite">
+                {t("{first}–{last} of {count} matching logs", {
+                  first: (pageStart + 1).toLocaleString(),
+                  last: pageEnd.toLocaleString(),
+                  count: entries.length.toLocaleString(),
+                })}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={logPage === 0}
+                onClick={() => showLogPage(logPage - 1)}
+              >
+                {t("Newer logs")}
+              </Button>
+            </div>
+          )}
           <span role="status">
             {t(feedback || (paused ? "Paused locally" : "Streaming"))}
           </span>

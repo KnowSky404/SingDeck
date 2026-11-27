@@ -39,6 +39,17 @@ Visual inspection of a prefinal candidate used desktop light and emulated mobile
 
 The official sing-box v1.14.0 Linux integration measures the received runtime counters and rate conversions. It waits across four status intervals while the lifecycle stream stays quiet, then sends SIGHUP and checks that the changed native service start time records one restart and a gap in the rate history. The mock unit tests cover the observation limits, counter resets, and gaps after late frames. Browser history is bounded to the current session.
 
+## Phase 2 — Core log buffer and browsing
+
+An active subscriber received a reset after an authenticated `ClearLogs` call on official sing-box 1.14.0 over loopback. Browser checks use explicit demo mode for the confirmation and cancellation flows, local-only clearing, ANSI rendering and filtered export. The core action clears the shared in-memory history after confirmation. The local action clears the current browser view. Exports are explicit local files using filtered plain text with the active API credential redacted. The scale fixture and screenshots used synthetic data outside the repository.
+
+A local comparison used production builds on loopback with Chromium 159.0.8154.6. Each viewport received 2,505 synthetic ANSI messages across the initial burst and five append batches. Both builds retained 2,000 messages. The paged build rendered at most 200 rows and exported all 500 matches from the tested level and source filters. Older and newer controls reached the boundary pages, and Resume returned to live rows. The timings are single local observations of the isolated builds.
+
+| CSS viewport | Initial log view before → paged | Clear search before → paged |
+| --- | ---: | ---: |
+| Desktop 1280 × 720 | 4,652 → 722 ms | 3,045 → 294 ms |
+| Emulated mobile 320 × 700 | 4,209 → 679 ms | 4,036 → 283 ms |
+
 ## v0.3.0 local regression record
 
 Worktree feature validation on 2026-11-17: lint, typecheck, production build, frozen installation, actionlint, schema regeneration and license reproducibility pass. Unit tests: **26 pass**. Official sing-box 1.14.0 integration: **5 pass**, including download of a root-layout ZIP from a loopback HTTP fixture, extraction into a new directory and serving HTML/assets under `/dashboard/`. This proves core archive handling; it does not prove a user's GitHub download route.
