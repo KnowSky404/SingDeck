@@ -48,7 +48,7 @@ export interface Snapshot {
   testingLatencies?: boolean;
   latencyTestSource?: "groups" | "outbounds";
   stoppingLatencyTests?: boolean;
-  testingManualLatency?: boolean;
+  testingManualLatencies?: ReadonlySet<string>;
   latencyTestError?: string;
   latencyTestSent?: boolean;
   logs: LogEntry[];
@@ -68,6 +68,12 @@ export const initialSnapshot = (): Snapshot => ({
   streamErrors: {},
   loaded: {},
 });
+
+export function hasCurrentConnections(snapshot: Snapshot) {
+  return snapshot.phase === "connected" &&
+    snapshot.loaded.connections === true &&
+    !snapshot.streamErrors.connections;
+}
 
 export function appendLogs(
   current: LogEntry[],

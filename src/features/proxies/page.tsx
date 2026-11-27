@@ -134,7 +134,7 @@ function ProxyGroup({
                 size="icon"
                 title={t("Test group")}
                 aria-label={t("Test {name}", { name: group.tag })}
-                disabled={testingDisabled}
+                disabled={testingDisabled || snapshot.testingManualLatencies?.has(group.tag)}
                 onClick={() => test(group.tag)}
               >
                 {testing.pending ? <LoaderCircle className="spin" /> : <Zap />}
@@ -234,7 +234,7 @@ function ProxyGroup({
                             name: item.tag,
                             group: group.tag,
                           })}
-                          disabled={testingDisabled}
+                          disabled={testingDisabled || snapshot.testingManualLatencies?.has(item.tag)}
                           onClick={() => test(item.tag)}
                         >
                           <Zap />
@@ -418,7 +418,7 @@ function OutboundGroups() {
               !enabled ||
               snapshot.capabilities.urlTest.status === "unsupported" ||
               !groups.length ||
-              Boolean(snapshot.testingManualLatency) ||
+              Boolean(snapshot.testingManualLatencies) ||
               testing
             }
             onClick={() =>

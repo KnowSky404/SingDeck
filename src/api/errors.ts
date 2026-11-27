@@ -1,7 +1,16 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 
+export class CloseAllUnavailable extends Error {
+  constructor(reason: "stale" | "empty") {
+    super(reason === "empty"
+      ? "No active connections remain."
+      : "Wait for the connection list to refresh, then try again.");
+  }
+}
+
 // Server text may echo secrets. Only fixed, actionable messages cross into the UI.
 export function describeError(error: unknown): string {
+  if (error instanceof CloseAllUnavailable) return error.message;
   switch (ConnectError.from(error).code) {
     case Code.Unauthenticated:
       return "Authentication failed. Disconnect and check the Bearer token on the entry page.";

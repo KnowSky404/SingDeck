@@ -94,6 +94,7 @@ test("mock workspace supports server-confirmed selection, filtering, log control
 }) => {
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  await page.clock.install();
   await demo(page);
   await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible();
   await navigate(page, "Outbounds");
@@ -277,6 +278,22 @@ test("mock workspace supports server-confirmed selection, filtering, log control
   await expect(
     page.getByRole("button", { name: "Details for mock-1", exact: true }),
   ).toBeVisible();
+  const closeAll = page.getByRole("button", {
+    name: "Close all connections",
+    exact: true,
+  });
+  await expect(closeAll).toBeEnabled();
+  await navigate(page, "Diagnostics");
+  await expect(page.getByRole("heading", { name: "Diagnostics" })).toBeVisible();
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+  try {
+    await page.evaluate(() => { location.hash = "/connections"; });
+    await expect(page.getByText(/28 matching connections/)).toBeVisible();
+    await expect(closeAll).toBeDisabled();
+  } finally {
+    await page.clock.resume();
+  }
+  await expect(closeAll).toBeEnabled();
   await page
     .getByRole("button", { name: "Details for mock-1", exact: true })
     .click();

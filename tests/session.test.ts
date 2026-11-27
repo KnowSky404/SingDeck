@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
+import { EmptySchema } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { InstanceSession } from "@/api/session";
 import { createMockClient, MockControl } from "@/mocks/client";
@@ -15,7 +16,7 @@ import {
   LogSchema,
 } from "@/proto/daemon/started_service_pb";
 import { CONNECTION_LIMIT } from "@/api/state";
-import { delay } from "@/api/errors";
+import { delay, describeError } from "@/api/errors";
 
 const sessions: InstanceSession[] = [];
 function session(
@@ -171,6 +172,35 @@ describe("session lifecycle", () => {
     expect(snapshot.connections.has("active-0")).toBe(true);
     expect(snapshot.connections.has("closed-1")).toBe(false);
     expect(snapshot.connectionOverflow).toBe(true);
+  });
+  it("does not close all from a published view that still shows stale active rows", async () => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    const closeAllConnections = vi.fn().mockResolvedValue(create(EmptySchema));
+    const s = session(new MockControl(), {
+      ...client,
+      closeAllConnections,
+      async *subscribeConnections(_, options) {
+        const signal = options!.signal!;
+        yield create(ConnectionEventsSchema, {
+          reset: true,
+          events: [{ id: "active", connection: create(ConnectionSchema, { id: "active" }) }],
+        });
+        await delay(500, signal);
+        yield create(ConnectionEventsSchema, { reset: true });
+        await delay(60_000, signal);
+      },
+    });
+    s.connect();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(s.getSnapshot().loaded.connections).toBe(true);
+    expect(s.getSnapshot().connections.has("active")).toBe(true);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(s.getSnapshot().connections.has("active")).toBe(true);
+    await expect(s.closeAllConnections().catch(describeError)).resolves.toBe("No active connections remain.");
+    s.setInventoryEnabled(true);
+    await expect(s.closeAllConnections().catch(describeError)).resolves.toBe("Wait for the connection list to refresh, then try again.");
+    expect(closeAllConnections).not.toHaveBeenCalled();
   });
   it("rechecks API compatibility after an outage and stops incompatible streams", async () => {
     vi.useFakeTimers();
@@ -330,20 +360,23 @@ describe("session lifecycle", () => {
     await expect(s.testLatency("Direct", 1)).rejects.toMatchObject({
       code: Code.Unavailable,
     });
-    expect(s.getSnapshot().testingManualLatency).toBe(true);
+    expect(s.getSnapshot().testingManualLatencies).toEqual(new Set(["Direct"]));
     await expect(s.testLatencies([{ tags: ["Primary route"], windows: 1 }]))
       .rejects.toMatchObject({ code: Code.Canceled });
     const second = s.testLatency("London 01", 1);
     await vi.advanceTimersByTimeAsync(250);
     await second;
-    await vi.advanceTimersByTimeAsync(15_250);
-    expect(s.getSnapshot().testingManualLatency).toBeUndefined();
+    expect(s.getSnapshot().testingManualLatencies).toEqual(new Set(["Direct", "London 01"]));
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(s.getSnapshot().testingManualLatencies).toEqual(new Set(["London 01"]));
+    await vi.advanceTimersByTimeAsync(250);
+    expect(s.getSnapshot().testingManualLatencies).toBeUndefined();
     uRLTest.mockRejectedValueOnce(new ConnectError("Missing group", Code.NotFound));
     await expect(s.testLatency("Missing group", 10)).rejects.toMatchObject({
       code: Code.NotFound,
     });
     await vi.advanceTimersByTimeAsync(0);
-    expect(s.getSnapshot().testingManualLatency).toBeUndefined();
+    expect(s.getSnapshot().testingManualLatencies).toBeUndefined();
   });
 
   it("keeps the running wave's cooldown across group stream recovery", async () => {

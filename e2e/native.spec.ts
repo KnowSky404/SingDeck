@@ -373,6 +373,16 @@ test("browser uses the official native service through CORS and built-in dashboa
     await outboundsLink.click();
     await expect(grid).toBeVisible();
     await expect(toast).toBeHidden();
+    await page.getByRole("button", { name: "Expand Primary route", exact: true }).click();
+    const testBackup = backup.getByRole("button", { name: "Test direct-backup in Primary route", exact: true });
+    const acknowledged = page.waitForResponse((response) =>
+      response.request().method() === "POST" &&
+      new URL(response.url()).pathname === "/daemon.StartedService/URLTest",
+    );
+    await testBackup.click();
+    await (await acknowledged).finished();
+    await expect(page.getByRole("button", { name: "Test direct in Primary route", exact: true })).toBeEnabled();
+    await expect(testBackup).toBeDisabled();
     await page.goto("http://127.0.0.1:19190/dashboard/#/settings");
     await expect(
       page.getByRole("heading", { name: "Connect your network.", exact: true }),
