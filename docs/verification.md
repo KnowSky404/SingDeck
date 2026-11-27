@@ -89,6 +89,12 @@ Pagination bounded mounted rows in every run. The timings varied under shared ho
 
 One separate CPU profile used `98347c4`, the same browser, viewport and synthetic 20,000-row fixture. Outbounds navigation to visible controls took 852 ms with no task of at least 50 ms. Selecting **All outbounds** to the first 60 rows took 346 ms with a 106 ms long task. Exact tag search took 87 ms. During the inventory phase, sampled inclusive stack time was about 108 ms for React and DOM work, 37 ms for mock acquisition and Protobuf cloning, 13 ms for inventory filtering, mapping and sorting, and 1 ms for indexing. Garbage collection accounted for about 41 ms. These categories can overlap. This single observed long task was shorter than the earlier 20,000-row samples, and the profile did not attribute their long tasks or measure a real core.
 
+## Phase 5 — High-volume core log fixture
+
+At `c08b35a`, two fresh Chromium 159.0.8154.6 contexts used the production app with explicit demo mode and synthetic ANSI messages at 1280 × 720. A 1,000-message reset retained all 1,000 messages. The 12,000-message case applied the same reset and eleven 1,000-message appends, checking the latest displayed sequence after each batch. It retained exactly the latest 2,000 messages. The adjacent evicted sequence was absent from search. Both cases mounted at most 200 rows, showed the expected bold styling and exported one searched latest row as plain text without ANSI escapes. There were no page errors or off-origin requests.
+
+In the 12,000-message case, browser dispatch through visible assertions took 167–329 ms per append. The live measurement window contained four long tasks with a maximum of 95 ms. The JS heap sample was 24.1 MiB without forced collection. These are single synthetic runs. Real-core logging throughput and long-run memory behavior require separate measurements.
+
 ## Phase 5 — Local browser and HTTPS compatibility
 
 CI runs Chromium on desktop and with a mobile device profile. These local desktop Linux smoke checks use production builds and Playwright 1.65.1. [CI browser configuration](../playwright.config.ts)
