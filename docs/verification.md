@@ -71,6 +71,15 @@ All cases use one browser process and fresh contexts, with one discarded warmup 
 
 The 12,000-record smoke retained 9,599 active and 401 closed records, showed the display-limit notice and kept the 50-row page. Its longest task was 224 ms. In one 10,000-record sample, traffic values changed during the eight-second update observation after the timed work. Heap use went from 50.1 to 45.1 MiB during that observation. These are short synthetic measurements on a shared host. Long-run memory behavior and real-core throughput need separate measurements.
 
+## Phase 5 — Local browser and HTTPS compatibility
+
+CI runs Chromium on desktop and with a mobile device profile. These local desktop Linux smoke checks use production builds and Playwright 1.65.1. [CI browser configuration](../playwright.config.ts)
+
+- At `bcb7ee85`, Firefox 159.0 (revision 1572) and WebKit 27.2 (revision 2388) each loaded 19 assets from a static `/preview/` mount and rendered 28 Connections rows after explicitly starting Demo. Reload preserved the route URL. Starting Demo again restored access to the route. Both engines also connected over cross-origin loopback HTTP to official sing-box 1.14.0. The core rejected an incorrect Bearer token and accepted the valid test token on API 4. Remember was off by default. Explicitly enabling it restored the Logs route after reload. The token was absent from localStorage and sessionStorage. Both engines recorded zero page errors and zero failed asset requests.
+- At `16a4ac58`, the same Firefox build negotiated TLS 1.3 for `/preview/` and the separate API origin. Caddy 2.11.9 forwarded API calls to official sing-box 1.14.0 over loopback HTTP. CORS allowed the configured origin to send `Authorization` and the gRPC-Web headers, and omitted the allow-origin header for an unapproved origin. Authenticated `GetVersion` and `SubscribeStatus` each returned HTTP 200 over gRPC-Web. Runtime reported the status stream as Live and its last-received timestamp advanced on the next frame. The page reported zero runtime errors.
+
+Firefox required an approved exception to the workspace execution sandbox to start its content processes. Firefox's own content sandbox and certificate validation remained enabled. The HTTPS test CA was trusted only in a disposable NSS profile. A fresh profile rejected both HTTPS origins with `SEC_ERROR_UNKNOWN_ISSUER`. Public-origin Private Network Access (PNA), real TLS deployments and physical mobile devices still need validation. [Browser security and deployment](api-compatibility.md#browser-security-and-deployment) · [Independent static hosting](deployment.md#b-independent-static-hosting)
+
 ## v0.3.0 local regression record
 
 Worktree feature validation on 2026-11-17: lint, typecheck, production build, frozen installation, actionlint, schema regeneration and license reproducibility pass. Unit tests: **26 pass**. Official sing-box 1.14.0 integration: **5 pass**, including download of a root-layout ZIP from a loopback HTTP fixture, extraction into a new directory and serving HTML/assets under `/dashboard/`. This proves core archive handling; it does not prove a user's GitHub download route.
