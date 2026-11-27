@@ -28,7 +28,6 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import { ServiceStatus_Type } from "@/proto/daemon/started_service_pb";
 import {
   bitrate,
   capacitySample,
@@ -124,9 +123,7 @@ function DiagnosticTool({
 
   const quality = kind === "networkQuality";
   const capability = snapshot.capabilities[kind];
-  const ready = snapshot.phase === "connected" &&
-    snapshot.service?.status === ServiceStatus_Type.STARTED &&
-    !snapshot.streamErrors.service;
+  const ready = snapshot.serviceActionsReady;
   const inventory = snapshot.streamErrors.outbounds ? undefined : snapshot.outbounds;
   const outboundOptions = useMemo(() => {
     const counts = new Map<string, number>();

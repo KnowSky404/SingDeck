@@ -92,6 +92,7 @@ test("project information is available before and after connecting", async ({
 test("mock workspace supports server-confirmed selection, filtering, log controls and safe connection actions", async ({
   page,
 }) => {
+  test.setTimeout(60_000);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.clock.install();

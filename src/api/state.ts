@@ -37,6 +37,8 @@ export interface Snapshot {
   authenticationFailed?: boolean;
   version?: Version;
   service?: ServiceStatus;
+  serviceActionsReady: boolean;
+  topologyGeneration: number;
   status?: Status;
   startedAt?: bigint;
   defaultLogLevel?: LogLevel;
@@ -60,6 +62,8 @@ export interface Snapshot {
 }
 export const initialSnapshot = (): Snapshot => ({
   phase: "disconnected",
+  serviceActionsReady: false,
+  topologyGeneration: 0,
   capabilities: initialCapabilities(),
   logs: [],
   connections: new Map(),

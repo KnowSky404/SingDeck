@@ -126,7 +126,7 @@ export default function Connections() {
   const activeCount = [...snapshot.connections.values()].filter(
     (c) => c.closedAt === 0n,
   ).length;
-  const current = hasCurrentConnections(snapshot);
+  const current = snapshot.serviceActionsReady && hasCurrentConnections(snapshot);
   const enabled = current && !action.pending;
   const closeAllEnabled = enabled && activeCount > 0;
 

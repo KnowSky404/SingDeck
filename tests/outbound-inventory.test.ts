@@ -1,6 +1,6 @@
 import { create } from "@bufbuild/protobuf";
 import { EmptySchema } from "@bufbuild/protobuf/wkt";
-import { Code } from "@connectrpc/connect";
+import { Code, ConnectError } from "@connectrpc/connect";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
@@ -14,6 +14,7 @@ import { translate } from "@/lib/i18n";
 import { createMockClient } from "@/mocks/client";
 import {
   GroupItemSchema,
+  GroupsSchema,
   GroupSchema,
   OutboundListSchema,
   ServiceStatusSchema,
@@ -62,6 +63,65 @@ it("redacts reflected Bearer text from inventory rows, selected members and acti
   expect(markup).toContain("Selected: member-[redacted]");
   expect(markup).toContain('aria-label="Test group-[redacted]"');
   expect(markup).toContain('aria-label="Group details for group-[redacted]"');
+});
+
+it("captures topology already received before the workspace publishes it", async () => {
+  const before = create(GroupsSchema, {
+    group: [{ tag: "route", items: [{ tag: "leaf", type: "direct", urlTestTime: 1n, urlTestDelay: 10 }] }],
+  });
+  const updated = create(GroupsSchema, {
+    group: [{ tag: "route", items: [{ tag: "leaf", type: "direct", urlTestTime: 1n, urlTestDelay: 18 }] }],
+  });
+  const client = createMockClient();
+  vi.spyOn(client, "subscribeGroups").mockImplementation(async function* (_, options) {
+    yield before;
+    await delay(350, options!.signal!);
+    yield updated;
+    await delay(60_000, options!.signal!);
+  });
+  const session = new InstanceSession(client, mockProfile);
+  vi.useFakeTimers();
+  try {
+    session.setInventoryEnabled(true);
+    session.connect();
+    await vi.advanceTimersByTimeAsync(350);
+    expect(session.getSnapshot().groups).toEqual(before.group);
+    const current = session.getOutboundTopology();
+    expect(current.groups).toEqual(updated.group);
+    expect(current.outbounds).toBeDefined();
+  } finally {
+    session.disconnect();
+    vi.useRealTimers();
+  }
+});
+
+it("keeps the same topology generation through an isolated inventory retry", async () => {
+  const client = createMockClient();
+  const inventory = create(OutboundListSchema, { outbounds: [{ tag: "leaf", type: "direct" }] });
+  const reads = vi.spyOn(client, "subscribeOutbounds").mockImplementationOnce(async function* (_, options) {
+    yield inventory;
+    await delay(500, options!.signal!);
+    throw new ConnectError("Inventory interrupted", Code.Unavailable);
+  });
+  const session = new InstanceSession(client, mockProfile);
+  vi.useFakeTimers();
+  try {
+    session.setInventoryEnabled(true);
+    session.connect();
+    await vi.advanceTimersByTimeAsync(200);
+    const { topologyGeneration } = session.getOutboundTopology();
+    expect(session.getSnapshot().outbounds).toBeDefined();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(session.getSnapshot().streamErrors.outbounds).toBeDefined();
+    expect(session.getSnapshot().topologyGeneration).toBe(topologyGeneration);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(reads).toHaveBeenCalledTimes(2);
+    expect(session.getSnapshot().streamErrors.outbounds).toBeUndefined();
+    expect(session.getSnapshot().topologyGeneration).toBe(topologyGeneration);
+  } finally {
+    session.disconnect();
+    vi.useRealTimers();
+  }
 });
 
 it.each([

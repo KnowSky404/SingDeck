@@ -26,10 +26,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
-import {
-  type Group,
-  ServiceStatus_Type,
-} from "@/proto/daemon/started_service_pb";
+import type { Group } from "@/proto/daemon/started_service_pb";
 
 import {
   Collapsible,
@@ -316,9 +313,7 @@ function OutboundGroups() {
   const filtering = query !== "" || type !== "all";
   const groups = snapshot.groups ?? [];
   const enabled =
-    snapshot.phase === "connected" &&
-    snapshot.service?.status === ServiceStatus_Type.STARTED &&
-    !snapshot.streamErrors.service &&
+    snapshot.serviceActionsReady && snapshot.groups !== undefined &&
     !snapshot.streamErrors.groups;
   const groupsByTag = new Map(groups.map((group) => [group.tag, group]));
   const types = [...new Set(groups.flatMap((g) => g.items.map((i) => i.type)))];
