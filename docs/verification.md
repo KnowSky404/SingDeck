@@ -85,6 +85,8 @@ The initial run used source `845ce6c`, Bun 1.4.4, Playwright 1.65.1 and headless
 
 Pagination bounded mounted rows in every run. The timings varied under shared host load and cover first display and one search. Real-core throughput, repeated stream churn and multi-group scale require separate measurements.
 
+One separate CPU profile used `98347c4`, the same browser, viewport and synthetic 20,000-row fixture. Outbounds navigation to visible controls took 852 ms with no task of at least 50 ms. Selecting **All outbounds** to the first 60 rows took 346 ms with a 106 ms long task. Exact tag search took 87 ms. During the inventory phase, sampled inclusive stack time was about 108 ms for React and DOM work, 37 ms for mock acquisition and Protobuf cloning, 13 ms for inventory filtering, mapping and sorting, and 1 ms for indexing. Garbage collection accounted for about 41 ms. These categories can overlap. This single observed long task was shorter than the earlier 20,000-row samples, and the profile did not attribute their long tasks or measure a real core.
+
 ## Phase 5 — Local browser and HTTPS compatibility
 
 CI runs Chromium on desktop and with a mobile device profile. These local desktop Linux smoke checks use production builds and Playwright 1.65.1. [CI browser configuration](../playwright.config.ts)
@@ -94,6 +96,10 @@ CI runs Chromium on desktop and with a mobile device profile. These local deskto
 - At `845ce6c`, Chromium 159.0.8154.6 loaded `/dashboard/#/runtime-monitor` from official sing-box 1.14.0 through a disposable OpenSSH 10.0p2 loopback forward. It inferred the forwarded origin, the core rejected an incorrect Bearer, and valid credentials reached API 4. Runtime reported the service and status streams as Live, and the displayed last-received timestamp advanced. Reload preserved the route and cleared the unremembered token. The browser reported zero page errors and zero requests outside the forwarded origin. The forwarded HTML matched the production candidate byte for byte. The SSH server required the disposable public key, preserved pre-authentication isolation and permitted only the API forward. The client pinned the temporary host key. Closing SSH closed the forwarded listener while the loopback core remained reachable. Temporary credentials, server and browser processes, and listeners were cleaned up.
 
 Firefox required an approved exception to the workspace execution sandbox to start its content processes. Firefox's own content sandbox and certificate validation remained enabled. The HTTPS test CA was trusted only in a disposable NSS profile. A fresh profile rejected both HTTPS origins with `SEC_ERROR_UNKNOWN_ISSUER`. Public-origin Private Network Access (PNA), real TLS deployments and physical mobile devices still need validation. [Browser security and deployment](api-compatibility.md#browser-security-and-deployment) · [Independent static hosting](deployment.md#b-independent-static-hosting)
+
+### Content Security Policy smoke
+
+At `f28375e`, Chromium 159.0.8154.6 loaded the production app from static `/preview/` with a test response header using `default-src 'none'`, same-origin scripts, styles, images and fonts, and `connect-src` limited to the exact loopback API origin. The app connected to official sing-box 1.14.0 on API 4, rendered the runtime charts and reported a Live status stream with no browser errors or policy violations. A separate loopback destination was blocked by `connect-src` before its listener received a request. This check covers the Runtime Monitor path with a host-managed header. [CSP connect-src](https://www.w3.org/TR/CSP3/#directive-connect-src)
 
 ## v0.3.0 local regression record
 
