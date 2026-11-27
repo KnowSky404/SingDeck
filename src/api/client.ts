@@ -21,6 +21,7 @@ export type SingBoxClient = Pick<
   | "closeConnection"
   | "closeAllConnections"
   | "getClashModeStatus"
+  | "subscribeClashMode"
   | "setClashMode"
   | "getStartedAt"
 >;

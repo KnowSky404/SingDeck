@@ -13,6 +13,50 @@ async function navigate(page: Page, name: string) {
   await page.getByRole("link", { name, exact: true }).first().click();
 }
 
+test("Settings shows the core-reported Clash Mode and waits for confirmation", async ({ page, isMobile }) => {
+  test.setTimeout(60_000);
+  await page.clock.install();
+  await demo(page);
+  if (isMobile) await page.getByRole("button", { name: "Open navigation" }).click();
+  await navigate(page, "Settings");
+  const panel = page.locator('[data-slot="card"]').filter({
+    has: page.getByText("Clash Mode", { exact: true }),
+  });
+  const chooser = panel.getByRole("combobox", { name: "Change Clash Mode" });
+  const current = panel.getByRole("definition");
+  const longMode = "Only direct when the primary route cannot reach the destination";
+  await expect(current).toHaveText("Balanced");
+  await expect(chooser).toBeEnabled();
+  await chooser.focus();
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("option")).toHaveText(["Balanced", "Low latency", longMode]);
+  await expect(page.getByRole("option", { name: "Balanced" })).toBeFocused();
+  await page.keyboard.press("End");
+  const option = page.getByRole("option", { name: longMode });
+  await expect(option).toBeFocused();
+  await expect(option).toBeInViewport({ ratio: 1 });
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+  await page.keyboard.press("Enter");
+  await expect(page.locator('[data-slot="select-content"]')).toHaveCount(0);
+  await page.clock.runFor(50);
+  await expect(panel.getByRole("status")).toHaveText("Waiting for mode confirmation…");
+  await expect(current).toHaveText("Balanced");
+  await expect(chooser).toBeDisabled();
+  await expect(chooser).toBeFocused();
+  await page.clock.runFor(700);
+  await expect(current).toHaveText(longMode);
+  await expect(chooser).toBeEnabled();
+  await expect(chooser).toBeFocused();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.clock.resume();
+  await page.evaluate(() => { location.hash = "/runtime-monitor"; });
+  const modeStream = page.getByRole("row", { name: /^Clash Mode\b/ });
+  await expect(modeStream.getByText("Inactive", { exact: true })).toBeVisible();
+  await expect(modeStream.locator("time")).toHaveAttribute("datetime", /\d/);
+  const connectionStream = page.getByRole("row", { name: /^Connections\b/ });
+  await expect(connectionStream.getByText("Live", { exact: true })).toBeVisible();
+});
+
 test("project information is available before and after connecting", async ({
   page,
   isMobile,

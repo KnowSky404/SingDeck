@@ -23,6 +23,7 @@ import {
   ConnectionEventType,
   ConnectionSchema,
   StartedAtSchema,
+  ClashModeSchema,
   ClashModeStatusSchema,
 } from "@/proto/daemon/started_service_pb";
 
@@ -46,7 +47,12 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
   const initialTestTime = BigInt(Math.floor(Date.now() / 1000));
   let revision = 0;
   let count = 0;
-  let mode = "rule";
+  const modeList = [
+    "Balanced",
+    "Low latency",
+    "Only direct when the primary route cannot reach the destination",
+  ];
+  let mode = modeList[0];
   let logGeneration = 0;
   const groups = [
     create(GroupSchema, {
@@ -450,13 +456,26 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
     async getClashModeStatus() {
       check();
       return create(ClashModeStatusSchema, {
-        modeList: ["rule", "global", "direct"],
+        modeList,
         currentMode: mode,
       });
     },
+    async *subscribeClashMode(_, opts) {
+      const signal = opts?.signal ?? new AbortController().signal;
+      let previous: string | undefined;
+      while (!signal.aborted) {
+        check();
+        if (previous !== mode) {
+          previous = mode;
+          yield create(ClashModeSchema, { mode });
+        }
+        await delay(200, signal);
+      }
+    },
     async setClashMode(request, opts) {
       await mutation(opts?.signal);
-      mode = request.mode ?? "rule";
+      const next = request.mode ?? "";
+      if (modeList.includes(next)) mode = next;
       return empty();
     },
   };

@@ -325,10 +325,14 @@ export default function App() {
     workspaceOpen &&
       (path === "/diagnostics" || (path === "/proxies" && (showInventory || inventoryBatch))),
   );
+  const detailChannel = inventoryEnabled
+    ? "outbounds"
+    : workspaceOpen && path === "/settings" && snapshot.capabilities.clashMode.status === "supported"
+      ? "clashMode"
+      : "connections";
   useEffect(() => {
-    session.setInventoryEnabled(inventoryEnabled);
-    if (inventoryEnabled) return () => session.setInventoryEnabled(false);
-  }, [inventoryEnabled, session]);
+    session.setDetailChannel(detailChannel);
+  }, [detailChannel, session]);
   const [collapsed, setCollapsed] = useState(false),
     [menu, setMenu] = useState(false);
   const pageKey = `${profile.id}:${session.profile.endpoint}`;

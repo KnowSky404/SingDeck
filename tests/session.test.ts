@@ -34,6 +34,51 @@ afterEach(() => {
   vi.useRealTimers();
 });
 describe("session lifecycle", () => {
+  it("recovers mode discovery after a transient error without interrupting monitoring", async () => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    const probe = vi.spyOn(client, "getClashModeStatus")
+      .mockRejectedValueOnce(new ConnectError("temporary", Code.Unavailable));
+    const s = session(undefined, client);
+    s.connect();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(s.getSnapshot().capabilities.clashMode.status).toBe("error");
+    expect(s.getSnapshot().phase).toBe("connected");
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(probe).toHaveBeenCalledTimes(2);
+    expect(s.getSnapshot().capabilities.clashMode.status).toBe("supported");
+    expect(s.getSnapshot().currentClashMode).toBe("Balanced");
+    expect(s.getSnapshot().loaded.clashMode).toBeFalsy();
+  });
+  it("keeps the last live Clash Mode until the core confirms and cancels when the slot changes", async () => {
+    vi.useFakeTimers();
+    const setClashMode = vi.fn(async () => create(EmptySchema));
+    const s = session(undefined, { ...createMockClient(), setClashMode });
+    s.connect();
+    await vi.advanceTimersByTimeAsync(500);
+    s.setDetailChannel("clashMode");
+    await vi.advanceTimersByTimeAsync(200);
+    expect(s.getSnapshot().currentClashMode).toBe("Balanced");
+    s.setInventoryEnabled(false);
+    expect(s.getSnapshot().loaded.clashMode).toBe(true);
+    const missing = await s.setClashMode("missing").catch((error: unknown) => ConnectError.from(error));
+    expect(missing).toMatchObject({ code: Code.InvalidArgument });
+    expect(setClashMode).not.toHaveBeenCalled();
+    const confirmation = expect(s.setClashMode("Low latency"))
+      .rejects.toMatchObject({ code: Code.DeadlineExceeded });
+    await vi.advanceTimersByTimeAsync(400);
+    expect(s.getSnapshot()).toMatchObject({ currentClashMode: "Balanced", changingClashMode: true });
+    await vi.advanceTimersByTimeAsync(8000);
+    await confirmation;
+    expect(s.getSnapshot().changingClashMode).toBeUndefined();
+    const canceled = expect(s.setClashMode("Low latency"))
+      .rejects.toMatchObject({ code: Code.Canceled });
+    s.setDetailChannel("outbounds");
+    await canceled;
+    await vi.advanceTimersByTimeAsync(200);
+    expect(s.getSnapshot().loaded).toMatchObject({ connections: false, outbounds: true, clashMode: false });
+    expect(s.getSnapshot().changingClashMode).toBeUndefined();
+  });
   it("converts nanosecond intervals and byte deltas to rates, ignoring the first sample", async () => {
     vi.useFakeTimers();
     let interval = 0n;
@@ -272,7 +317,7 @@ describe("session lifecycle", () => {
     expect(s.getSnapshot().connections.get("first")?.closedAt).toBe(0n);
     expect(s.getSnapshot().connections.has("new-match")).toBe(true);
   });
-  it.each(["caller cancellation", "disconnect", "connection reset"])("cancels a pending request on %s", async (stop) => {
+  it.each(["caller cancellation", "disconnect", "connection reset", "detail slot change"])("cancels a pending request on %s", async (stop) => {
     vi.useFakeTimers();
     const client = createMockClient();
     const closeConnection = vi.fn<typeof client.closeConnection>(async (_, options) => {
@@ -304,6 +349,7 @@ describe("session lifecycle", () => {
     expect(closeConnection).toHaveBeenCalledTimes(1);
     if (stop === "caller cancellation") caller.abort();
     else if (stop === "disconnect") s.disconnect();
+    else if (stop === "detail slot change") s.setDetailChannel("clashMode");
     else await vi.advanceTimersByTimeAsync(100);
     await expect(result).resolves.toMatchObject({ acknowledged: 0, unacknowledged: 1, unsent: 1 });
     expect(closeConnection.mock.calls[0][1]?.signal?.aborted).toBe(true);
