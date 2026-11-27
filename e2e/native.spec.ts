@@ -197,6 +197,7 @@ test("browser uses the official native service through CORS and built-in dashboa
     await page
       .getByRole("button", { name: "Expand Primary route", exact: true })
       .click();
+    const collapsePrimary = page.getByRole("button", { name: "Collapse Primary route", exact: true });
     const backup = page
       .locator(".proxy-row")
       .filter({ has: page.getByText("direct-backup", { exact: true }) });
@@ -316,9 +317,7 @@ test("browser uses the official native service through CORS and built-in dashboa
     await expect(toast).toBeHidden({ timeout: 6500 });
     expect((await grid.boundingBox())!.y).toBe(gridTop);
     await expect(testAll).toBeFocused();
-    await page
-      .getByRole("button", { name: "Expand Primary route", exact: true })
-      .click();
+    await expect(collapsePrimary).toHaveAttribute("aria-expanded", "true");
     await testAll.click();
     const openDetails = backup.getByRole("button", {
       name: "Node details for direct-backup",
@@ -381,7 +380,7 @@ test("browser uses the official native service through CORS and built-in dashboa
     await outboundsLink.click();
     await expect(grid).toBeVisible();
     await expect(toast).toBeHidden();
-    await page.getByRole("button", { name: "Expand Primary route", exact: true }).click();
+    await expect(collapsePrimary).toHaveAttribute("aria-expanded", "true");
     const testBackup = backup.getByRole("button", { name: "Test direct-backup in Primary route", exact: true });
     const acknowledged = page.waitForResponse((response) =>
       response.request().method() === "POST" &&
