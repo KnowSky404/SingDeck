@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useState,
   useEffect,
   useLayoutEffect,
@@ -33,6 +34,7 @@ import {
 import { WorkspaceContext } from "./context";
 import {
   loadDisplayPreferences,
+  loadSavedOverviewLayout,
   saveDisplayPreference,
   saveDisplayPreferences,
   type DisplayPreferences,
@@ -87,13 +89,29 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [storageError, setStorageError] = useState<string>();
   const [displayPreferences, setDisplayPreferences] = useState(loadDisplayPreferences);
   const { language, theme } = displayPreferences;
+  const overviewLayoutUnsaved = useRef(false);
+  const refreshOverviewLayout = useCallback(() => {
+    // Keep this tab's unsaved layout when the user opens Overview again.
+    if (overviewLayoutUnsaved.current) return;
+    const saved = loadSavedOverviewLayout();
+    if (!saved) return;
+    setDisplayPreferences((current) => {
+      const { metrics, panels } = current.overviewLayout;
+      const sameOrder = metrics.every((card, index) => card === saved.metrics[index]) &&
+        panels.every((card, index) => card === saved.panels[index]);
+      return sameOrder ? current : { ...current, overviewLayout: saved };
+    });
+  }, []);
   function setDisplayPreference<Key extends keyof DisplayPreferences>(key: Key, value: DisplayPreferences[Key]) {
+    const saved = saveDisplayPreference(key, value);
+    if (key === "overviewLayout") overviewLayoutUnsaved.current = !saved;
     setDisplayPreferences((current) => ({ ...current, [key]: value }));
-    saveDisplayPreference(key, value);
   }
   function applyDisplayPreferences(preferences: DisplayPreferences) {
+    const saved = saveDisplayPreferences(preferences);
+    overviewLayoutUnsaved.current = !saved;
     setDisplayPreferences(preferences);
-    return saveDisplayPreferences(preferences);
+    return saved;
   }
   const t = useMemo(() => translate(language), [language]);
   useEffect(() => {
@@ -473,6 +491,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setTheme: (theme) => setDisplayPreference("theme", theme),
         setLanguage: (language) => setDisplayPreference("language", language),
         setOverviewLayout: (layout) => setDisplayPreference("overviewLayout", layout),
+        refreshOverviewLayout,
         applyDisplayPreferences,
         t,
         saveProfile,

@@ -155,6 +155,8 @@ test("Settings rejects mixed invalid input and can export a same-name retry that
     .toEqual([null, null, null]);
   await navigate(page, "概览", isMobile);
   await expectOverview(page, importedMetrics, importedPanels);
+  await expectDisplay(page, "zh", "dark");
+  expect(await stored(page)).toBe(JSON.stringify(legacy));
 
   await page.reload();
   await expectDisplay(page, "en", "light");
@@ -197,4 +199,39 @@ test("Settings abandons a delayed preference read when replaced or when leaving 
   await expectDisplay(page, "en", "light");
   await expectOverview(page, legacyMetrics, legacyPanels);
   expect(JSON.parse((await stored(page))!)).toEqual(legacy);
+});
+
+test("Overview restores another tab's panel order before saving a metric move", async ({ context, page, isMobile }) => {
+  test.skip(isMobile, "The cross-tab storage behavior is shared across viewports.");
+  await context.addInitScript(({ key, initial }) => {
+    if (localStorage.getItem(key) === null) localStorage.setItem(key, JSON.stringify(initial));
+  }, { key: preferenceKey, initial: legacy });
+  await page.goto("/");
+  await demo(page, "en");
+  await expectOverview(page, legacyMetrics, legacyPanels);
+
+  const other = await context.newPage();
+  await other.goto("/");
+  await demo(other, "en");
+  await navigate(other, "Settings", false);
+
+  const customize = async (tab: Page) => {
+    await tab.getByRole("button", { name: "Customize Overview", exact: true }).press("Enter");
+    return tab.getByRole("dialog", { name: "Customize Overview", exact: true });
+  };
+  await (await customize(page)).getByRole("button", { name: "Move Recent logs up", exact: true }).press("Enter");
+  const panels = ["outbounds", "traffic", "logs", "instance"];
+  const panelTitles = ["Outbound groups", "Traffic activity", "Recent logs", "Instance details"];
+  const readPersisted = async () => JSON.parse((await stored(page))!);
+  await expect.poll(readPersisted).toEqual({ ...legacy, overviewLayout: { ...legacy.overviewLayout, panels } });
+
+  await navigate(other, "Overview", false);
+  await expectOverview(other, legacyMetrics, panelTitles);
+  await (await customize(other)).getByRole("button", { name: "Move Upload up", exact: true }).press("Enter");
+  await other.keyboard.press("Escape");
+  await expectOverview(other, ["Download", "Upload", "Active connections", "Memory"], panelTitles);
+  await expect.poll(readPersisted).toEqual({
+    ...legacy,
+    overviewLayout: { metrics: ["download", "upload", "connections", "memory"], panels },
+  });
 });

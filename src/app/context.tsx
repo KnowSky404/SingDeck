@@ -13,6 +13,7 @@ export interface Workspace extends DisplayPreferences {
   setTheme: (theme: DisplayPreferences["theme"]) => void;
   setLanguage: (language: DisplayPreferences["language"]) => void;
   setOverviewLayout: (layout: DisplayPreferences["overviewLayout"]) => void;
+  refreshOverviewLayout: () => void;
   applyDisplayPreferences: (preferences: DisplayPreferences) => boolean;
   t: Translate;
   selectProfile: (id: string) => void;

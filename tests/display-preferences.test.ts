@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   displayPreferenceFileLimit,
   loadDisplayPreferences,
+  loadSavedOverviewLayout,
   parseDisplayPreferenceFile,
   saveDisplayPreference,
   saveDisplayPreferences,
@@ -66,12 +67,14 @@ describe("display preference storage", () => {
     };
     const { entries, setItem } = stubStorage({ ...legacy, [storageKey]: "invalid" });
     expect(loadDisplayPreferences()).toEqual(preferences);
+    expect(loadSavedOverviewLayout()).toEqual(preferences.overviewLayout);
     expect(setItem).not.toHaveBeenCalled();
 
     const snapshot: DisplayPreferences = { theme: "system", language: "en", overviewLayout: defaultOverviewLayout };
     expect(saveDisplayPreferences(snapshot)).toBe(true);
     expect(setItem).toHaveBeenCalledExactlyOnceWith(storageKey, serializeDisplayPreferenceFile(snapshot));
     expect(loadDisplayPreferences()).toEqual(snapshot);
+    expect(loadSavedOverviewLayout()).toEqual(defaultOverviewLayout);
     expect(Object.fromEntries(entries)).toEqual({ ...legacy, [storageKey]: serializeDisplayPreferenceFile(snapshot) });
   });
 
@@ -97,6 +100,7 @@ describe("display preference storage", () => {
     vi.stubGlobal("navigator", { language: "en" });
 
     expect(loadDisplayPreferences()).toEqual({ theme: "system", language: "en", overviewLayout: defaultOverviewLayout });
+    expect(loadSavedOverviewLayout()).toBeNull();
     expect(saveDisplayPreference("language", "zh")).toBe(false);
     expect(setItem).not.toHaveBeenCalled();
   });

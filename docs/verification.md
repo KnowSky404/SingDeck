@@ -365,7 +365,7 @@ Chromium desktop and 320px emulated mobile verified visual and keyboard order, f
 
 Settings exports the current theme, language and Overview card order in a versioned JSON file. Import accepts a file of up to 4096 bytes and validates the values and card order before applying them together. The new browser storage entry holds a complete display snapshot. Existing display preferences load from their previous entries until the first successful save in the new format. If a save fails, Settings reports that the import applies for the current visit. A reload uses the last saved snapshot.
 
-Chromium desktop and emulated mobile verified actual file export and import, legacy storage compatibility, atomic rejection and live preferences after a denied write. The official sing-box 1.14.0 built-in dashboard in Chromium kept its status subscription live as the three display preferences changed and restored those preferences after a reload and fresh login.
+Chromium desktop and emulated mobile verified actual file export and import, legacy storage compatibility, atomic rejection and live preferences after a denied write. A desktop test reopened Overview in a second tab, loaded the saved detail order and moved a metric card while preserving that order. The official sing-box 1.14.0 built-in dashboard in Chromium kept its status subscription live as the three display preferences changed and restored those preferences after a reload and fresh login.
 
 ### Overview traffic history window
 
