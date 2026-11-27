@@ -227,6 +227,8 @@ const zh: Record<string, string> = {
   Closed: "已关闭",
   "Connection records": "连接记录",
   "Connection action failed": "连接操作失败",
+  "No active connections remain.": "当前已无活动连接。",
+  "Wait for the connection list to refresh, then try again.": "请等待连接列表刷新后重试。",
   "Display limit reached": "已达到显示上限",
   "Only {count} connection records are retained. The instance may have more records.":
     "最多保留 {count} 条连接记录，实例可能有更多记录。",
@@ -397,7 +399,7 @@ const zh: Record<string, string> = {
   "Measure capacity, latency and responsiveness from the sing-box core. Tests can use substantial data.": "在 sing-box 核心所在的网络路径上测量带宽、延迟和响应能力。测试可能消耗大量流量。",
   "Check STUN reachability and NAT behavior from the sing-box core.": "在 sing-box 核心所在的网络路径上检查 STUN 可达性和 NAT 行为。",
   "I authorize the core to fetch this configuration and contact the destinations it specifies.": "我同意核心获取此配置并访问配置指定的目标。",
-  "I authorize the core to send UDP requests to this STUN server.": "我同意核心向此 STUN 服务器发送 UDP 请求。",
+  "I authorize the core to send UDP requests to this STUN server and to any alternate IP address or port it supplies for NAT testing.": "我同意核心向此 STUN 服务器发送 UDP 请求，并在 NAT 测试中向该服务器提供的备用 IP 地址或端口发送请求。",
   "Run test": "运行测试",
   "Cancel test": "取消测试",
   "Keep results for this page": "在当前页面保留结果",

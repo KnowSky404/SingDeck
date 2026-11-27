@@ -99,7 +99,7 @@ export function OutboundInventory() {
     !snapshot.streamErrors.outbounds &&
     snapshot.capabilities.urlTest.status !== "unsupported";
   const testing = Boolean(
-    snapshot.testingLatencies || snapshot.testingManualLatency || action.pending,
+    snapshot.testingLatencies || snapshot.testingManualLatencies || action.pending,
   );
   const groupsReady = !!groups && !snapshot.streamErrors.groups;
   const canBatch = canTest && groupsReady && query === normalizedSearch;
@@ -218,7 +218,7 @@ export function OutboundInventory() {
           {t(
             resultObserved
               ? "Fresh latency observed for {name}."
-              : snapshot.testingManualLatency
+              : snapshot.testingManualLatencies?.has(currentSent.tag)
                 ? "Test requested for {name}. Waiting for new latency history."
                 : "Test requested for {name}. A new result could not be confirmed.",
             { name: session.redactText(currentSent.tag) },

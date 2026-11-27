@@ -291,7 +291,7 @@ function DiagnosticTool({
                 onChange={(event) => setConfirmed(event.target.checked)} className="mt-1 accent-primary" />
               {t(quality
                 ? "I authorize the core to fetch this configuration and contact the destinations it specifies."
-                : "I authorize the core to send UDP requests to this STUN server.")}
+                : "I authorize the core to send UDP requests to this STUN server and to any alternate IP address or port it supplies for NAT testing.")}
             </label>
           )}
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">

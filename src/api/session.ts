@@ -20,13 +20,14 @@ import type {
   NetworkQualityRequest,
   STUNRequest,
 } from "./diagnostics";
-import { canRetry, canRetryCode, delay, describeError } from "./errors";
+import { canRetry, canRetryCode, CloseAllUnavailable, delay, describeError } from "./errors";
 import {
   appendLogs,
   applyConnections,
   assertCompatible,
   CompatibilityError,
   CONNECTION_LIMIT,
+  hasCurrentConnections,
   initialSnapshot,
   type Channel,
   type Snapshot,
@@ -97,8 +98,18 @@ const streamCapabilities: Partial<Record<Channel, CapabilityName>> = {
 function sameInventory(before: GroupItem[], after: GroupItem[]) {
   if (before === after) return true;
   if (before.length !== after.length) return false;
-  const types = new Map(after.map(({ tag, type }) => [tag, type]));
-  return before.every(({ tag, type }) => types.get(tag) === type);
+  const counts = new Map<string, number>();
+  for (const { tag, type } of after) {
+    const key = JSON.stringify([tag, type]);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  return before.every(({ tag, type }) => {
+    const key = JSON.stringify([tag, type]);
+    const count = counts.get(key) ?? 0;
+    if (count === 0) return false;
+    counts.set(key, count - 1);
+    return true;
+  });
 }
 
 function sameGroupTopology(before: Group[], after: Group[]) {
@@ -127,7 +138,6 @@ export class InstanceSession {
     promise: Promise<void>;
     source: "groups" | "outbounds";
   };
-  private manualLatencyTests = new Set<string>();
   private latencyCooldown = new AbortController();
   private serviceReadsScope?: AbortController;
   private detailScope?: AbortController;
@@ -207,7 +217,6 @@ export class InstanceSession {
     this.latencyCooldown.abort();
     this.latencyCooldown = new AbortController();
     this.latencyTest = undefined;
-    this.manualLatencyTests.clear();
   }
   private setCapability(name: CapabilityName, next: Capability) {
     const current = this.pending.capabilities[name];
@@ -275,7 +284,7 @@ export class InstanceSession {
         connections: undefined,
         outbounds: undefined,
       },
-    });
+    }, true);
     this.startDetailStream();
   };
   private startDetailStream() {
@@ -745,7 +754,7 @@ export class InstanceSession {
                 testingLatencies: undefined,
                 latencyTestSource: undefined,
                 stoppingLatencyTests: undefined,
-                testingManualLatency: undefined,
+                testingManualLatencies: undefined,
                 latencyTestSent: undefined,
                 latencyTestError: undefined,
               }, true);
@@ -951,12 +960,12 @@ export class InstanceSession {
   }
   testLatency = (tag: string, windows: number, source: "groups" | "outbounds" = "groups") => {
     const signal = this.signal;
+    const activeTags = this.pending.testingManualLatencies;
     if (!signal || signal.aborted || !this.canTestLatencies(source) ||
-        this.latencyTest || this.manualLatencyTests.has(tag))
+        this.latencyTest || activeTags?.has(tag))
       return Promise.reject(new ConnectError("Test unavailable", Code.Canceled));
     const cooldown = this.latencyCooldown.signal;
-    this.manualLatencyTests.add(tag);
-    this.update({ testingManualLatency: true }, true);
+    this.update({ testingManualLatencies: new Set(activeTags).add(tag) }, true);
     const request = this.urlTest(tag, cooldown);
     void request
       .then(() => true, canRetry)
@@ -967,9 +976,9 @@ export class InstanceSession {
       .catch(() => undefined)
       .finally(() => {
         if (cooldown.aborted) return;
-        this.manualLatencyTests.delete(tag);
-        if (this.manualLatencyTests.size === 0)
-          this.update({ testingManualLatency: undefined }, true);
+        const remaining = new Set(this.pending.testingManualLatencies);
+        remaining.delete(tag);
+        this.update({ testingManualLatencies: remaining.size ? remaining : undefined }, true);
       });
     return request;
   };
@@ -998,7 +1007,7 @@ export class InstanceSession {
     if (!sessionSignal || sessionSignal.aborted)
       return Promise.reject(new ConnectError("Disconnected", Code.Canceled));
     const source = plannedOutbounds === undefined ? "groups" : "outbounds";
-    if (!this.canTestLatencies(source) || this.manualLatencyTests.size)
+    if (!this.canTestLatencies(source) || this.pending.testingManualLatencies)
       return Promise.reject(new ConnectError("Service unavailable", Code.Canceled));
     const controller = new AbortController();
     const stop = () => controller.abort(sessionSignal.reason);
@@ -1171,6 +1180,11 @@ export class InstanceSession {
   }
   closeConnection = (id: string) =>
     this.runUnary((options) => this.client.closeConnection({ id }, options));
-  closeAllConnections = () =>
-    this.runUnary((options) => this.client.closeAllConnections({}, options));
+  closeAllConnections = async () => {
+    const snapshot = this.pending;
+    if (!hasCurrentConnections(snapshot)) throw new CloseAllUnavailable("stale");
+    if (!Array.from(snapshot.connections.values()).some(({ closedAt }) => closedAt === 0n))
+      throw new CloseAllUnavailable("empty");
+    return this.runUnary((options) => this.client.closeAllConnections({}, options));
+  };
 }

@@ -10,6 +10,7 @@ import {
   Info,
 } from "lucide-react";
 import { useWorkspace } from "@/app/context";
+import { hasCurrentConnections } from "@/api/state";
 import { useAction } from "@/hooks/use-action";
 import {
   ChannelState,
@@ -125,10 +126,16 @@ export default function Connections() {
   const activeCount = [...snapshot.connections.values()].filter(
     (c) => c.closedAt === 0n,
   ).length;
-  const enabled =
-    snapshot.phase === "connected" &&
-    !snapshot.streamErrors.connections &&
-    !action.pending;
+  const current = hasCurrentConnections(snapshot);
+  const enabled = current && !action.pending;
+  const closeAllEnabled = enabled && activeCount > 0;
+
+  function confirmCloseAll() {
+    void action.run(session.closeAllConnections).then((ok) => {
+      if (ok) setConfirm(false);
+    });
+  }
+
   const selected = detail
     ? (snapshot.connections.get(detail.id) ?? detail)
     : null;
@@ -204,7 +211,7 @@ export default function Connections() {
         <Button
           variant="outline"
           className="toolbar-actions"
-          disabled={!enabled || !activeCount}
+          disabled={!closeAllEnabled}
           onClick={() => setConfirm(true)}
         >
           {t("Close all connections")}
@@ -391,10 +398,16 @@ export default function Connections() {
           <DialogHeader>
             <DialogTitle>{t("Close all active connections?")}</DialogTitle>
             <DialogDescription>
-              {t(
-                "This interrupts traffic on {count} tracked connections. Applications may reconnect automatically.",
-                { count: activeCount },
-              )}
+              {current
+                ? t(
+                    "This interrupts traffic on {count} tracked connections. Applications may reconnect automatically.",
+                    { count: activeCount },
+                  )
+                : t(
+                    snapshot.streamErrors.connections ??
+                      snapshot.error ??
+                      "Waiting for the instance…",
+                  )}
             </DialogDescription>
           </DialogHeader>
           {action.error && (
@@ -406,14 +419,8 @@ export default function Connections() {
             </DialogClose>
             <Button
               variant="destructive"
-              disabled={!enabled}
-              onClick={() =>
-                void action
-                  .run(() => session.closeAllConnections())
-                  .then((ok) => {
-                    if (ok) setConfirm(false);
-                  })
-              }
+              disabled={!closeAllEnabled}
+              onClick={confirmCloseAll}
             >
               {t(action.pending ? "Closing…" : "Close all")}
             </Button>
