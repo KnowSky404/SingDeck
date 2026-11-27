@@ -3,6 +3,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const preferenceKey = "singdeck.display-preferences";
 const filename = "singdeck-display-preferences.json";
+const fixtureRevision = "0123456789abcdef0123456789abcdef";
 const legacy = {
   format: "singdeck-display-preferences",
   version: 1,
@@ -22,6 +23,7 @@ const imported = {
     panels: ["logs", "instance", "outbounds", "traffic"],
   },
 };
+const fixtureBaseline = JSON.stringify({ revision: fixtureRevision, document: legacy });
 
 function activate(button: Locator, isMobile: boolean) {
   return isMobile ? button.tap() : button.press("Enter");
@@ -73,6 +75,18 @@ async function chooseFile(page: Page, isMobile: boolean, json: unknown, name = f
 
 const stored = (page: Page) => page.evaluate(key => localStorage.getItem(key), preferenceKey);
 
+const effectiveStored = (page: Page) => page.evaluate(key => {
+  const { revision, document } = JSON.parse(localStorage.getItem(key)!);
+  const getField = (field: string) => localStorage.getItem(`${key}.${revision}.${field}`);
+  const layout = getField("overviewLayout");
+  return {
+    ...document,
+    theme: getField("theme") ?? document.theme,
+    language: getField("language") ?? document.language,
+    overviewLayout: layout !== null ? JSON.parse(layout) : document.overviewLayout,
+  };
+}, preferenceKey);
+
 test("Settings exports legacy-backed display preferences and imports a whole persistent snapshot", async ({ page, isMobile }) => {
   if (isMobile) await page.setViewportSize({ width: 320, height: 740 });
   await page.addInitScript((layout) => {
@@ -107,7 +121,10 @@ test("Settings exports legacy-backed display preferences and imports a whole per
     return { mounted: node.isConnected, phases: [...phases] };
   })).toEqual({ mounted: true, phases: ["Connected", "已连接"] });
   await connection.dispose();
-  expect(JSON.parse((await stored(page))!)).toEqual(imported);
+  expect(JSON.parse((await stored(page))!)).toEqual({
+    revision: expect.stringMatching(/^[0-9a-f]{32}$/),
+    document: imported,
+  });
   expect(await page.evaluate(() => ({
     theme: localStorage.getItem("singdeck.theme"),
     language: localStorage.getItem("singdeck.language"),
@@ -131,7 +148,7 @@ test("Settings rejects mixed invalid input and can export a same-name retry that
       if (this === localStorage && name === key) throw new DOMException("Fixture storage unavailable", "QuotaExceededError");
       write.call(this, name, value);
     };
-  }, { key: preferenceKey, initial: JSON.stringify(legacy) });
+  }, { key: preferenceKey, initial: fixtureBaseline });
   await page.goto("/");
   await demo(page, "en");
   await navigate(page, "Settings", isMobile);
@@ -142,7 +159,7 @@ test("Settings rejects mixed invalid input and can export a same-name retry that
   await expect(page.locator('input[type="file"]')).toHaveValue("");
   const exportButton = page.getByRole("button", { name: "Export display preferences", exact: true });
   expect(await downloadPreferences(page, exportButton, isMobile)).toEqual(legacy);
-  expect(await stored(page)).toBe(JSON.stringify(legacy));
+  expect(await stored(page)).toBe(fixtureBaseline);
 
   await chooseFile(page, isMobile, imported);
   await expectDisplay(page, "zh", "dark");
@@ -150,13 +167,14 @@ test("Settings rejects mixed invalid input and can export a same-name retry that
   await expect(page).toHaveURL(/#\/settings$/);
   const translatedExport = page.getByRole("button", { name: "导出显示偏好", exact: true });
   expect(await downloadPreferences(page, translatedExport, isMobile)).toEqual(imported);
-  expect(await stored(page)).toBe(JSON.stringify(legacy));
+  expect(await stored(page)).toBe(fixtureBaseline);
   expect(await page.evaluate(() => ["singdeck.theme", "singdeck.language", "singdeck.overview-layout"].map(key => localStorage.getItem(key))))
     .toEqual([null, null, null]);
   await navigate(page, "概览", isMobile);
   await expectOverview(page, importedMetrics, importedPanels);
   await expectDisplay(page, "zh", "dark");
-  expect(await stored(page)).toBe(JSON.stringify(legacy));
+  expect(await stored(page)).toBe(fixtureBaseline);
+  expect(await effectiveStored(page)).toEqual(legacy);
 
   await page.reload();
   await expectDisplay(page, "en", "light");
@@ -190,7 +208,8 @@ test("Settings abandons a delayed preference read when replaced or when leaving 
   await finishRead("pending-first.json");
   await expect(importedFeedback).toBeVisible();
   await expectDisplay(page, "en", "light");
-  expect(JSON.parse((await stored(page))!)).toEqual(legacy);
+  const acceptedBaseline = await stored(page);
+  expect(await effectiveStored(page)).toEqual(legacy);
 
   await chooseFile(page, false, imported, "pending-exit.json");
   await expect(page.getByText("Reading display preferences…", { exact: true })).toBeVisible();
@@ -198,14 +217,15 @@ test("Settings abandons a delayed preference read when replaced or when leaving 
   await finishRead("pending-exit.json");
   await expectDisplay(page, "en", "light");
   await expectOverview(page, legacyMetrics, legacyPanels);
-  expect(JSON.parse((await stored(page))!)).toEqual(legacy);
+  expect(await stored(page)).toBe(acceptedBaseline);
+  expect(await effectiveStored(page)).toEqual(legacy);
 });
 
 test("Overview restores another tab's panel order before saving a metric move", async ({ context, page, isMobile }) => {
   test.skip(isMobile, "The cross-tab storage behavior is shared across viewports.");
   await context.addInitScript(({ key, initial }) => {
-    if (localStorage.getItem(key) === null) localStorage.setItem(key, JSON.stringify(initial));
-  }, { key: preferenceKey, initial: legacy });
+    if (localStorage.getItem(key) === null) localStorage.setItem(key, initial);
+  }, { key: preferenceKey, initial: fixtureBaseline });
   await page.goto("/");
   await demo(page, "en");
   await expectOverview(page, legacyMetrics, legacyPanels);
@@ -222,7 +242,7 @@ test("Overview restores another tab's panel order before saving a metric move", 
   await (await customize(page)).getByRole("button", { name: "Move Recent logs up", exact: true }).press("Enter");
   const panels = ["outbounds", "traffic", "logs", "instance"];
   const panelTitles = ["Outbound groups", "Traffic activity", "Recent logs", "Instance details"];
-  const readPersisted = async () => JSON.parse((await stored(page))!);
+  const readPersisted = () => effectiveStored(page);
   await expect.poll(readPersisted).toEqual({ ...legacy, overviewLayout: { ...legacy.overviewLayout, panels } });
 
   await navigate(other, "Overview", false);
@@ -234,4 +254,55 @@ test("Overview restores another tab's panel order before saving a metric move", 
     ...legacy,
     overviewLayout: { metrics: ["download", "upload", "connections", "memory"], panels },
   });
+  expect(await stored(page)).toBe(fixtureBaseline);
+});
+
+test("Concurrent display controls in two tabs persist independent changes to one import", async ({ context, page, isMobile }) => {
+  test.skip(isMobile, "The cross-tab storage behavior is shared across viewports.");
+  await context.addInitScript(key => {
+    const write = Storage.prototype.setItem;
+    const writes: [string, string][] = [];
+    Object.defineProperty(window, "displayPreferenceWrites", { value: writes });
+    Storage.prototype.setItem = function (name, value) {
+      if (this === localStorage && name.startsWith(key)) writes.push([name, value]);
+      write.call(this, name, value);
+    };
+  }, preferenceKey);
+  await page.goto("/");
+  await demo(page, "en");
+  await navigate(page, "Settings", false);
+  await chooseFile(page, false, legacy);
+  await expect(page.getByText("Display preferences imported.", { exact: true })).toBeVisible();
+  const baseline = await stored(page);
+  const { revision } = JSON.parse(baseline!);
+
+  const other = await context.newPage();
+  await other.goto("/");
+  await demo(other, "en");
+  const tabs = [page, other];
+  for (const tab of tabs) {
+    await expectDisplay(tab, "en", "light");
+    await tab.getByRole("button", { name: "Display settings", exact: true }).press("Enter");
+  }
+
+  // Exercise the real controls together and record their destinations, independent of renderer scheduling.
+  await Promise.all([
+    page.getByRole("radio", { name: "Dark theme", exact: true }).click(),
+    other.getByRole("radio", { name: "简体中文", exact: true }).click(),
+  ]);
+  await expect(page.locator("html")).toHaveCSS("color-scheme", "dark");
+  await expect(other.locator("html")).toHaveAttribute("lang", "zh-CN");
+  const writes = await Promise.all(tabs.map(tab => tab.evaluate(() => Reflect.get(window, "displayPreferenceWrites"))));
+  expect(writes).toEqual([
+    [[preferenceKey, baseline], [`${preferenceKey}.${revision}.theme`, "dark"]],
+    [[`${preferenceKey}.${revision}.language`, "zh"]],
+  ]);
+  expect(await stored(page)).toBe(baseline);
+  expect(await effectiveStored(page)).toEqual({ ...legacy, theme: "dark", language: "zh" });
+
+  const fresh = await context.newPage();
+  await fresh.goto("/");
+  await expectDisplay(fresh, "zh", "dark");
+  await demo(fresh, "zh");
+  await expectOverview(fresh, ["下载", "活动连接", "上传", "内存"], ["代理组", "流量趋势", "实例信息", "最近日志"]);
 });
