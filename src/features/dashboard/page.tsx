@@ -29,14 +29,13 @@ import { bytes, time, uptime } from "@/lib/format";
 import { ServiceStatus_Type } from "@/proto/daemon/started_service_pb";
 import { LogLevel } from "@/proto/daemon/started_service_pb";
 import { LogLine } from "@/features/logs/log-line";
+import { useRuntimeWindow } from "./use-runtime-window";
 
 export default function Dashboard() {
   const { profile, snapshot, t } = useWorkspace();
   const { status, version, runtime, service } = snapshot;
   const latest = runtime.samples.at(-1);
-  const traffic = latest
-    ? runtime.samples.filter(({ time }) => time >= latest.time - profile.preferences.windowSeconds * 1000)
-    : [];
+  const traffic = useRuntimeWindow(runtime.samples, profile.preferences.windowSeconds);
   const measuredCount = traffic.filter(({ down }) => down !== undefined).length;
   const recentLogs = snapshot.logs
     .filter((entry) => entry.level <= LogLevel.INFO)
@@ -57,9 +56,7 @@ export default function Dashboard() {
     },
     {
       label: t("Active connections"),
-      value: status
-        ? String(available ? status.connectionsIn : status.connectionsOut)
-        : "—",
+      value: (available ? latest?.connectionsIn : latest?.connectionsOut)?.toString() ?? "—",
       icon: Network,
       kind: "",
     },
@@ -171,6 +168,8 @@ export default function Dashboard() {
                     />
                     <XAxis
                       dataKey="time"
+                      type="number"
+                      domain={["dataMin", "dataMax"]}
                       tickFormatter={time}
                       minTickGap={75}
                       axisLine={false}

@@ -14,6 +14,7 @@ import type { Channel, Snapshot } from "@/api/state";
 import { Badge } from "@/components/ui/badge";
 import { Choice, EmptyState, Notice, Panel } from "@/components/shared";
 import { bytes, uptime } from "@/lib/format";
+import { useRuntimeWindow } from "./use-runtime-window";
 import { ServiceStatus_Type } from "@/proto/daemon/started_service_pb";
 
 const windows = [
@@ -101,12 +102,7 @@ export default function RuntimeMonitor() {
   const streamsAborted = session.signal?.aborted ?? false;
   const [windowSeconds, setWindowSeconds] = useState(String(profile.preferences.windowSeconds));
   const latest = runtime.samples.at(-1);
-  const samples = useMemo(() => {
-    const latestTime = runtime.samples.at(-1)?.time;
-    return latestTime === undefined
-      ? []
-      : runtime.samples.filter(({ time }) => time >= latestTime - Number(windowSeconds) * 1000);
-  }, [runtime.samples, windowSeconds]);
+  const samples = useRuntimeWindow(runtime.samples, Number(windowSeconds));
   const points = useMemo(() => chartPoints(samples), [samples]);
   const averages = useMemo(
     () => ({ down: summarizeRates(samples, "down"), up: summarizeRates(samples, "up") }),

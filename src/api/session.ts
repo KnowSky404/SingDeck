@@ -773,7 +773,8 @@ export class InstanceSession {
                 observations,
                 status,
                 now,
-                this.pending.service?.status === ServiceStatus_Type.STARTED,
+                !this.pending.streamErrors.service &&
+                  this.pending.service?.status === ServiceStatus_Type.STARTED,
                 gap,
                 rate,
               ),

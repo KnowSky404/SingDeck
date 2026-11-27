@@ -103,5 +103,11 @@ test("runtime monitor shows live metrics and lets the user change the history wi
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
     ))
     .toBe(true);
+  const beforePause = await page.evaluate(() => Date.now());
+  await page.clock.pauseAt(beforePause + 3000);
+  await page.clock.setSystemTime(beforePause + 310_000);
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await expect(main.getByRole("application", { name: "Traffic rate history" })).toHaveCount(0);
+  await expect(main.getByRole("application", { name: "Memory history" })).toHaveCount(0);
   expect(errors).toEqual([]);
 });
