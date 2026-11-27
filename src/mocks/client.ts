@@ -93,12 +93,14 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
   const connections = new Map(
     Array.from({ length: 28 }, (_, i) => {
       const id = `mock-${i + 1}`;
+      const outbound = i % 3 ? "Tokyo 01" : "Singapore 01";
       return [
         id,
         create(ConnectionSchema, {
           id,
           inbound: "mixed-in",
           inboundType: "mixed",
+          ipVersion: 4,
           network: i % 4 ? "tcp" : "udp",
           source: `127.0.0.1:${50000 + i}`,
           destination: `203.0.113.${i + 1}:443`,
@@ -109,13 +111,13 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
             "registry.npmjs.org",
           ][i % 4],
           protocol: i % 4 ? "tls" : "quic",
-          outbound: i % 3 ? "Tokyo 01" : "Singapore 01",
+          outbound,
           outboundType: "vless",
           createdAt: BigInt(Date.now() - i * 2300),
           uplinkTotal: BigInt(12000 * (i + 1)),
           downlinkTotal: BigInt(134000 * (i + 1)),
-          chainList: ["Primary route", "Tokyo 01"],
-          rule: "default",
+          chainList: [outbound, "Primary route"],
+          rule: "inbound=mixed-in",
         }),
       ];
     }),
