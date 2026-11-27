@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { LoaderCircle, ShieldCheck } from "lucide-react";
-import { createNativeClient, validateEndpoint } from "@/api/client";
+import { createNativeClient, normalizeBearerToken, redactSecret, validateEndpoint } from "@/api/client";
 import { assertCompatible, CompatibilityError } from "@/api/state";
 import { describeError } from "@/api/errors";
 import { canRememberConnection } from "./remembered-connection";
@@ -94,7 +94,10 @@ export function ConnectionForm() {
         { signal: scope.signal },
       );
       assertCompatible(version);
-      setMessage({ version: version.version, api: version.apiVersion });
+      setMessage({
+        version: redactSecret(version.version, normalizeBearerToken(token)),
+        api: version.apiVersion,
+      });
     } catch (error) {
       if (!scope.signal.aborted)
         setMessage(

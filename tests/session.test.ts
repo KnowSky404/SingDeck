@@ -117,6 +117,27 @@ describe("session lifecycle", () => {
     expect(interval).toBe(2_000_000_000n);
     expect(s.getSnapshot().runtime.samples.at(-1)).toMatchObject({ up: 100, down: 2500 });
   });
+  it("validates the reported version before masking the effective token in snapshots", async () => {
+    vi.useFakeTimers();
+    const marker = "1.14.123";
+    const reported = create(VersionSchema, { version: marker, apiVersion: 4 });
+    const s = new InstanceSession(
+      { ...createMockClient(), getVersion: async () => reported },
+      mockProfile,
+      `${marker} \t`,
+    );
+    sessions.push(s);
+    s.connect();
+    await vi.advanceTimersByTimeAsync(500);
+    const { phase, version } = s.getSnapshot();
+    expect(phase).toBe("connected");
+    expect(version).toMatchObject({ version: "[redacted]", apiVersion: 4 });
+    expect(reported.version).toBe(marker);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(s.getSnapshot().version).toBe(version);
+    s.disconnect();
+    expect(s.getSnapshot().version).toBeUndefined();
+  });
   it("redacts credentials before any page or log export can consume a received message", async () => {
     vi.useFakeTimers();
     const marker = "synthetic-log-marker";
