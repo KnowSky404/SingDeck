@@ -95,6 +95,24 @@ describe("session lifecycle", () => {
     );
   });
 
+  it("keeps the current logs until the core sends a reset after acknowledging clear", async () => {
+    vi.useFakeTimers();
+    const s = session();
+    await expect(s.clearCoreLogs()).rejects.toMatchObject({
+      code: Code.Unavailable,
+    });
+    s.connect();
+    await vi.advanceTimersByTimeAsync(300);
+    const original = s.getSnapshot().logs;
+    expect(original.length).toBeGreaterThan(0);
+    const request = s.clearCoreLogs();
+    await vi.advanceTimersByTimeAsync(300);
+    await request;
+    expect(s.getSnapshot().logs).toEqual(original);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(s.getSnapshot().logs).toEqual([]);
+  });
+
   it("connects, confirms node changes from subscriptions, and does not fake a rejected selection", async () => {
     vi.useFakeTimers();
     const control = new MockControl(),

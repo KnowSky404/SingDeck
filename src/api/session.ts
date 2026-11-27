@@ -29,6 +29,7 @@ import {
   CompatibilityError,
   CONNECTION_LIMIT,
   hasCurrentConnections,
+  hasCurrentLogs,
   initialSnapshot,
   type Channel,
   type Snapshot,
@@ -406,6 +407,12 @@ export class InstanceSession {
     return version?.version !== next.version || version?.apiVersion !== next.apiVersion;
   }
   clearLogs = () => this.update({ logs: [] }, true);
+  clearCoreLogs = async () => {
+    const signal = this.signal;
+    if (!signal || signal.aborted || !hasCurrentLogs(this.pending))
+      throw new ConnectError("Log stream unavailable", Code.Unavailable);
+    return this.runUnary((options) => this.client.clearLogs({}, options), signal);
+  };
   private async readMetadata(signal: AbortSignal) {
     const version = await this.client.getVersion({}, { signal });
     signal.throwIfAborted();
