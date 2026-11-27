@@ -259,19 +259,21 @@ suite("official sing-box 1.14.0 native integration (not mock)", () => {
       ipVersion: 4,
     });
     expect(active.createdAt).toBeGreaterThan(0n);
-    await client.closeConnection({ id: active.id });
+    const { id, chainList, createdAt } = active;
+    await client.closeConnection({ id });
+    // The unary can return before the tracker records the closed row.
+    await expect.poll(async () => {
+      const verify = new AbortController();
+      const signal = AbortSignal.any([verify.signal, AbortSignal.timeout(1000)]);
+      try {
+        const snapshot = await first(client.subscribeConnections({}, { signal }));
+        const closed = snapshot.value?.events.find((event) => event.id === id)?.connection;
+        return closed && closed.closedAt >= createdAt ? closed : undefined;
+      } finally {
+        verify.abort();
+      }
+    }, { timeout: 5000 }).toMatchObject({ chainList, createdAt });
     await client.closeAllConnections({});
-    const verify = scope();
-    const snapshot = await first(
-      client.subscribeConnections(
-        { interval: 1_000_000_000n },
-        { signal: verify.signal },
-      ),
-    );
-    const closed = snapshot.value?.events.find((e: ConnectionEvent) => e.id === active.id)?.connection;
-    expect(closed).toMatchObject({ chainList: active.chainList, createdAt: active.createdAt });
-    expect(closed?.closedAt).toBeGreaterThanOrEqual(active.createdAt);
-    verify.abort();
   });
   it("serves production assets and hash routes under /dashboard/ and enforces configured CORS", async () => {
     const html = await fetch(`${endpoint}/dashboard/`);
