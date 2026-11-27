@@ -28,6 +28,7 @@ test("diagnostics require consent, cancel cleanly, and report streamed measureme
   await run.click();
   await expect(page.getByRole("status").filter({ hasText: /^Completed$/ })).toBeVisible();
   await expect(page.getByRole("img", { name: /capacity over time/ })).toBeVisible();
+  await expect(page.getByText("High confidence", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Test comparison", { exact: true })).toBeVisible();
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export report" }).click();

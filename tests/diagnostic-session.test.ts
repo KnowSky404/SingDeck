@@ -9,6 +9,8 @@ import { validateDiagnosticTarget } from "@/features/diagnostics/model";
 import { mockProfile } from "@/features/instances/profiles";
 import { createMockClient } from "@/mocks/client";
 import {
+  ConnectionEventsSchema,
+  ConnectionEventType,
   DeprecatedWarningsSchema,
   ServiceStatusSchema,
   ServiceStatus_Type,
@@ -72,6 +74,7 @@ describe("native diagnostic state", () => {
     expect(stun).not.toHaveBeenCalled();
     expect(latency).not.toHaveBeenCalled();
     await session.refreshWarnings();
+    expect(session.redactText("route-private/token")).toBe("route-[redacted]");
     expect(session.getSnapshot().warnings).toMatchObject([{
       message: "Upgrade this setting",
       description: "Fixed secret: [redacted]",
@@ -80,6 +83,53 @@ describe("native diagnostic state", () => {
     session.disconnect();
     expect(session.getSnapshot().warnings).toBeUndefined();
     expect(session.getSnapshot().capabilities.outboundInventory.status).toBe("unknown");
+  });
+
+  it("waits for the first STARTED event before reading warnings", async () => {
+    const client = createMockClient();
+    const warnings = vi.spyOn(client, "getDeprecatedWarnings");
+    vi.spyOn(client, "subscribeServiceStatus").mockImplementation(
+      async function* (_, options) {
+        await delay(500, options!.signal!);
+        yield create(ServiceStatusSchema, { status: ServiceStatus_Type.STARTED });
+        await delay(60_000, options!.signal!);
+      },
+    );
+    const session = await connect(client);
+    expect(warnings).not.toHaveBeenCalled();
+    expect(session.getSnapshot().capabilities.deprecatedWarnings.status).toBe("unknown");
+    await vi.advanceTimersByTimeAsync(700);
+    expect(warnings).toHaveBeenCalledTimes(1);
+    expect(session.getSnapshot().capabilities.deprecatedWarnings.status).toBe("supported");
+  });
+
+  it("keeps previously observed closed rows when resuming the same core", async () => {
+    const client = createMockClient();
+    const subscribe = vi.spyOn(client, "subscribeConnections");
+    for (const rows of [
+      [{ id: "old-closed", closedAt: 5n }, { id: "old-active", closedAt: 0n }],
+      [{ id: "new-closed", closedAt: 8n }, { id: "new-active", closedAt: 0n }],
+    ]) {
+      subscribe.mockImplementationOnce(async function* (_, options) {
+        yield create(ConnectionEventsSchema, {
+          reset: true,
+          events: rows.map((connection) => ({
+            id: connection.id,
+            type: ConnectionEventType.CONNECTION_EVENT_NEW,
+            connection,
+          })),
+        });
+        await delay(60_000, options!.signal!);
+      });
+    }
+    const session = await connect(client);
+    session.setInventoryEnabled(false);
+    await vi.advanceTimersByTimeAsync(200);
+    expect([...session.getSnapshot().connections.keys()]).toEqual(["old-closed", "old-active"]);
+    session.setInventoryEnabled(true);
+    session.setInventoryEnabled(false);
+    await vi.advanceTimersByTimeAsync(200);
+    expect([...session.getSnapshot().connections.keys()]).toEqual(["old-closed", "new-closed", "new-active"]);
   });
 
   it("swaps inventory and connections without using two permanent request slots", async () => {

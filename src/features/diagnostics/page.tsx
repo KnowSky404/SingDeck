@@ -125,8 +125,8 @@ function DiagnosticTool({
     for (const { tag } of inventory ?? []) counts.set(tag, (counts.get(tag) ?? 0) + 1);
     return (inventory ?? [])
       .filter(({ tag }) => tag && counts.get(tag) === 1)
-      .map(({ tag, type }) => ({ value: `tag:${tag}`, label: `${tag} · ${type}` }));
-  }, [inventory]);
+      .map(({ tag, type }) => ({ value: `tag:${tag}`, label: `${session.redactText(tag)} · ${session.redactText(type)}` }));
+  }, [inventory, session]);
   const validOutbound = outbound === defaultOutbound || outboundOptions.some(({ value }) => value === outbound);
   const options = [
     { value: defaultOutbound, label: t("Core default outbound") },
@@ -185,7 +185,7 @@ function DiagnosticTool({
       const report = {
         value,
         measuredAt: Date.now(),
-        outboundTag,
+        outboundTag: session.redactText(outboundTag),
         elapsedMs,
         source: profile.mode,
         coreVersion: snapshot.version?.version,
@@ -327,7 +327,8 @@ function DiagnosticTool({
                   <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                     <LineChart data={samples}>
                       <CartesianGrid stroke="var(--border)" vertical={false} />
-                      <XAxis dataKey="elapsed" tickFormatter={(seconds: number) => `${seconds.toFixed(1)}s`} minTickGap={25} />
+                      <XAxis type="number" dataKey="elapsed" domain={[0, "dataMax"]}
+                        tickFormatter={(seconds: number) => `${seconds.toFixed(1)}s`} minTickGap={25} />
                       <YAxis width={48} />
                       <Tooltip labelFormatter={(seconds) => `${seconds}s`} />
                       <Line type="monotone" dataKey="download" name={t("Download")}
@@ -402,7 +403,9 @@ function DiagnosticMetrics({ values }: { values: [name: string, value: string, d
 
 function QualityReadout({ value, elapsed }: { value: DiagnosticProgress<"networkQuality">; elapsed?: number }) {
   const { t } = useWorkspace();
-  const confidence = (accuracy: number) => t("{level} confidence", { level: t(accuracyLabels[accuracy] ?? "Unknown") });
+  const confidence = (accuracy: number) => value.phase === 3
+    ? t("{level} confidence", { level: t(accuracyLabels[accuracy] ?? "Unknown") })
+    : undefined;
   return <DiagnosticMetrics values={[
     ["Download capacity", bitrate(value.downloadCapacity), value.downloadCapacity > 0n ? confidence(value.downloadCapacityAccuracy) : undefined],
     ["Upload capacity", bitrate(value.uploadCapacity), value.uploadCapacity > 0n ? confidence(value.uploadCapacityAccuracy) : undefined],
