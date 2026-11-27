@@ -72,6 +72,14 @@ Set **GitHub Actions** as the Pages source. The `github-pages` environment must 
 
 For a real connection from Pages, use your own trusted HTTPS API and allow the exact CORS origin `https://knowsky404.github.io` (without `/SingDeck/`). Plain HTTP APIs may be blocked by mixed-content policy; private-network endpoints also depend on browser permissions. Tokens stay in browser memory by default. On a trusted device, choose **Remember this device** to reconnect automatically in the same browser profile. This requires HTTPS or loopback hosting and browser site storage. Disconnect from the workspace to forget the saved connection.
 
+## Install the dashboard
+
+Use your browser's install or Add to Home Screen action when it is available. Open the dashboard on trusted HTTPS or a loopback address the browser treats as secure. The installed app opens the same dashboard mount in a standalone window on supported browsers. It still uses the normal login and Remember this device behavior for that browser profile.
+
+Serve `manifest.json` and both PNG icons from the dashboard directory with the rest of `dist/`. If your host sets a Content Security Policy, allow the same-origin manifest with `manifest-src 'self'` and the same-origin icons with `img-src 'self'`. Keep the existing API origin restrictions. The mount path identifies the installed app and limits its navigation scope. Site storage and permissions follow the browser's origin and profile rules.
+
+SingDeck does not register a service worker or cache credentials, API responses, connection details or logs for offline use. Live monitoring requires an open dashboard, a reachable core and a browser that allows the window to run.
+
 ## Old dashboard after switching or updating / 切换或更新后仍显示旧面板
 
 First try **Ctrl + Shift + R** in Firefox on Windows/Linux. In a confirmed migration case, the core was already serving SingDeck while the browser still showed the previous dashboard; a force reload resolved it. This is different from the core failing to download the new files.
