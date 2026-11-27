@@ -66,6 +66,8 @@ test("connection details show the reported route and retained closed state", asy
   );
   await expect(fact("Closed at")).toHaveText("Unavailable");
   await expect(fact("Download total")).toHaveText(/^[\d.]+ [KMGT]?B$/);
+  await expect(fact("Upload in reported interval")).toHaveText("Unavailable");
+  await expect(fact("Download in reported interval")).toHaveText("Unavailable");
 
   const route = dialog.getByRole("region", { name: "Route", exact: true });
   await expect(route.getByRole("list")).toBeVisible();
