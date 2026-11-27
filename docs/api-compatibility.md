@@ -45,7 +45,8 @@ Authorization and session redaction use the same effective Bearer token. Trailin
 | CloseConnection | id | Empty; closed state confirmed by stream |
 | CloseAllConnections | Empty | Empty; destructive action requires confirmation |
 | GetClashModeStatus | Empty | modeList/currentMode, NotFound if mode manager absent |
-| SetClashMode | mode (field 3) | Empty; SDK only in P0 |
+| SubscribeClashMode | Empty | stream ClashMode; initial and changed mode, with an empty mode during a service stop |
+| SetClashMode | mode (field 3) | Empty; the core may acknowledge an unknown name without changing mode |
 | GetStartedAt | Empty | startedAt Unix **milliseconds**, used for uptime |
 
 Status rates divide the native byte deltas by the requested interval in seconds. The initial sample, gaps, and counter resets leave the rate unavailable. Status frames carry no timestamps. Runtime Monitor uses browser receipt time for its observed history. Inbound counts and cumulative traffic require the core's traffic manager. The outbound count comes from the separate connection manager and is available on a running service even when traffic tracking is disabled. Memory is the process measurement exposed by the core's platform implementation. Zero memory is shown as unavailable. `GetStartedAt` measures service start time and can change after a reload in the same process. [Pinned status implementation](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/started_service.go#L463-L511) · [Core attachment](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/attached_service.go)
@@ -67,6 +68,8 @@ The demo stream starts with a reset and cumulative counters. Subsequent UPDATE e
 Filtered batch close sends one `CloseConnection` per confirmed active ID, sequentially. The selection covers all matching pages and is available with a narrowing filter and a current, untruncated connection list. It skips IDs already marked closed and stops queueing requests when the records reset, the instance becomes unavailable, a request fails, or the user stops the batch. Only the subscription confirms closed state. A request already in flight when stopped may still take effect.
 
 The v1.14.0 log stream carries only level and text. Its optional rendered context ID differs from the connection UUID, so the workspace cannot reliably join logs to connections. [Log context ID](https://github.com/SagerNet/sing-box/blob/v1.14.0/log/id.go) · [Connection tracker](https://github.com/SagerNet/sing-box/blob/v1.14.0/common/trafficcontrol/tracker.go)
+
+Settings shows Clash Mode when the native service reports a mode manager. The core supplies selectable names. SingDeck confirms changes only from the live subscription, which also reports changes made by other clients. On a `with_clash_api` core, configure `experimental.clash_api` and omit `external_controller` to use native mode control without opening a Clash REST listener.
 
 ## Native diagnostic semantics
 

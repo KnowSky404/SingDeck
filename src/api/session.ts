@@ -32,6 +32,7 @@ import {
   hasCurrentLogs,
   initialSnapshot,
   type Channel,
+  type DetailChannel,
   type Snapshot,
 } from "./state";
 import type { Profile } from "@/features/instances/profiles";
@@ -157,7 +158,9 @@ export class InstanceSession {
   private serviceReadsScope?: AbortController;
   private topologyGeneration = 0;
   private detailScope?: AbortController;
-  private inventoryEnabled = false;
+  private detailChannel: DetailChannel = "connections";
+  private clashModeProbe?: AbortSignal;
+  private clashModeChange?: AbortController;
   private retainClosedOnResume = false;
   private streamsStarted = false;
   private revalidation?: { controller: AbortController; promise: Promise<void> };
@@ -205,6 +208,8 @@ export class InstanceSession {
       this.latencyTest.controller.abort();
     if (this.connectionBatch && !this.canCloseConnectionBatch(this.connectionBatch))
       this.connectionBatch.scope.abort();
+    if (this.clashModeChange && !this.canChangeClashMode())
+      this.clashModeChange.abort(new ConnectError("Mode confirmation interrupted", Code.Unavailable));
     if (!this.canRunServiceAction()) this.interruptDiagnostic();
     if (immediate) this.flush();
     else this.flushTimer ??= setTimeout(() => this.flush(), 100);
@@ -241,6 +246,8 @@ export class InstanceSession {
     this.provisionalWarnings = false;
     this.cancelRevalidation();
     this.detailScope = undefined;
+    this.clashModeProbe = undefined;
+    this.clashModeChange = undefined;
     this.cancelWarningRead();
     this.serviceReadsScope = undefined;
     this.diagnosticScope = undefined;
@@ -288,44 +295,52 @@ export class InstanceSession {
       connectionOverflow: false,
       groups: undefined,
       outbounds: undefined,
+      clashModeOptions: undefined,
+      currentClashMode: undefined,
       ...(!keepWarnings && { warnings: undefined }),
       ...(!keepWarningRead && { checkingWarnings: undefined }),
       capabilities: {
         ...initialCapabilities(),
         ...(keepWarnings && { deprecatedWarnings: this.pending.capabilities.deprecatedWarnings }),
       },
-      loaded: { ...this.pending.loaded, connections: false, groups: false, outbounds: false },
+      loaded: { ...this.pending.loaded, connections: false, groups: false, outbounds: false, clashMode: false },
       streamErrors: {
         ...this.pending.streamErrors,
         groups: undefined,
         outbounds: undefined,
+        clashMode: undefined,
       },
     });
-    if (!this.inventoryEnabled) this.startDetailStream();
+    if (this.detailChannel === "connections") this.startDetailStream();
   }
   private async refreshServiceReads(parent: AbortSignal) {
     const scope = new AbortController();
     this.serviceReadsScope = scope;
     const signal = AbortSignal.any([parent, scope.signal]);
-    if (this.inventoryEnabled) this.startDetailStream();
+    if (this.detailChannel !== "connections") this.startDetailStream();
     this.readServiceConfiguration();
     await this.stream("groups", signal);
   }
   setInventoryEnabled = (enabled: boolean) => {
-    if (enabled === this.inventoryEnabled) return;
-    this.inventoryEnabled = enabled;
-    if (enabled) {
+    if (!enabled && this.detailChannel !== "outbounds") return;
+    this.setDetailChannel(enabled ? "outbounds" : "connections");
+  };
+  setDetailChannel = (channel: DetailChannel) => {
+    if (channel === this.detailChannel) return;
+    if (this.detailChannel === "connections") {
       this.retainClosedOnResume = (this.retainClosedOnResume || this.pending.loaded.connections === true) &&
         this.lastBootMarker !== undefined && this.canRunServiceAction();
     }
+    this.detailChannel = channel;
     this.detailScope?.abort();
     this.update({
       outbounds: undefined,
-      loaded: { ...this.pending.loaded, connections: false, outbounds: false },
+      loaded: { ...this.pending.loaded, connections: false, outbounds: false, clashMode: false },
       streamErrors: {
         ...this.pending.streamErrors,
         connections: undefined,
         outbounds: undefined,
+        clashMode: undefined,
       },
     }, true);
     this.startDetailStream();
@@ -333,8 +348,8 @@ export class InstanceSession {
   private startDetailStream() {
     const parent = this.signal;
     if (!parent || parent.aborted || !this.streamsStarted) return;
-    const channel = this.inventoryEnabled ? "outbounds" : "connections";
-    const service = this.inventoryEnabled ? this.serviceReadsScope?.signal : parent;
+    const channel = this.detailChannel;
+    const service = channel === "connections" ? parent : this.serviceReadsScope?.signal;
     if (!service || service.aborted) return;
     // Keep a request slot free on native HTTP/1.1 origins with a six-socket limit.
     this.detailScope?.abort();
@@ -414,13 +429,45 @@ export class InstanceSession {
     }
   };
   private async probeClashMode(signal: AbortSignal) {
+    if (this.clashModeProbe && !this.clashModeProbe.aborted) return;
+    this.clashModeProbe = signal;
+    let attempt = 0;
     try {
-      await this.runUnary((options) => this.client.getClashModeStatus({}, options), signal);
-      if (!signal.aborted)
-        this.setCapability("clashMode", { status: "supported" });
-    } catch (error) {
-      if (!signal.aborted) this.setCapability("clashMode", capabilityFailure(error));
+      while (!signal.aborted) {
+        try {
+          const { modeList, currentMode } = await this.runUnary(
+            (options) => this.client.getClashModeStatus({}, options), signal,
+          );
+          if (signal.aborted) return;
+          this.update({
+            clashModeOptions: [...new Set(modeList.filter((mode) => this.safeClashMode(mode)))],
+            ...(!this.pending.loaded.clashMode && {
+              currentClashMode: this.safeClashMode(currentMode),
+            }),
+          });
+          this.setCapability("clashMode", { status: "supported" });
+          return;
+        } catch (error) {
+          if (signal.aborted) return;
+          this.clearClashMode(error);
+          if (!this.profile.preferences.autoReconnect || !canRetry(error)) return;
+        }
+        try {
+          await delay(Math.min(1000 * 2 ** attempt++, 30000), signal);
+        } catch {
+          return;
+        }
+      }
+    } finally {
+      if (this.clashModeProbe === signal) this.clashModeProbe = undefined;
     }
+  }
+  private clearClashMode(error: unknown) {
+    this.update({ clashModeOptions: undefined, currentClashMode: undefined });
+    this.setCapability("clashMode", capabilityFailure(error));
+  }
+  private safeClashMode(mode: string) {
+    return mode && this.redactText(mode) === mode ? mode : undefined;
   }
   private versionChanged(next: Version) {
     const { version } = this.pending;
@@ -643,9 +690,12 @@ export class InstanceSession {
     this.update({
       groups: undefined,
       outbounds: undefined,
-      loaded: { ...this.pending.loaded, groups: false, outbounds: false, connections: false },
+      clashModeOptions: undefined,
+      currentClashMode: undefined,
+      capabilities: { ...this.pending.capabilities, clashMode: { status: "unknown" } },
+      loaded: { ...this.pending.loaded, groups: false, outbounds: false, connections: false, clashMode: false },
     });
-    if (!this.inventoryEnabled) this.startDetailStream();
+    if (this.detailChannel === "connections") this.startDetailStream();
   }
   private archiveWarnings() {
     if (this.pending.warnings)
@@ -678,7 +728,7 @@ export class InstanceSession {
         this.update({ ...metadata, error: undefined });
         this.streamsStarted = true;
         void this.refreshServiceReads(signal);
-        if (!this.inventoryEnabled) this.startDetailStream();
+        if (this.detailChannel === "connections") this.startDetailStream();
         await Promise.all(
           (["service", "status", "logs"] as const).map(
             (channel) => this.stream(channel, signal),
@@ -864,6 +914,15 @@ export class InstanceSession {
             received();
             this.update({ outbounds: inventory.outbounds });
           }
+        } else if (channel === "clashMode") {
+          for await (const { mode } of this.client.subscribeClashMode({}, options)) {
+            if (parentSignal.aborted) return;
+            received();
+            this.update({
+              currentClashMode: this.safeClashMode(mode),
+              loaded: { ...this.pending.loaded, clashMode: Boolean(mode) },
+            });
+          }
         } else if (channel === "logs") {
           for await (const log of this.client.subscribeLog({}, options)) {
             if (parentSignal.aborted) return;
@@ -928,6 +987,9 @@ export class InstanceSession {
             : describeError(error);
         const capability = streamCapabilities[channel];
         if (capability) this.setCapability(capability, capabilityFailure(error));
+        const { code } = ConnectError.from(error);
+        if (channel === "clashMode" && (code === Code.NotFound || code === Code.Unimplemented))
+          this.clearClashMode(error);
         if (channel === "status") this.setCapability("trafficTracking", capabilityFailure(error));
         if (channel === "status" || channel === "service") this.retainClosedOnResume = false;
         if (channel === "service") this.topologyGeneration++;
@@ -953,7 +1015,7 @@ export class InstanceSession {
             streamErrors: { ...this.pending.streamErrors, [channel]: message },
             authenticationFailed:
               this.pending.authenticationFailed ||
-              ConnectError.from(error).code === Code.Unauthenticated,
+              code === Code.Unauthenticated,
             ...(channel === "status"
               ? { phase: retry ? "reconnecting" : "error", error: message,
                   ...(!retry && { checkingWarnings: false }) }
@@ -1002,7 +1064,12 @@ export class InstanceSession {
     await this.runUnary((options) =>
       this.client.selectOutbound({ groupTag, outboundTag }, options),
     );
-    await new Promise<void>((resolve, reject) => {
+    return this.waitForConfirmation(signal, () => this.snapshot.groups?.some(
+      (group) => group.tag === groupTag && group.selected === outboundTag,
+    ) === true);
+  };
+  private waitForConfirmation(signal: AbortSignal, confirmed: () => boolean) {
+    return new Promise<void>((resolve, reject) => {
       const cleanup = () => {
         clearTimeout(timer);
         unsubscribe();
@@ -1010,14 +1077,12 @@ export class InstanceSession {
       };
       const aborted = () => {
         cleanup();
-        reject(new ConnectError("Canceled", Code.Canceled));
+        reject(signal.reason instanceof ConnectError
+          ? signal.reason
+          : new ConnectError("Canceled", Code.Canceled));
       };
       const check = () => {
-        if (
-          this.snapshot.groups?.some(
-            (g) => g.tag === groupTag && g.selected === outboundTag,
-          )
-        ) {
+        if (confirmed()) {
           cleanup();
           resolve();
         }
@@ -1035,6 +1100,43 @@ export class InstanceSession {
         check();
       }
     });
+  }
+  private canChangeClashMode() {
+    return this.canRunServiceAction() &&
+      this.detailChannel === "clashMode" &&
+      this.pending.capabilities.clashMode.status === "supported" &&
+      this.pending.loaded.clashMode === true && !this.pending.streamErrors.clashMode;
+  }
+  setClashMode = async (mode: string) => {
+    const parent = this.signal;
+    const service = this.serviceReadsScope?.signal;
+    const detail = this.detailScope?.signal;
+    if (!parent || !service || !detail || this.clashModeChange || !this.canChangeClashMode())
+      throw new ConnectError("Mode state unavailable", Code.Unavailable);
+    if (!this.pending.clashModeOptions?.includes(mode))
+      throw new ConnectError("Mode not reported by the instance", Code.InvalidArgument);
+    if (this.pending.currentClashMode === mode) return;
+    const scope = new AbortController();
+    const signal = AbortSignal.any([parent, service, detail, scope.signal]);
+    signal.throwIfAborted();
+    this.clashModeChange = scope;
+    this.update({ changingClashMode: true }, true);
+    try {
+      await this.runUnary((options) => this.client.setClashMode({ mode }, options), signal);
+      await this.waitForConfirmation(signal, () =>
+        this.snapshot.loaded.clashMode === true && this.snapshot.currentClashMode === mode,
+      );
+    } catch (error) {
+      const { code } = ConnectError.from(error);
+      if (!signal.aborted && (code === Code.NotFound || code === Code.Unimplemented))
+        this.clearClashMode(error);
+      throw error;
+    } finally {
+      if (this.clashModeChange === scope) {
+        this.clashModeChange = undefined;
+        this.update({ changingClashMode: undefined }, true);
+      }
+    }
   };
   urlTest = async (outboundTag: string, signal = this.signal) => {
     if (!this.canRunServiceAction())

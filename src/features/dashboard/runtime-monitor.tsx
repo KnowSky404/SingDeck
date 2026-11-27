@@ -29,6 +29,7 @@ const streamLabels: Record<Channel, string> = {
   connections: "Connections",
   logs: "Logs",
   outbounds: "Outbound inventory",
+  clashMode: "Clash Mode",
 };
 const serviceLabels = ["Idle", "Starting", "Running", "Stopping", "Fatal"];
 const phaseLabels = {
@@ -77,6 +78,7 @@ function summarizeRates(samples: Sample[], key: "up" | "down") {
 
 function streamState(snapshot: Snapshot, channel: Channel, statusStale: boolean, streamsAborted: boolean): string {
   if (snapshot.phase === "disconnected") return "Disconnected";
+  if (channel === "clashMode") return "Inactive";
   if (snapshot.streamErrors[channel]) return "Interrupted";
   if (channel === "outbounds") return "Inactive";
   if (streamsAborted) return "Unavailable";
@@ -297,6 +299,8 @@ export default function RuntimeMonitor() {
             </thead>
             <tbody>
               {(Object.keys(streamLabels) as Channel[]).map((channel) => {
+                if (channel === "clashMode" && snapshot.capabilities.clashMode.status !== "supported")
+                  return null;
                 const state = streamState(snapshot, channel, stale, streamsAborted);
                 return (
                   <tr key={channel} className="border-b last:border-b-0">

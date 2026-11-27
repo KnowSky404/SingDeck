@@ -231,6 +231,16 @@ suite("official sing-box 1.14.0 native integration (not mock)", () => {
       await expect(client.setClashMode({ mode: "rule" })).rejects.toMatchObject(
         { code: Code.NotFound },
       );
+      const modes = scope();
+      try {
+        await expect(first(client.subscribeClashMode({}, { signal: modes.signal })))
+          .rejects.toMatchObject({ code: Code.NotFound });
+        await expect.poll(() => session.getSnapshot().capabilities.clashMode.status)
+          .toBe("unavailable");
+        expect(session.getSnapshot().clashModeOptions).toBeUndefined();
+      } finally {
+        modes.abort();
+      }
     } finally {
       session.disconnect();
     }
@@ -386,4 +396,71 @@ suite("official sing-box 1.14.0 native integration (not mock)", () => {
       session.disconnect();
     }
   }, 30_000);
+});
+
+suite("official sing-box 1.14.0 native Clash Mode (not mock)", () => {
+  it("confirms native Clash Mode changes and receives changes from a second client", async () => {
+    const directory = await mkdtemp(`${tmpdir()}/singdeck-native-mode-`);
+    const secret = randomBytes(24).toString("hex");
+    const path = `${directory}/clash-mode.json`;
+    await writeFile(path, JSON.stringify({
+      log: { level: "info" },
+      outbounds: [{ type: "direct", tag: "direct" }],
+      route: {
+        rules: [{ clash_mode: "Low latency", action: "route", outbound: "direct" }],
+        final: "direct",
+      },
+      experimental: { clash_api: { default_mode: "Balanced" } },
+      services: [{
+        type: "api", tag: "mode-api", listen: "127.0.0.1", listen_port: 0, secret,
+      }],
+    }), { mode: 0o600 });
+    const daemon = spawn(binary!, ["run", "-c", path], { stdio: ["ignore", "ignore", "pipe"] });
+    let address: string | undefined;
+    createInterface({ input: daemon.stderr }).on("line", (line) => {
+      address ??= line.match(/service\/api\[mode-api\]: tcp server started at (127\.0\.0\.1:\d+)/)?.[1];
+    });
+    let modeSession: InstanceSession | undefined;
+    try {
+      await expect.poll(() => address, { timeout: 5000 }).toBeDefined();
+      const modeEndpoint = `http://${address}`;
+      const modeClient = createNativeClient(modeEndpoint, secret);
+      const otherClient = createNativeClient(modeEndpoint, secret);
+      expect(await modeClient.getClashModeStatus({})).toMatchObject({
+        modeList: ["Balanced", "Low latency"],
+        currentMode: "Balanced",
+      });
+      modeSession = new InstanceSession(modeClient, { ...defaultProfile, endpoint: modeEndpoint });
+      const session = modeSession;
+      session.connect();
+      await expect.poll(() => session.getSnapshot().clashModeOptions)
+        .toEqual(["Balanced", "Low latency"]);
+      expect(session.getSnapshot().currentClashMode).toBe("Balanced");
+      expect(session.getSnapshot().loaded.clashMode).toBeFalsy();
+      session.setDetailChannel("clashMode");
+      await expect.poll(() => {
+        const { serviceActionsReady, loaded, currentClashMode } = session.getSnapshot();
+        return serviceActionsReady && loaded.clashMode && currentClashMode;
+      }).toBe("Balanced");
+      expect(session.getSnapshot().loaded.connections).toBe(false);
+      await expect(session.setClashMode("missing")).rejects.toMatchObject({ code: Code.InvalidArgument });
+      await session.setClashMode("Low latency");
+      expect(session.getSnapshot().currentClashMode).toBe("Low latency");
+      await otherClient.setClashMode({ mode: "missing" });
+      expect((await otherClient.getClashModeStatus({})).currentMode).toBe("Low latency");
+      await otherClient.setClashMode({ mode: "Balanced" });
+      await expect.poll(() => session.getSnapshot().currentClashMode).toBe("Balanced");
+      session.setDetailChannel("connections");
+      await expect.poll(() => session.getSnapshot().loaded.connections).toBe(true);
+      expect(session.getSnapshot().loaded.clashMode).toBe(false);
+    } finally {
+      modeSession?.disconnect();
+      if (daemon.exitCode === null && daemon.signalCode === null) {
+        const exited = new Promise<void>((done) => daemon.once("exit", () => done()));
+        daemon.kill("SIGTERM");
+        await exited;
+      }
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 });

@@ -185,6 +185,7 @@ export function ChannelState({
                 status: "Overview",
                 groups: "Groups",
                 outbounds: "Outbounds",
+                clashMode: "Clash Mode",
                 logs: "Logs",
                 connections: "Connections",
               }[channel],

@@ -26,7 +26,8 @@ export interface LogEntry {
   message: string;
   text: string;
 }
-export type Channel = "service" | "status" | "groups" | "outbounds" | "logs" | "connections";
+export type DetailChannel = "connections" | "outbounds" | "clashMode";
+export type Channel = "service" | "status" | "groups" | "logs" | DetailChannel;
 export interface Snapshot {
   phase: "disconnected" | "connecting" | "connected" | "reconnecting" | "error";
   error?: string;
@@ -40,6 +41,9 @@ export interface Snapshot {
   defaultLogLevel?: LogLevel;
   groups?: Group[];
   outbounds?: GroupItem[];
+  clashModeOptions?: string[];
+  currentClashMode?: string;
+  changingClashMode?: boolean;
   capabilities: Capabilities;
   warnings?: DeprecatedWarning[];
   checkingWarnings?: boolean;
