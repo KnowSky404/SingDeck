@@ -36,10 +36,15 @@ export interface RuntimeObservation {
   events: RuntimeEvent[];
   lastFrameAt: Partial<Record<Channel, number>>;
   lastBoot?: bigint;
+  awaitingPostRestartSample?: boolean;
 }
 
 export function recordRuntimeEvent(runtime: RuntimeObservation, event: RuntimeEvent) {
-  return { ...runtime, events: [...runtime.events, event].slice(-eventLimit) };
+  return {
+    ...runtime,
+    events: [...runtime.events, event].slice(-eventLimit),
+    ...(event.kind === "restart" && { awaitingPostRestartSample: true }),
+  };
 }
 
 export function recordRuntimeSample(
@@ -65,6 +70,7 @@ export function recordRuntimeSample(
   };
   return {
     ...runtime,
+    awaitingPostRestartSample: false,
     samples: [...runtime.samples, sample]
       .filter(({ time: observed }) => observed >= time - sampleWindowMs)
       .slice(-sampleLimit),

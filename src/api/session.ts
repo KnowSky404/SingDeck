@@ -558,6 +558,11 @@ export class InstanceSession {
     if (runtime.samples.length <= 1) return;
     this.update({ runtime: { ...runtime, samples: runtime.samples.slice(-1) } }, true);
   };
+  clearRuntimeEvents = () => {
+    const { runtime } = this.pending;
+    if (!runtime.events.length) return;
+    this.update({ runtime: { ...runtime, events: [] } }, true);
+  };
   clearLogs = () => this.update({ logs: [] }, true);
   clearCoreLogs = async () => {
     const signal = this.signal;
