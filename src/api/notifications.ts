@@ -67,7 +67,14 @@ export function safeNativeText(value: string, redact: (value: string) => string,
   const plain = plainLog(value).replace(/[\p{Cc}\p{Cf}]/gu, " ");
   let text = plain;
   for (let depth = 0; depth <= 2; depth++) {
-    if (redact(text) !== text || credential.test(text) || url.test(text)) return "[redacted]";
+    // A normal text label can display an HTML whitespace run as one space.
+    const collapsed = text.replace(/[\t\n\f\r ]+/g, " ");
+    if (
+      redact(text) !== text ||
+      (collapsed !== text && redact(collapsed) !== collapsed) ||
+      credential.test(text) ||
+      url.test(text)
+    ) return "[redacted]";
     if (depth === 2 || !text.includes("%")) break;
     // Decode without treating literal plus signs and ampersands as form data.
     const decoded = new URLSearchParams(`text=${text.replaceAll("+", "%2B").replaceAll("&", "%26")}`).get("text");
