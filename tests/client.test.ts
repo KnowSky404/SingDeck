@@ -97,6 +97,17 @@ describe("real gRPC-Web adapter", () => {
       values.push(value);
     expect(values[0].memory).toBe(1234n);
   });
+  it.each(["fixture marker", "  fixture\tmarker", "fixture\u00a0"])(
+    "authenticates with the effective header value while preserving meaningful token characters",
+    async (effective) => {
+      const client = createNativeClient("https://api.example.org", `${effective}\t \r\n`, async (_, options) => {
+        if (new Headers(options?.headers).get("authorization") !== `Bearer ${effective}`)
+          return response(new Uint8Array(), 16);
+        return response(frame(toBinary(VersionSchema, create(VersionSchema, { version: "1.14.0", apiVersion: 4 }))));
+      });
+      await expect(client.getVersion({})).resolves.toMatchObject({ apiVersion: 4 });
+    },
+  );
   it("decodes gRPC error trailers and never displays server-echoed credentials", async () => {
     const client = createNativeClient(
       "https://api.example.org",

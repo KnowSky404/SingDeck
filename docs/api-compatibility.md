@@ -22,6 +22,8 @@ Service: `daemon.StartedService`; POST `/<service>/<RPC>`. Native HTTP/2 gRPC an
 
 Metadata: `authorization: Bearer <secret>`. No query credentials. Unary deadline 10s; subscription scope cancellation; status watchdog; bounded exponential reconnect for transient failures. Authentication, permission, unsupported API and malformed requests require correction, not an insecure retry/fallback.
 
+Authorization and session redaction use the same effective Bearer token. Trailing HTTP whitespace is removed as in Fetch header normalization. Leading and internal token characters are preserved. [Fetch header normalization](https://fetch.spec.whatwg.org/#concept-header-value-normalize)
+
 `GetVersion` returns core `version` and integer `apiVersion`; **v1.14.0 uses API version 4**, not 1. SingDeck gates on API 4 and core >=1.14.0 stable; other API revisions fail explicitly until verified. The vendored proto and API 4 are unchanged in the v1.14.5 stable and v1.15.0-alpha.14 sources. Stable v1.14.5 received a targeted STUN runtime check. Prereleases remain outside SingDeck's connection gate. [Upstream releases](https://github.com/SagerNet/sing-box/releases)
 
 | RPC | Input | Output / semantics |

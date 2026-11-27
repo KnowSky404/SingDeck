@@ -114,6 +114,10 @@ suite("official sing-box 1.14.0 native integration (not mock)", () => {
       version: "1.14.0",
       apiVersion: 4,
     });
+    await expect(createNativeClient(endpoint, `${secret} \t`).getVersion({})).resolves.toMatchObject({
+      version: "1.14.0",
+      apiVersion: 4,
+    });
     await expect(
       createNativeClient(endpoint, "invalid").getVersion({}),
     ).rejects.toMatchObject({ code: Code.Unauthenticated });

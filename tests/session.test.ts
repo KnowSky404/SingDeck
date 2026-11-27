@@ -71,6 +71,8 @@ describe("session lifecycle", () => {
   });
   it("redacts credentials before any page or log export can consume a received message", async () => {
     vi.useFakeTimers();
+    const marker = "synthetic-log-marker";
+    const pasted = `${marker} \t`;
     const client = createMockClient();
     const s = new InstanceSession(
       {
@@ -78,21 +80,23 @@ describe("session lifecycle", () => {
         async *subscribeLog(_, options) {
           yield create(LogSchema, {
             messages: [
-              { message: "server echoed private-token twice: private-token" },
+              { message: `server echoed ${marker} twice: ${marker}` },
+              { message: `server echoed ${pasted}` },
             ],
           });
           await delay(100000, options!.signal!);
         },
       },
       mockProfile,
-      "private-token",
+      pasted,
     );
     sessions.push(s);
     s.connect();
     await vi.advanceTimersByTimeAsync(300);
-    expect(s.getSnapshot().logs[0].message).toBe(
-      "server echoed [redacted] twice: [redacted]",
-    );
+    expect(s.getSnapshot().logs.map(({ message, text }) => [message, text])).toEqual([
+      ["server echoed [redacted] twice: [redacted]", "server echoed [redacted] twice: [redacted]"],
+      ["server echoed [redacted] \t", "server echoed [redacted] \t"],
+    ]);
   });
 
   it("keeps the current logs until the core sends a reset after acknowledging clear", async () => {

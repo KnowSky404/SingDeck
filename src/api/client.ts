@@ -54,17 +54,25 @@ export function validateEndpoint(value: string): string {
   return url.href.replace(/\/+$/, "");
 }
 
+export function normalizeBearerToken(token: string): string {
+  // Fetch trims HTTP whitespace from the full header value, which starts with "Bearer ".
+  let end = token.length;
+  while (end > 0 && " \t\n\r".includes(token.charAt(end - 1))) end--;
+  return token.slice(0, end);
+}
+
 export function createNativeClient(
   endpoint: string,
   token: string,
   customFetch?: typeof globalThis.fetch,
 ): SingBoxClient {
+  const authorization = token ? `Bearer ${normalizeBearerToken(token)}` : undefined;
   const transport = createGrpcWebTransport({
     baseUrl: validateEndpoint(endpoint),
     useBinaryFormat: true,
     interceptors: [
       (next) => (request) => {
-        if (token) request.header.set("Authorization", `Bearer ${token}`);
+        if (authorization) request.header.set("Authorization", authorization);
         return next(request);
       },
     ],

@@ -1,6 +1,9 @@
 import { create } from "@bufbuild/protobuf";
 import { expect, it } from "vitest";
+import { InstanceSession } from "@/api/session";
 import { serializeConnectionExport } from "@/features/connections/export";
+import { mockProfile } from "@/features/instances/profiles";
+import { createMockClient } from "@/mocks/client";
 import { ConnectionSchema } from "@/proto/daemon/started_service_pb";
 
 it("exports exact counters and only allowlisted, redacted connection metadata", () => {
@@ -107,9 +110,13 @@ it("redacts percent-encoded credentials even within malformed native text", () =
   });
 });
 
-it("keeps nested percent and form-encoded credentials out of the file", () => {
+it("keeps the effective credential and its nested encodings out of the file", () => {
   const marker = "synthetic value/marker";
+  const pasted = `${marker}\t `;
+  const session = new InstanceSession(createMockClient(), mockProfile, pasted);
   const row = create(ConnectionSchema, {
+    outbound: marker,
+    source: pasted,
     rule: "literal=synthetic+value/marker",
     inbound: "synthetic%2520value%252Fmarker",
     processInfo: { processPath: "apps/synthetic%2520value%252fmarker" },
@@ -119,9 +126,11 @@ it("keeps nested percent and form-encoded credentials out of the file", () => {
     "native",
     new Date(0),
     false,
-    (value) => value.replaceAll(marker, "[redacted]"),
+    (value) => session.redactText(value),
   );
   expect(JSON.parse(report).connections[0]).toMatchObject({
+    outbound: "[redacted]",
+    source: "[redacted]\t ",
     rule: "[redacted]",
     inbound: "[redacted]",
     processInfo: { processPath: "[redacted]" },
