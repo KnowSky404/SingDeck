@@ -9,7 +9,7 @@ SingDeck connects directly to the native sing-box Service API for control, diagn
 | Phase 2 · v0.10.0 target | In development | Runtime Monitor, Connection Inspector with export and bulk disconnect, core log controls, native Clash Mode, and the Notification Center are available. Traffic Analytics is in development. |
 | Phase 3 · v0.11.0 target | Planned | Instance management and quick switch, session isolation, opt-in multi-instance credential migration, and evaluation of a bounded multi-instance overview. |
 | Phase 4 · v0.12.0 target | Planned | Capability-gated Tailscale, Taildrop, OpenConnect, OpenVPN, and USB/IP. Browser gRPC-Web bidirectional features require separate transport verification. |
-| Phase 5 · v1.0.0 target | Planned | Reconnect and performance work with measured workloads, cross-browser/deployment checks, security audit, and evaluation of installable/custom workspaces. |
+| Phase 5 · v1.0.0 target | In development | Synthetic Connections, Logs and Outbound measurements, local browser and hosting checks, and security fixes are recorded in the verification record. Deployment acceptance and evaluation of installable and customizable workspaces remain open. |
 
 Versions are targets. Work is accepted against its phase criteria before moving to the next phase. Publication requires a separately authorized release.
 
