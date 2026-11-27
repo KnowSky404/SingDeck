@@ -14,14 +14,9 @@ import type { Channel, Snapshot } from "@/api/state";
 import { Badge } from "@/components/ui/badge";
 import { Choice, EmptyState, Notice, Panel } from "@/components/shared";
 import { bytes, uptime } from "@/lib/format";
-import { useRuntimeWindow } from "./use-runtime-window";
+import { runtimeWindows, useRuntimeWindow } from "./use-runtime-window";
 import { ServiceStatus_Type } from "@/proto/daemon/started_service_pb";
 
-const windows = [
-  { value: "60", label: "1 minute" },
-  { value: "180", label: "3 minutes" },
-  { value: "300", label: "5 minutes" },
-];
 const streamLabels: Record<Channel, string> = {
   service: "Service lifecycle",
   status: "Runtime status",
@@ -111,9 +106,8 @@ export default function RuntimeMonitor() {
   }, []);
   const { status, version, service, runtime } = snapshot;
   const streamsAborted = session.signal?.aborted ?? false;
-  const [windowSeconds, setWindowSeconds] = useState(String(profile.preferences.windowSeconds));
   const latest = runtime.samples.at(-1);
-  const samples = useRuntimeWindow(runtime.samples, Number(windowSeconds));
+  const { samples, windowSeconds, selectWindow } = useRuntimeWindow(runtime.samples, profile.preferences.windowSeconds);
   const points = useMemo(() => chartPoints(samples), [samples]);
   const averages = useMemo(
     () => ({ down: summarizeRates(samples, "down"), up: summarizeRates(samples, "up") }),
@@ -231,8 +225,8 @@ export default function RuntimeMonitor() {
             <Choice
               label="History window"
               value={windowSeconds}
-              onChange={setWindowSeconds}
-              options={windows.map(({ value, label }) => ({ value, label: t(label) }))}
+              onChange={selectWindow}
+              options={runtimeWindows.map(({ value, label }) => ({ value, label: t(label) }))}
             />
           </div>
         </div>

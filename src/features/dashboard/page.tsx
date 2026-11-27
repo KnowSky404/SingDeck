@@ -18,6 +18,7 @@ import {
 import { useWorkspace } from "@/app/context";
 import {
   ChannelState,
+  Choice,
   PageHeading,
   Panel,
   EmptyState,
@@ -29,13 +30,13 @@ import { bytes, time, uptime } from "@/lib/format";
 import { ServiceStatus_Type } from "@/proto/daemon/started_service_pb";
 import { LogLevel } from "@/proto/daemon/started_service_pb";
 import { LogLine } from "@/features/logs/log-line";
-import { useRuntimeWindow } from "./use-runtime-window";
+import { runtimeWindows, useRuntimeWindow } from "./use-runtime-window";
 
 export default function Dashboard() {
   const { profile, snapshot, t } = useWorkspace();
   const { status, version, runtime, service } = snapshot;
   const latest = runtime.samples.at(-1);
-  const traffic = useRuntimeWindow(runtime.samples, profile.preferences.windowSeconds);
+  const { samples: traffic, windowSeconds, selectWindow } = useRuntimeWindow(runtime.samples, profile.preferences.windowSeconds);
   const measuredCount = traffic.filter(({ down }) => down !== undefined).length;
   const recentLogs = snapshot.logs
     .filter((entry) => entry.level <= LogLevel.INFO)
@@ -86,11 +87,12 @@ export default function Dashboard() {
         <Panel
           title={t("Traffic activity")}
           action={
-            <span className="subtle">
-              {t("Last {seconds} seconds", {
-                seconds: profile.preferences.windowSeconds,
-              })}
-            </span>
+            <Choice
+              label="History window"
+              value={windowSeconds}
+              onChange={selectWindow}
+              options={runtimeWindows.map(({ value, label }) => ({ value, label: t(label) }))}
+            />
           }
           className="traffic-panel"
         >
