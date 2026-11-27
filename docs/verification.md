@@ -99,7 +99,13 @@ A local comparison used production builds on loopback with Chromium 159.0.8154.6
 
 An official sing-box 1.14.0/API 4 Linux fixture ran in a loopback-only network namespace. Its named Tailscale endpoint stayed in `NeedsLogin` with zero peers while the authenticated HTTP gRPC-Web inbox stream reported one preseeded completed file. The reported name, size and modification time matched the file.
 
-Downloading the 4,194,357-byte file returned a size frame and 258 data frames. The largest data frame carried 16,320 bytes, and the assembled SHA-256 matched the fixture file. A missing filename returned `NotFound`. In a second download, closing the client after one data frame released the core's open file handle. The file checksum stayed intact and the API remained responsive. This check covers seeded inbox listing and download cancellation. Live peer receipt, sender metadata, send progress and inbox mutations still need separate verification.
+Downloading the 4,194,357-byte file returned a size frame and 258 data frames. The largest data frame carried 16,320 bytes, and the assembled SHA-256 matched the fixture file. A missing filename returned `NotFound`. In a second download, closing the client after one data frame released the core's open file handle. The file checksum stayed intact and the API remained responsive. This check covers seeded inbox listing, download and download cancellation.
+
+### Seeded inbox deletion
+
+A separate loopback-only fixture on official sing-box 1.14.0/API 4 seeded two completed synthetic files while the endpoint had no peers. A `DeleteTaildropFile` call with an incorrect Bearer returned `Unauthenticated` and left both files unchanged. The authenticated call named one file and succeeded. The original inbox subscription then reported one file instead of two. The target was absent on disk and a download returned `NotFound` without data. The remaining file's metadata, bytes and SHA-256 matched its pre-delete state. The API stayed responsive and the disposable fixture cleaned up its files and listener.
+
+This check covers deletion of a completed file at the core API. Live peer receipt, sender metadata, send progress, inbox read state and cancellation of a pending transfer require separate evidence.
 
 ### Browser storage research
 
