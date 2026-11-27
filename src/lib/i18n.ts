@@ -326,6 +326,10 @@ const zh: Record<string, string> = {
   "Clipboard unavailable. Use Export to save filtered logs.":
     "无法使用剪贴板，请导出日志。",
   "Filtered logs exported.": "已导出筛选日志。",
+  "Log history pages": "日志历史分页",
+  "Older logs": "较早日志",
+  "Newer logs": "较新日志",
+  "{first}–{last} of {count} matching logs": "显示第 {first}–{last} 条，共 {count} 条匹配日志",
   "{count} shown · {limit} entry limit · 16K characters per message":
     "显示 {count} 条 · 最多 {limit} 条 · 每条最多 16K 字符",
   "Paused locally": "显示已暂停",

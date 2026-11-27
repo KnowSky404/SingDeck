@@ -575,7 +575,11 @@ test("ANSI logs render colors and export plain text", async ({ page }) => {
     line.locator(".log-message span").filter({ hasText: /^1679805080$/ }),
   ).toHaveCSS("color", "rgb(215, 95, 135)");
   await page.getByRole("textbox", { name: "Search logs" }).fill("DEBUG[16737]");
-  await expect(page.locator(".log-line")).toHaveCount(1);
+  const messages = page.locator(".log-line .log-message");
+  await expect.poll(async () => {
+    const visible = await messages.allTextContents();
+    return visible.length > 0 && visible.every((message) => message.includes("DEBUG[16737]"));
+  }).toBe(true);
   const downloaded = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export filtered logs" }).click();
   const download = await downloaded;
