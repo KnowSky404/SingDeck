@@ -143,6 +143,20 @@ export default function Settings() {
           </div>
         </Panel>
         {snapshot.capabilities.clashMode.status === "supported" && <ClashMode />}
+        {profile.mode === "native" && (
+          <Panel title="Native services">
+            {snapshot.capabilities.usbip.status === "unavailable" ||
+            snapshot.capabilities.usbip.status === "unsupported" ? (
+              <p>{t("USB/IP status is unavailable on this instance.")}</p>
+            ) : (
+              <div className="button-row">
+                <Button variant="outline" asChild>
+                  <a href="#/settings/usbip">{t("USB/IP server status")}</a>
+                </Button>
+              </div>
+            )}
+          </Panel>
+        )}
       </div>
     </>
   );

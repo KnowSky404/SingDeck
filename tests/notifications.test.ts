@@ -48,6 +48,25 @@ describe("notification history", () => {
       .toMatchObject({ count: 1, read: false });
   });
 
+  it("redacts raw reflected credentials before normalizing notification text", () => {
+    const reflected = "fixture\tmarker";
+    const packet = create(NotificationEventSchema, {
+      event: { case: "send", value: {
+        identifier: "sample",
+        title: `Reflected ${reflected}`,
+        subtitle: encodeURIComponent(reflected),
+        body: " \x1b[31mOrdinary body\x1b[0m\tvalue ",
+      } },
+    });
+    const [entry] = receiveNativeNotification([], packet, 1, 1, (text) =>
+      text.replaceAll(reflected, "[redacted]"),
+    );
+    expect(entry.source).toBe("native");
+    if (entry.source !== "native") throw new Error("Missing native notification");
+    expect([entry.title, entry.subtitle].map((text) => text === "[redacted]")).toEqual([true, true]);
+    expect(entry.body).toBe("Ordinary body value");
+  });
+
   it("bounds memory and drops incomplete or oversized identities", () => {
     let history: NotificationRecord[] = [];
     for (let i = 0; i < NOTIFICATION_LIMIT + 5; i++) {

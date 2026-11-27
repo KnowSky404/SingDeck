@@ -186,6 +186,7 @@ export function ChannelState({
                 groups: "Groups",
                 outbounds: "Outbounds",
                 clashMode: "Clash Mode",
+                usbip: "USB/IP server status",
                 logs: "Logs",
                 connections: "Connections",
                 notifications: "Notifications",

@@ -60,8 +60,9 @@ export function receiveLocalNotification(
 const credential = /\bbearer\s+\S|\b(?:authorization|(?:set[-_])?cookie|passwd|password|(?:client[-_ ]?)?secret|(?:x[-_])?api[-_ ]?key|(?:(?:access|refresh|id)[-_ ]?)?token)["']?\s*[:=]/iu;
 const url = /\/\/\S|\b(?:https?|file|mailto|data|javascript|vbscript|sing-box):\S/iu;
 
-function safeNativeText(value: string, redact: (value: string) => string, limit: number) {
+export function safeNativeText(value: string, redact: (value: string) => string, limit: number) {
   if (value.length > 8192) return "";
+  if (redact(value) !== value) return "[redacted]";
   // Controls and formatting must not conceal credential and URL markers.
   const plain = plainLog(value).replace(/[\p{Cc}\p{Cf}]/gu, " ");
   let text = plain;

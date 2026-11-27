@@ -50,6 +50,12 @@ A local comparison used production builds on loopback with Chromium 159.0.8154.6
 | Desktop 1280 × 720 | 4,652 → 722 ms | 3,045 → 294 ms |
 | Emulated mobile 320 × 700 | 4,209 → 679 ms | 4,036 → 283 ms |
 
+## Phase 4 — USB/IP Server status
+
+An official sing-box v1.14.0 Linux loopback fixture returned a named, configured dynamic server with an empty device list through authenticated HTTP gRPC-Web. A fixture without the dynamic service returned an empty server list. An incorrect Bearer was rejected as Unauthenticated. Both fixtures used synthetic credentials and no attached devices.
+
+Chromium desktop and emulated mobile opened the status view under Settings against the official configured service from a local production build. The subscription began when the view opened, displayed the service name and zero shared devices, and was canceled when the view closed. The browser checks also covered horizontal overflow. The session regression covers raw and encoded credential redaction, late-frame rejection, restoration of the Connections stream, and the distinction between an empty result and NotFound. The view regressions cover stopped and fatal services, and metadata revalidation failure before or after the first USB/IP frame. The browser regression also checks keyboard entry focuses the USB/IP heading. Real-device descriptors and hardware behavior await a device fixture. [Browser regression](../e2e/usbip.spec.ts) · [Session tests](../tests/session.test.ts)
+
 ## Phase 5 — Connections capacity baseline
 
 The baseline uses application source `ec030fb`, Bun 1.4.4, Playwright 1.65.1 and headless Chromium 159.0.8154.6 at 1280 × 720 on a shared Linux x86_64 host with two available CPUs. The [measurement script](../scripts/measure-connection-capacity.ts) serves an isolated production-mode fixture build on `127.0.0.1:15926` and blocks browser requests to other origins. The initial reset seeds active connections and closed history. The test reads both through the status filter and observes subsequent traffic updates on active rows. The fixture build emitted 376,544 gzip bytes of JS and CSS, compressed individually.
