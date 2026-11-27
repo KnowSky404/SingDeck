@@ -52,6 +52,8 @@ In a local production Chromium run with official sing-box 1.14.0/API 4, **Clear 
 
 The chart-sample regression also clears while a newer status sample is queued for publication. The clear publishes that exact sample and leaves lifecycle events, stream state and sibling receipt times intact. Desktop and 320px mobile Demo tests separately check keyboard or touch, retained readings, new samples, the wider window and the same cleared buffer after navigating through Overview.
 
+Overview and Runtime Monitor share a stale-data threshold of three configured Status intervals. In isolated Chromium with the production dashboard and official sing-box 1.14.0/API 4, a loopback fixture held Status frames for about 4.15 seconds on one open subscription. Overview stayed connected and kept its last readings. It showed the stale notice and labeled its traffic chart with the last observed rates. On release, fresh frames cleared the notice and restored the current rate label without opening another subscription. Desktop and 320px mobile Demo tests separately verify the retained cards, chart and recovery.
+
 ## Phase 2 — Per-connection observed rates
 
 A production Chromium 159.0.8154.6 browser connected to the built-in dashboard on official sing-box 1.14.0/API 4 with a one-second Connections interval. An isolated TCP fixture sent 128 B up and 256 B down after the inspector opened. The first live update established the baseline and both rates stayed unavailable. The next update of 192 B up and 384 B down displayed 192 B/s and 384 B/s in that run. Reported interval fields kept their original byte values.

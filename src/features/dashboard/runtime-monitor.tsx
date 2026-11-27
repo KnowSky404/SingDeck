@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import {
   CartesianGrid,
   Line,
@@ -9,13 +9,14 @@ import {
   YAxis,
 } from "recharts";
 import { useWorkspace } from "@/app/context";
-import { notificationStreamState, runtimeStaleIntervals } from "@/api/runtime";
+import { notificationStreamState } from "@/api/runtime";
 import type { Channel, Snapshot } from "@/api/state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Choice, EmptyState, Notice, Panel } from "@/components/shared";
 import { bytes, uptime } from "@/lib/format";
 import { runtimeWindows, useRuntimeWindow } from "./use-runtime-window";
+import { useRuntimeStale } from "./use-runtime-stale";
 import { ServiceStatus_Type } from "@/proto/daemon/started_service_pb";
 
 const streamLabels: Record<Channel, string> = {
@@ -124,34 +125,7 @@ export default function RuntimeMonitor() {
     () => new Intl.DateTimeFormat(language, { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
     [language],
   );
-  const lastStatus = runtime.lastFrameAt.status;
-  const staleAfterMs = profile.preferences.intervalMs * runtimeStaleIntervals;
-  const [staleFrame, setStaleFrame] = useState<number>();
-  useEffect(() => {
-    if (lastStatus === undefined) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const schedule = () => {
-      clearTimeout(timer);
-      if (!document.hidden) {
-        timer = setTimeout(
-          () => setStaleFrame(lastStatus),
-          Math.max(0, lastStatus + staleAfterMs - Date.now()),
-        );
-      }
-    };
-    schedule();
-    document.addEventListener("visibilitychange", schedule);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener("visibilitychange", schedule);
-    };
-  }, [lastStatus, staleAfterMs]);
-  const stale = Boolean(latest && (
-    snapshot.phase !== "connected" ||
-    snapshot.streamErrors.status ||
-    (lastStatus !== undefined && staleFrame === lastStatus) ||
-    runtime.awaitingPostRestartSample
-  ));
+  const stale = useRuntimeStale(snapshot, profile.preferences.intervalMs);
   const metrics = [
     ["Memory", bytes(latest?.memory || undefined)],
     ["Goroutines", count(latest?.goroutines)],
@@ -192,7 +166,7 @@ export default function RuntimeMonitor() {
         </Notice>
       )}
       <div className="grid min-w-0 gap-4 lg:grid-cols-2">
-        <Panel title={<h2>{t("Current runtime")}</h2>}>
+        <Panel title={<h2>{t(stale ? "Last observed runtime" : "Current runtime")}</h2>}>
           <dl className="grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-3">
             {metrics.map(([label, value]) => (
               <div key={label} className="min-w-0">

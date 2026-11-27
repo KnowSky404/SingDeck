@@ -94,3 +94,56 @@ test("Overview changes the samples shown without saving the window or reviving e
   await expect(empty).toBeVisible();
   await expect(chart).toHaveCount(0);
 });
+
+test("Overview marks retained readings stale before a quiet status stream reconnects", async ({ page, isMobile }) => {
+  if (isMobile) await page.setViewportSize({ width: 320, height: 740 });
+  await page.clock.install();
+  await page.goto("/");
+  await page.getByRole("button", { name: "Explore demo", exact: true }).click();
+  await expect(page.getByText("Mock mode", { exact: true })).toBeVisible();
+
+  const main = page.getByRole("main");
+  const stale = main.getByText("Runtime data is stale", { exact: true });
+  const chart = main.getByRole("img", { name: /^Traffic history\./ });
+  const currentName = /^Traffic history\. Current download \d.+ per second; upload \d.+ per second\.$/;
+  const curves = chart.locator("path.recharts-area-curve");
+  const cards = main.locator(".metrics-grid .metric strong");
+  const connection = page.locator(".connection-status");
+  const viewRuntime = main.getByRole("link", { name: "View runtime monitor", exact: true });
+  await expect(curves).toHaveCount(2);
+  // Load both routes before freezing the clock so lazy page loading can finish normally.
+  await viewRuntime.press("Enter");
+  await expect(main.getByRole("heading", { name: "Current runtime", exact: true })).toBeVisible();
+  await page.goBack();
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1_000));
+  await expect(chart).toHaveAccessibleName(currentName);
+  await expect(stale).toHaveCount(0);
+  await expect(cards).toHaveCount(4);
+  const readings = await cards.allTextContents();
+  expect(readings.every(value => /^\d/.test(value))).toBe(true);
+  const lastObservedName = (await chart.getAttribute("aria-label"))!
+    .replace("Current download", "Last observed download") + " Readings are stale.";
+
+  // Age the last sample past the three-second limit without delivering another status frame.
+  await page.clock.setSystemTime(await page.evaluate(() => Date.now() + 4_000));
+  await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+  await page.clock.runFor(1);
+  await expect(connection).toHaveText("Connected");
+  await expect(stale).toBeVisible();
+  await expect(chart).toHaveAccessibleName(lastObservedName);
+  await expect(cards).toHaveText(readings);
+  await expect(curves).toHaveCount(2);
+
+  await viewRuntime.press("Enter");
+  await expect(main.getByRole("heading", { name: "Last observed runtime", exact: true })).toBeVisible();
+  await expect(stale).toBeVisible();
+  await page.goBack();
+  await expect(stale).toBeVisible();
+  await expect(chart).toHaveAccessibleName(lastObservedName);
+
+  // The first status frame after the gap restores freshness. The next frame restores rates.
+  await page.clock.runFor(2_200);
+  await expect(stale).toHaveCount(0);
+  await expect(connection).toHaveText("Connected");
+  await expect(chart).toHaveAccessibleName(currentName);
+});

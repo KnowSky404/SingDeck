@@ -23,6 +23,7 @@ import {
   PageHeading,
   Panel,
   EmptyState,
+  Notice,
 } from "@/components/shared";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -32,6 +33,7 @@ import { ServiceStatus_Type } from "@/proto/daemon/started_service_pb";
 import { LogLevel } from "@/proto/daemon/started_service_pb";
 import { LogLine } from "@/features/logs/log-line";
 import { runtimeWindows, useRuntimeWindow } from "./use-runtime-window";
+import { useRuntimeStale } from "./use-runtime-stale";
 import { OverviewCustomization } from "./overview-customization";
 import {
   loadOverviewLayout,
@@ -61,8 +63,10 @@ export default function Dashboard() {
   }
   const { status, version, runtime, service } = snapshot;
   const latest = runtime.samples.at(-1);
+  const stale = useRuntimeStale(snapshot, profile.preferences.intervalMs);
   const { samples: traffic, windowSeconds, selectWindow } = useRuntimeWindow(runtime.samples, profile.preferences.windowSeconds);
-  const measuredCount = traffic.filter(({ down }) => down !== undefined).length;
+  const measuredTraffic = traffic.filter(({ down }) => down !== undefined);
+  const chartRates = stale ? measuredTraffic.at(-1) : latest;
   const recentLogs = snapshot.logs
     .filter((entry) => entry.level <= LogLevel.INFO)
     .slice(-4);
@@ -95,6 +99,11 @@ export default function Dashboard() {
       <div className="flex justify-end">
         <OverviewCustomization layout={layout} onChange={changeLayout} />
       </div>
+      {stale && !snapshot.streamErrors.status && (
+        <Notice title="Runtime data is stale">
+          Retained data may be stale.
+        </Notice>
+      )}
       <div className="metrics-grid">
         {layout.metrics.map((card) => {
           const { value, icon: Icon, kind } = metrics[card];
@@ -126,14 +135,14 @@ export default function Dashboard() {
           className="traffic-panel"
         >
           <ChannelState channel="status">
-            {measuredCount === 0 && !available ? (
+            {measuredTraffic.length === 0 && !available ? (
               <EmptyState
                 title={t("Traffic unavailable")}
                 description={t(
                   "The native API has not reported traffic tracking data.",
                 )}
               />
-            ) : measuredCount === 0 ? (
+            ) : measuredTraffic.length === 0 ? (
               <EmptyState
                 title={t("Collecting traffic samples")}
                 description={t(
@@ -145,8 +154,10 @@ export default function Dashboard() {
                 className="chart-frame"
                 role="img"
                 aria-label={t(
-                  "Traffic history. Current download {down} per second; upload {up} per second.",
-                  { down: bytes(latest?.down), up: bytes(latest?.up) },
+                  stale
+                    ? "Traffic history. Last observed download {down} per second; upload {up} per second. Readings are stale."
+                    : "Traffic history. Current download {down} per second; upload {up} per second.",
+                  { down: bytes(chartRates?.down), up: bytes(chartRates?.up) },
                 )}
               >
                 <ResponsiveContainer width="100%" height="100%" minWidth={0}>
@@ -252,7 +263,7 @@ export default function Dashboard() {
                 </ResponsiveContainer>
               </div>
             )}
-            {!available && measuredCount > 0 && (
+            {!available && measuredTraffic.length > 0 && (
               <p className="footnote">{t("The native API has not reported traffic tracking data.")}</p>
             )}
             <div className="chart-legend">

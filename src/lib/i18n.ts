@@ -199,6 +199,8 @@ const zh: Record<string, string> = {
   "Last {seconds} seconds": "最近 {seconds} 秒",
   "Traffic history. Current download {down} per second; upload {up} per second.":
     "流量历史。当前每秒下载 {down}，上传 {up}。",
+  "Traffic history. Last observed download {down} per second; upload {up} per second. Readings are stale.":
+    "流量历史。上次观测到的每秒下载为 {down}，上传为 {up}。读数已过期。",
   "Traffic unavailable": "流量不可用",
   "The native API has not reported traffic tracking data.":
     "原生 API 尚未返回流量跟踪数据。",
@@ -593,6 +595,7 @@ const zh: Record<string, string> = {
   "Runtime monitor": "运行监控",
   "View runtime monitor": "查看运行监控",
   "Current runtime": "当前运行状态",
+  "Last observed runtime": "上次观测到的运行状态",
   "Runtime data is stale": "运行监控数据已过期",
   "Connection status": "连接状态",
   "Inbound connections": "入站连接数",
