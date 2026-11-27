@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -101,6 +102,7 @@ const links = [
   },
 ];
 const currentPath = () => location.hash.slice(1) || "/";
+const noOpenGroups: ReadonlySet<string> = new Set<string>();
 const subscribeToastVisibility = (listener: () => void) => {
   const portals = new MutationObserver(listener);
   portals.observe(document.body, { childList: true });
@@ -336,6 +338,26 @@ export default function App() {
     window.scrollTo(0, 0);
   }, [path]);
   const workspaceOpen = snapshot.loaded.status && !disconnecting;
+  const canRetainGroupExpansion = workspaceOpen && !snapshot.authenticationFailed;
+  const freshGroups = snapshot.streamErrors.groups ? undefined : snapshot.groups;
+  const [groupExpansion, setGroupExpansion] = useState<{
+    session: InstanceSession;
+    tags: ReadonlySet<string>;
+  }>();
+  const retainedGroupExpansion = useMemo(() => {
+    if (!canRetainGroupExpansion || groupExpansion?.session !== session) return undefined;
+    // The native Groups stream can publish an empty frame before its lifecycle update arrives.
+    if (!freshGroups?.length) return groupExpansion;
+    const tags = new Set(freshGroups
+      .filter(({ tag }) => groupExpansion.tags.has(tag))
+      .map(({ tag }) => tag));
+    if (!tags.size) return undefined;
+    return tags.size === groupExpansion.tags.size
+      ? groupExpansion
+      : { ...groupExpansion, tags };
+  }, [canRetainGroupExpansion, groupExpansion, session, freshGroups]);
+  if (groupExpansion !== retainedGroupExpansion) setGroupExpansion(retainedGroupExpansion);
+
   const currentReportedOutbound = path === "/proxies" && workspaceOpen &&
     !snapshot.authenticationFailed && reportedOutbound?.session === session &&
     reportedOutbound.topologyGeneration === snapshot.topologyGeneration
@@ -502,6 +524,14 @@ export default function App() {
                   key={pageKey}
                   showInventory={showInventory}
                   reportedTag={currentReportedOutbound?.tag}
+                  openGroups={retainedGroupExpansion?.tags ?? noOpenGroups}
+                  setOpenGroups={(update) => {
+                    if (!canRetainGroupExpansion) return;
+                    setGroupExpansion((current) => {
+                      const tags = update(current?.session === session ? current.tags : noOpenGroups);
+                      return tags.size ? { session, tags } : undefined;
+                    });
+                  }}
                   onShowAll={() => setReportedOutbound(undefined)}
                   onInventoryChange={(enabled) => {
                     setShowInventory(enabled);

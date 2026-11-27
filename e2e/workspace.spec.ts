@@ -824,6 +824,47 @@ test("group cards and node cards are independent and settings stay read-only", a
   ).toBeVisible();
 });
 
+test("keeps manual outbound group expansion for the current workspace", async ({ page }) => {
+  await demo(page);
+  await navigate(page, "Outbounds");
+  const expandPrimary = page.getByRole("button", { name: "Expand Primary route", exact: true });
+  const collapsePrimary = page.getByRole("button", { name: "Collapse Primary route", exact: true });
+  const expandAuto = page.getByRole("button", { name: "Expand Auto route", exact: true });
+  await expandPrimary.press("Enter");
+  await expect(collapsePrimary).toBeFocused();
+  await expect(expandAuto).toBeVisible();
+
+  await navigate(page, "Logs");
+  await expect(page).toHaveURL(/#\/logs$/);
+  await navigate(page, "Outbounds");
+  await expect(collapsePrimary).toHaveAttribute("aria-expanded", "true");
+  await expect(expandAuto).toBeVisible();
+
+  await page.getByRole("radio", { name: "All outbounds", exact: true }).click();
+  await expect(page.getByRole("list", { name: "All outbounds", exact: true })).toBeVisible();
+  await page.getByRole("radio", { name: "Groups", exact: true }).click();
+  await expect(collapsePrimary).toBeVisible();
+  await expect(expandAuto).toBeVisible();
+
+  const search = page.getByRole("textbox", { name: "Search outbounds", exact: true });
+  await search.fill("Direct");
+  await expect(page.locator(".proxy-items .proxy-row")).toHaveCount(1);
+  await collapsePrimary.click();
+  await expect(expandPrimary).toBeVisible();
+  await search.clear();
+  await expect(collapsePrimary).toBeVisible();
+  await expect(expandAuto).toBeVisible();
+
+  await page.getByRole("button", { name: "Current connection", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Disconnect", exact: true }).click();
+  await expect(page.getByRole("navigation")).toHaveCount(0);
+  await page.getByRole("button", { name: "Explore demo", exact: true }).click();
+  await expect(page.getByText("Mock mode", { exact: true })).toBeVisible();
+  await navigate(page, "Outbounds");
+  await expect(expandPrimary).toHaveAttribute("aria-expanded", "false");
+  await expect(expandAuto).toBeVisible();
+});
+
 test("INFO threshold hides debug and trace while retaining warnings and errors", async ({
   page,
 }) => {
