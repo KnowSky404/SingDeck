@@ -70,11 +70,13 @@ function ProxyGroup({
     );
   const [target, setTarget] = useState("");
   const currentDescription = useId();
-  const items = group.items.filter(
-    (item) =>
-      item.tag.toLowerCase().includes(search) &&
-      (type === "all" || item.type === type),
-  );
+  const items = expanded
+    ? group.items.filter(
+        (item) =>
+          item.tag.toLowerCase().includes(search) &&
+          (type === "all" || item.type === type),
+      )
+    : undefined;
   const current = group.items.find((item) => item.tag === group.selected);
   const currentLatency =
     current && latencyTone(current) !== "unknown" ? latency(current) : null;
@@ -152,7 +154,7 @@ function ProxyGroup({
           </CardContent>
         )}
         <CollapsibleContent className="proxy-group-body">
-          <CardContent>
+          {items && <CardContent>
             <div className={cards ? "proxy-items proxy-cards" : "proxy-items"}>
               {items.map((item) => {
                 const active = item.tag === group.selected;
@@ -247,7 +249,7 @@ function ProxyGroup({
                 {t("No outbounds match your filters.")}
               </p>
             )}
-          </CardContent>
+          </CardContent>}
         </CollapsibleContent>
       </Card>
     </Collapsible>
