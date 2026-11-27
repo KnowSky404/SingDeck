@@ -24,6 +24,7 @@ import { canRetry, canRetryCode, CloseAllUnavailable, delay, describeError } fro
 import { recordRuntimeEvent, recordRuntimeSample, runtimeStaleIntervals } from "./runtime";
 import {
   appendLogs,
+  applyConnectionEvents,
   applyConnections,
   assertCompatible,
   CompatibilityError,
@@ -1104,13 +1105,17 @@ export class InstanceSession {
           )) {
             if (parentSignal.aborted) return;
             received();
-            const snapshot = applyConnections(this.pending.connections, events);
+            const previous = this.pending.connections;
+            // Once published, the map belongs to snapshot readers.
+            const snapshot = !events.reset && previous instanceof Map && previous !== this.snapshot.connections
+              ? applyConnectionEvents(previous, events.events)
+              : applyConnections(previous, events);
             const resume = events.reset && this.retainClosedOnResume;
             let connections = snapshot;
             if (resume) {
               // The core's reset replaces live rows but its closed buffer is shorter than ours.
               connections = new Map();
-              for (const [id, row] of this.pending.connections) {
+              for (const [id, row] of previous) {
                 if (row.closedAt > 0n && !snapshot.has(id)) connections.set(id, row);
               }
               for (const [id, row] of snapshot) connections.set(id, row);
