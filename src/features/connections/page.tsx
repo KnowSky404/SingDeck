@@ -72,7 +72,9 @@ function hasStartTime(timestamp: bigint) {
   return timestamp > 0n && timestamp <= 8_640_000_000_000_000n;
 }
 
-export default function Connections() {
+export default function Connections({ onInspectOutbound }: {
+  onInspectOutbound: (tag: string, topologyGeneration: number) => void;
+}) {
   const { snapshot, session, profile, language, t } = useWorkspace();
   const [filters, setFilters] = useState(defaultConnectionFilters);
   const [search, setSearch] = useState("");
@@ -594,6 +596,7 @@ export default function Connections() {
       </Dialog>
       <ConnectionInspector
         connectionId={detailId}
+        onInspectOutbound={onInspectOutbound}
         onClose={() => setDetailId(null)}
         onCloseAutoFocus={(event) => {
           event.preventDefault();

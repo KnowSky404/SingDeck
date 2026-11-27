@@ -255,9 +255,13 @@ function ProxyGroup({
 }
 export default function Outbounds({
   showInventory,
+  reportedTag,
+  onShowAll,
   onInventoryChange,
 }: {
   showInventory: boolean;
+  reportedTag?: string;
+  onShowAll: () => void;
   onInventoryChange: (enabled: boolean) => void;
 }) {
   const { snapshot, t } = useWorkspace();
@@ -289,7 +293,7 @@ export default function Outbounds({
           {t("Queued tests stopped. The core may finish probes already sent.")}
         </p>
       )}
-      {showInventory ? <OutboundInventory /> : <OutboundGroups />}
+      {showInventory ? <OutboundInventory reportedTag={reportedTag} onShowAll={onShowAll} /> : <OutboundGroups />}
     </>
   );
 }

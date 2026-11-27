@@ -2,6 +2,7 @@ import {
   Component,
   Suspense,
   lazy,
+  useCallback,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -49,6 +50,7 @@ import {
 import { version } from "../../package.json";
 import { cn } from "@/lib/utils";
 import { useDesktopAlerts } from "@/features/notifications/desktop";
+import type { InstanceSession } from "@/api/session";
 
 const Overview = lazy(() => import("@/features/dashboard/page"));
 const RuntimeMonitor = lazy(() => import("@/features/dashboard/runtime-monitor"));
@@ -98,10 +100,6 @@ const links = [
     icon: Settings,
   },
 ];
-const subscribeHash = (listener: () => void) => {
-  addEventListener("hashchange", listener);
-  return () => removeEventListener("hashchange", listener);
-};
 const currentPath = () => location.hash.slice(1) || "/";
 const subscribeToastVisibility = (listener: () => void) => {
   const portals = new MutationObserver(listener);
@@ -317,12 +315,32 @@ export default function App() {
     t,
   } = useWorkspace();
   const desktopAlerts = useDesktopAlerts(session, snapshot.notifications, t);
+  const [showInventory, setShowInventory] = useState(false);
+  const [reportedOutbound, setReportedOutbound] = useState<{
+    session: InstanceSession;
+    topologyGeneration: number;
+    tag: string;
+  }>();
+  const subscribeHash = useCallback((listener: () => void) => {
+    const onHashChange = (event: HashChangeEvent) => {
+      // A quick Back can restore the hash before React renders the route that was visited.
+      if (new URL(event.oldURL).hash === "#/proxies" && new URL(event.newURL).hash !== "#/proxies")
+        setReportedOutbound(undefined);
+      listener();
+    };
+    addEventListener("hashchange", onHashChange);
+    return () => removeEventListener("hashchange", onHashChange);
+  }, []);
   const path = useSyncExternalStore(subscribeHash, currentPath);
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [path]);
-  const [showInventory, setShowInventory] = useState(false);
   const workspaceOpen = snapshot.loaded.status && !disconnecting;
+  const currentReportedOutbound = path === "/proxies" && workspaceOpen &&
+    !snapshot.authenticationFailed && reportedOutbound?.session === session &&
+    reportedOutbound.topologyGeneration === snapshot.topologyGeneration
+      ? reportedOutbound : undefined;
+  if (reportedOutbound && !currentReportedOutbound) setReportedOutbound(undefined);
   const inventoryBatch = snapshot.latencyTestSource === "outbounds" &&
     !snapshot.stoppingLatencyTests;
   const inventoryEnabled = Boolean(
@@ -347,21 +365,19 @@ export default function App() {
   const Page =
     path === "/"
       ? Overview
-      : path === "/connections"
-        ? Connections
-        : path === "/logs"
-          ? Logs
-          : path === "/diagnostics"
-            ? Diagnostics
-            : path === "/configuration-health"
-              ? ConfigurationHealth
-              : path === "/runtime-monitor"
-                ? RuntimeMonitor
-                : path === "/settings"
-                  ? SettingsPage
-                  : path === "/settings/usbip"
-                    ? USBIPStatus
-                    : null;
+      : path === "/logs"
+        ? Logs
+        : path === "/diagnostics"
+          ? Diagnostics
+          : path === "/configuration-health"
+            ? ConfigurationHealth
+            : path === "/runtime-monitor"
+              ? RuntimeMonitor
+              : path === "/settings"
+                ? SettingsPage
+                : path === "/settings/usbip"
+                  ? USBIPStatus
+                  : null;
   const partial = Object.entries(snapshot.streamErrors).filter(
     ([channel, error]) => channel !== "status" && error,
   );
@@ -485,8 +501,19 @@ export default function App() {
                 <Proxies
                   key={pageKey}
                   showInventory={showInventory}
-                  onInventoryChange={setShowInventory}
+                  reportedTag={currentReportedOutbound?.tag}
+                  onShowAll={() => setReportedOutbound(undefined)}
+                  onInventoryChange={(enabled) => {
+                    setShowInventory(enabled);
+                    if (!enabled) setReportedOutbound(undefined);
+                  }}
                 />
+              ) : path === "/connections" ? (
+                <Connections key={pageKey} onInspectOutbound={(tag, topologyGeneration) => {
+                  location.hash = "/proxies";
+                  setShowInventory(true);
+                  setReportedOutbound({ session, tag, topologyGeneration });
+                }} />
               ) : path === "/notifications" ? (
                 <Notifications key={pageKey} desktop={desktopAlerts} />
               ) : Page ? (

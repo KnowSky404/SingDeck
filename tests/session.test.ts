@@ -427,7 +427,7 @@ describe("session lifecycle", () => {
     await expect(s.closeConnectionBatch({ ...snapshot, ids: ["active-0"] })).resolves.toMatchObject({ unsent: 1 });
     expect(closeConnection).not.toHaveBeenCalled();
   });
-  it("does not close all from a published view that still shows stale active rows", async () => {
+  it.each(["reset", "closed"])("rejects stale published active rows after a pending %s", async (event) => {
     vi.useFakeTimers();
     const client = createMockClient();
     const closeAllConnections = vi.fn().mockResolvedValue(create(EmptySchema));
@@ -438,19 +438,30 @@ describe("session lifecycle", () => {
         const signal = options!.signal!;
         yield create(ConnectionEventsSchema, {
           reset: true,
-          events: [{ id: "active", connection: create(ConnectionSchema, { id: "active" }) }],
+          events: [{ id: "active", connection: create(ConnectionSchema, { id: "active", outbound: "route" }) }],
         });
         await delay(500, signal);
-        yield create(ConnectionEventsSchema, { reset: true });
+        yield create(ConnectionEventsSchema, event === "reset" ? { reset: true } : {
+          events: [{ id: "active", type: ConnectionEventType.CONNECTION_EVENT_CLOSED, closedAt: 1n }],
+        });
         await delay(60_000, signal);
       },
     });
     s.connect();
     await vi.advanceTimersByTimeAsync(300);
-    expect(s.getSnapshot().loaded.connections).toBe(true);
-    expect(s.getSnapshot().connections.has("active")).toBe(true);
+    const expected = s.getSnapshot();
+    expect(expected.loaded.connections).toBe(true);
+    expect(s.canInspectReportedOutbound("active", "route", expected)).toBe(true);
+    expect(s.canInspectReportedOutbound("active", "Route", expected)).toBe(false);
+    expect(s.canInspectReportedOutbound("active", "route", {
+      ...expected, connectionGeneration: expected.connectionGeneration - 1,
+    })).toBe(false);
+    expect(s.canInspectReportedOutbound("active", "route", {
+      ...expected, topologyGeneration: expected.topologyGeneration + 1,
+    })).toBe(false);
     await vi.advanceTimersByTimeAsync(200);
-    expect(s.getSnapshot().connections.has("active")).toBe(true);
+    expect(s.getSnapshot().connections.get("active")?.closedAt).toBe(0n);
+    expect(s.canInspectReportedOutbound("active", "route", expected)).toBe(false);
     await expect(s.closeAllConnections().catch(describeError)).resolves.toBe("No active connections remain.");
     s.setInventoryEnabled(true);
     await expect(s.closeAllConnections().catch(describeError)).resolves.toBe("Wait for the connection list to refresh, then try again.");

@@ -2,6 +2,7 @@ import { useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowRight, Copy } from "lucide-react";
 import { useWorkspace } from "@/app/context";
 import { hasCurrentConnections } from "@/api/state";
+import { safeNativeText } from "@/api/notifications";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -29,10 +30,12 @@ function recordedBytes(value: bigint) {
 
 export function ConnectionInspector({
   connectionId,
+  onInspectOutbound,
   onClose,
   onCloseAutoFocus,
 }: {
   connectionId: string | null;
+  onInspectOutbound: (tag: string, topologyGeneration: number) => void;
   onClose: () => void;
   onCloseAutoFocus: (event: Event) => void;
 }) {
@@ -40,6 +43,16 @@ export function ConnectionInspector({
   const title = useRef<HTMLHeadingElement>(null);
   const record = connectionId === null ? undefined : snapshot.connections.get(connectionId);
   const current = snapshot.serviceActionsReady && hasCurrentConnections(snapshot);
+  const tag = record?.outbound;
+  // A credential can equal the fixed redaction marker, even after decoding a label.
+  const redactTag = (value: string) => value.includes("[redacted]") ? "" : session.redactText(value);
+  const canInspectOutbound = current && !snapshot.authenticationFailed && record?.closedAt === 0n &&
+    !!tag && tag.length <= 160 && redactNativeConnectionText(tag, redactTag) === tag &&
+    safeNativeText(tag, redactTag, 160) === tag;
+  function inspectOutbound() {
+    if (canInspectOutbound && session.canInspectReportedOutbound(record.id, tag, snapshot))
+      onInspectOutbound(tag, snapshot.topologyGeneration);
+  }
   return (
     <Dialog
       open={connectionId !== null}
@@ -73,16 +86,22 @@ export function ConnectionInspector({
           </DialogDescription>
         </DialogHeader>
         {record && (
-          <ConnectionDetails key={record.id} record={record} current={current} />
+          <ConnectionDetails
+            key={record.id}
+            record={record}
+            current={current}
+            onInspectOutbound={canInspectOutbound ? inspectOutbound : undefined}
+          />
         )}
       </DialogContent>
     </Dialog>
   );
 }
 
-function ConnectionDetails({ record, current }: {
+function ConnectionDetails({ record, current, onInspectOutbound }: {
   record: Connection;
   current: boolean;
+  onInspectOutbound?: () => void;
 }) {
   const { language, session, t } = useWorkspace();
   const dateFormat = useMemo(() => new Intl.DateTimeFormat(language, {
@@ -187,6 +206,11 @@ function ConnectionDetails({ record, current }: {
               ))}
             </ol>
           ) : <p className="text-muted-foreground">{t("Unavailable")}</p>}
+          {onInspectOutbound && (
+            <Button type="button" variant="outline" size="sm" className="justify-self-start" onClick={onInspectOutbound}>
+              {t("View reported outbound")}
+            </Button>
+          )}
         </section>
         <dl className="grid gap-3 sm:grid-cols-2">
           {fields.map(([label, value, copyLabel]) => (

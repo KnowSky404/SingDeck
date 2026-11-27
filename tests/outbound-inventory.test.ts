@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { expect, it, vi } from "vitest";
 import { delay } from "@/api/errors";
 import { InstanceSession } from "@/api/session";
-import { initialSnapshot } from "@/api/state";
+import { initialSnapshot, type Snapshot } from "@/api/state";
 import { WorkspaceContext } from "@/app/context";
 import { mockProfile } from "@/features/instances/profiles";
 import { OutboundInventory } from "@/features/proxies/inventory";
@@ -21,19 +21,9 @@ import {
   ServiceStatus_Type,
 } from "@/proto/daemon/started_service_pb";
 
-it("redacts reflected Bearer text from inventory rows, selected members and action labels", () => {
-  const reflected = "synthetic-reflected-value";
-  const tag = `group-${reflected}`;
-  const session = new InstanceSession(createMockClient(), mockProfile, reflected);
-  const snapshot = initialSnapshot();
-  snapshot.phase = "connected";
-  snapshot.loaded.outbounds = true;
-  snapshot.service = create(ServiceStatusSchema, { status: ServiceStatus_Type.STARTED });
-  snapshot.groups = [create(GroupSchema, { tag, selected: `member-${reflected}` })];
-  snapshot.outbounds = [create(GroupItemSchema, { tag, type: `type-${reflected}` })];
+function renderInventory(session: InstanceSession, snapshot: Snapshot, reportedTag?: string) {
   const noop = () => undefined;
-
-  const markup = renderToStaticMarkup(createElement(WorkspaceContext.Provider, {
+  return renderToStaticMarkup(createElement(WorkspaceContext.Provider, {
     value: {
       profile: mockProfile,
       profiles: [mockProfile],
@@ -55,14 +45,79 @@ it("redacts reflected Bearer text from inventory rows, selected members and acti
       restoredConnection: false,
       remembering: false,
     },
-  }, createElement(OutboundInventory)));
+  }, createElement(OutboundInventory, { reportedTag })));
+}
 
+it("redacts reflected Bearer text from inventory rows, selected members and action labels", () => {
+  const reflected = "synthetic-reflected-value";
+  const tag = `group-${reflected}`;
+  const session = new InstanceSession(createMockClient(), mockProfile, reflected);
+  const snapshot = initialSnapshot();
+  snapshot.phase = "connected";
+  snapshot.loaded.outbounds = true;
+  snapshot.service = create(ServiceStatusSchema, { status: ServiceStatus_Type.STARTED });
+  snapshot.groups = [create(GroupSchema, { tag, selected: `member-${reflected}` })];
+  snapshot.outbounds = [create(GroupItemSchema, { tag, type: `type-${reflected}` })];
+  const markup = renderInventory(session, snapshot);
   expect(markup.includes(reflected)).toBe(false);
   expect(markup).toContain("group-[redacted]");
   expect(markup).toContain("type-[redacted]");
   expect(markup).toContain("Selected: member-[redacted]");
   expect(markup).toContain('aria-label="Test group-[redacted]"');
   expect(markup).toContain('aria-label="Group details for group-[redacted]"');
+});
+
+const reportedTag = "reported-group";
+
+function reportedInventorySnapshot(): Snapshot {
+  return {
+    ...initialSnapshot(),
+    phase: "connected",
+    detailChannel: "outbounds",
+    serviceActionsReady: true,
+    loaded: { groups: true, outbounds: true },
+    groups: [
+      create(GroupSchema, { tag: "parent-group", selected: reportedTag }),
+      create(GroupSchema, { tag: reportedTag, selected: "selected-leaf" }),
+    ],
+    outbounds: [create(GroupItemSchema, { tag: reportedTag, type: "direct" })],
+  };
+}
+
+it("keeps the focused inventory row but only shows current Groups metadata", () => {
+  const session = new InstanceSession(createMockClient(), mockProfile);
+  const snapshot = reportedInventorySnapshot();
+  const current = renderInventory(session, snapshot, reportedTag);
+  const groupMetadata = [">Selected</span>", "Selected: selected-leaf", `aria-label="Group details for ${reportedTag}"`];
+  for (const field of groupMetadata) expect(current).toContain(field);
+
+  const retained: Snapshot[] = [
+    { ...snapshot, streamErrors: { groups: "Groups interrupted" } },
+    { ...snapshot, loaded: { ...snapshot.loaded, groups: false } },
+  ];
+  for (const stale of retained) {
+    const focused = renderInventory(session, stale, reportedTag);
+    expect(focused).toContain(`>${reportedTag}</strong>`);
+    expect(focused).toContain(`aria-label="Node details for ${reportedTag}"`);
+    const ordinary = renderInventory(session, stale);
+    for (const field of groupMetadata) {
+      expect(focused).not.toContain(field);
+      expect(ordinary).toContain(field);
+    }
+  }
+});
+
+it("shows the terminal inventory permission error without extra waiting in the focused view", () => {
+  const session = new InstanceSession(createMockClient(), mockProfile);
+  const snapshot = reportedInventorySnapshot();
+  const error = "This instance denied access. Check its access policy.";
+  snapshot.streamErrors.outbounds = error;
+  snapshot.capabilities.outboundInventory = { status: "error", code: Code.PermissionDenied, error };
+  const focused = renderInventory(session, snapshot, reportedTag);
+  expect(focused).toContain("Outbounds stream interrupted");
+  expect(focused).toContain(error);
+  expect(focused).not.toContain("Waiting for the instance…");
+  expect(focused).not.toContain(`>${reportedTag}</strong>`);
 });
 
 it("captures topology already received before the workspace publishes it", async () => {

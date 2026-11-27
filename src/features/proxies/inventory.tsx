@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { Check, LayoutGrid, List, Search, X, Zap } from "lucide-react";
 import { useWorkspace } from "@/app/context";
@@ -40,9 +40,23 @@ type SentTest = {
   confirmed: boolean;
 };
 
-export function OutboundInventory() {
+export function OutboundInventory({ reportedTag, onShowAll }: {
+  reportedTag?: string;
+  onShowAll?: () => void;
+}) {
   const { snapshot, session, language, t } = useWorkspace();
   const action = useAction();
+  const heading = useRef<HTMLHeadingElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
+  const reportRegion = useCallback((region: HTMLElement | null) => {
+    if (!region) return;
+    return () => {
+      if (!region.contains(document.activeElement)) return;
+      requestAnimationFrame(() => {
+        if (document.activeElement === document.body) searchInput.current?.focus();
+      });
+    };
+  }, []);
   const [search, setSearch] = useState("");
   const [type, setType] = useState<string>();
   const [sort, setSort] = useState("tag");
@@ -57,13 +71,19 @@ export function OutboundInventory() {
   const normalizedSearch = search.trim().toLowerCase();
   const query = useDeferredValue(normalizedSearch);
   const { outbounds, groups } = snapshot;
+  const focused = reportedTag !== undefined;
+  useEffect(() => {
+    if (focused) heading.current?.focus({ preventScroll: true });
+  }, [focused]);
+  const groupsReady = !!groups && !snapshot.streamErrors.groups && (!focused || snapshot.loaded.groups === true);
+  const displayGroups = focused && !groupsReady ? undefined : groups;
   const groupsByTag = useMemo(
-    () => new Map(groups?.map((group) => [group.tag, group])),
-    [groups],
+    () => new Map(displayGroups?.map((group) => [group.tag, group])),
+    [displayGroups],
   );
   const selectedTags = useMemo(
-    () => new Set(groups?.map((group) => group.selected)),
-    [groups],
+    () => new Set(displayGroups?.map((group) => group.selected)),
+    [displayGroups],
   );
   const types = useMemo(() => {
     const reported = new Set(outbounds?.map(({ type }) => type).filter(Boolean));
@@ -71,7 +91,11 @@ export function OutboundInventory() {
     return [...reported].sort();
   }, [outbounds, type]);
   const inventoryByTag = useMemo(() => indexInventory(outbounds), [outbounds]);
+  const inventoryReady = snapshot.detailChannel === "outbounds" && snapshot.serviceActionsReady &&
+    !snapshot.authenticationFailed && snapshot.loaded.outbounds && !snapshot.streamErrors.outbounds;
+  const reported = reportedTag !== undefined && inventoryReady ? inventoryByTag.get(reportedTag) : undefined;
   const rows = useMemo(() => {
+    if (focused) return reported ? [{ item: reported, index: 0, measuredAt: testedAt(reported) }] : [];
     const matches = (outbounds ?? [])
       .filter((item) =>
         item.tag.toLowerCase().includes(query) &&
@@ -91,7 +115,7 @@ export function OutboundInventory() {
       }
       return a.item.tag.localeCompare(b.item.tag, language);
     });
-  }, [outbounds, query, type, sort, language]);
+  }, [focused, reported, outbounds, query, type, sort, language]);
   const formatTime = useMemo(
     () => new Intl.DateTimeFormat(language, {
       dateStyle: "short",
@@ -109,7 +133,6 @@ export function OutboundInventory() {
   const testing = Boolean(
     snapshot.testingLatencies || snapshot.testingManualLatencies || action.pending,
   );
-  const groupsReady = !!groups && !snapshot.streamErrors.groups;
   const readyGroups = groupsReady ? groupsByTag : undefined;
   const canBatch = canTest && groupsReady && query === normalizedSearch;
   const eligible = useMemo(
@@ -178,12 +201,13 @@ export function OutboundInventory() {
     );
   }
 
-  return (
+  const content = (
     <>
-      <div className="toolbar proxy-toolbar">
+      {!focused && <div className="toolbar proxy-toolbar">
         <div className="search-field">
           <Search aria-hidden="true" />
           <Input
+            ref={searchInput}
             aria-label={t("Search outbounds")}
             placeholder={t("Search outbounds…")}
             value={search}
@@ -260,7 +284,7 @@ export function OutboundInventory() {
             </Button>
           )}
         </div>
-      </div>
+      </div>}
       {action.error && <Notice title="Test failed">{session.redactText(action.error)}</Notice>}
       {currentSent && (
         <p role="status" className="text-sm text-muted-foreground">
@@ -279,7 +303,7 @@ export function OutboundInventory() {
           {capability.error && session.redactText(capability.error)}
         </Notice>
       ) : (
-        <ChannelState channel="outbounds" empty={outbounds?.length === 0}>
+        <ChannelState channel="outbounds" empty={!focused && outbounds?.length === 0}>
           {rows.length ? (
             <ul
               aria-label={t("All outbounds")}
@@ -345,8 +369,12 @@ export function OutboundInventory() {
                 );
               })}
             </ul>
-          ) : (
-            <p className="quiet-empty">{t("No outbounds match your filters.")}</p>
+          ) : (!focused || !snapshot.streamErrors.outbounds) && (
+            <p className="quiet-empty" role={focused ? "status" : undefined}>
+              {t(focused
+                ? (inventoryReady ? "The reported outbound is unavailable." : "Waiting for the instance…")
+                : "No outbounds match your filters.")}
+            </p>
           )}
           {totalPages > 1 && (
             <div className="button-row mt-3 items-center">
@@ -365,4 +393,20 @@ export function OutboundInventory() {
       )}
     </>
   );
+  return focused ? (
+    <section ref={reportRegion} aria-labelledby="reported-outbound-heading" className="grid min-w-0 gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="reported-outbound-heading" ref={heading} tabIndex={-1} className="font-medium">
+          {t("Reported outbound")}
+        </h2>
+        <Button type="button" variant="outline" size="sm" onClick={() => {
+          onShowAll?.();
+          requestAnimationFrame(() => searchInput.current?.focus());
+        }}>
+          {t("Show all outbounds")}
+        </Button>
+      </div>
+      {content}
+    </section>
+  ) : content;
 }
