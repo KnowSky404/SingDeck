@@ -6,7 +6,7 @@ import {
   type Group,
   type GroupItem,
 } from "@/proto/daemon/started_service_pb";
-import { normalizeBearerToken, type SingBoxClient } from "./client";
+import { normalizeBearerToken, redactSecret, type SingBoxClient } from "./client";
 import {
   capabilityFailure,
   initialCapabilities,
@@ -160,6 +160,7 @@ function sameGroupTopology(before: Group[], after: Group[]) {
 
 export class InstanceSession {
   private snapshot = initialSnapshot();
+  private visibleVersion?: { reported: Version; display: Version };
   private listeners = new Set<() => void>();
   private controller?: AbortController;
   private flushTimer?: ReturnType<typeof setTimeout>;
@@ -245,8 +246,17 @@ export class InstanceSession {
   private flush() {
     clearTimeout(this.flushTimer);
     this.flushTimer = undefined;
+    // Lifecycle comparisons use the reported version. Views consume the masked value.
+    const version = this.pending.version;
+    if (version !== this.visibleVersion?.reported) {
+      this.visibleVersion = version && {
+        reported: version,
+        display: { ...version, version: this.redactText(version.version) },
+      };
+    }
     this.snapshot = {
       ...this.pending,
+      version: this.visibleVersion?.display,
       serviceActionsReady: this.canRunServiceAction(),
       topologyGeneration: this.topologyGeneration,
       detailChannel: this.detailChannel,
@@ -414,7 +424,7 @@ export class InstanceSession {
     void this.stream(channel, AbortSignal.any([parent, service, scope.signal]));
   }
   redactText(value: string) {
-    return this.secret ? value.replaceAll(this.secret, "[redacted]") : value;
+    return redactSecret(value, this.secret);
   }
   private readServiceConfiguration() {
     const parent = this.signal;

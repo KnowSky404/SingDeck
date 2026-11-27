@@ -64,6 +64,10 @@ export function normalizeBearerToken(token: string): string {
   return token.slice(0, end);
 }
 
+export function redactSecret(value: string, secret: string) {
+  return secret ? value.replaceAll(secret, "[redacted]") : value;
+}
+
 export function createNativeClient(
   endpoint: string,
   token: string,
