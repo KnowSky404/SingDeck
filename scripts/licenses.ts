@@ -53,9 +53,12 @@ function collect(name: string, from: string) {
 const pkg = JSON.parse(readFileSync("package.json", "utf8"));
 for (const dependency of Object.keys(pkg.dependencies))
   collect(dependency, root);
+// The browser bundle includes Tailwind CSS and its Preflight stylesheet.
+collect("tailwindcss", root);
 assert(
   notices.some((n) => n.startsWith("react@")) &&
-    notices.some((n) => n.startsWith("@fontsource-variable/geist@")),
+    notices.some((n) => n.startsWith("@fontsource-variable/geist@")) &&
+    notices.some((n) => n.startsWith("tailwindcss@")),
   "Incomplete runtime license inventory",
 );
 assert(
