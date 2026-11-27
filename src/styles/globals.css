@@ -1528,7 +1528,8 @@ h3 {
   }
   .connection-table thead tr {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
     gap: 4px;
   }
   .connection-table thead th:not(.connection-sort) {
