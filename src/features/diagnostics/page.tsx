@@ -29,9 +29,18 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { ServiceStatus_Type } from "@/proto/daemon/started_service_pb";
-import { bitrate, diagnosticMeasurement, validateDiagnosticTarget } from "./model";
+import {
+  bitrate,
+  capacitySample,
+  diagnosticMeasurement,
+  validateDiagnosticTarget,
+  type CapacitySample,
+  type CapacityTrace,
+} from "./model";
 
 type Progress = DiagnosticProgress<DiagnosticName>;
+type CapacityReadout = Pick<CapacityTrace, "download" | "upload" | "downloadRPM" | "uploadRPM">;
+type LiveProgress = CapacityReadout & { value: Progress; elapsedMs: number };
 type Result = {
   measuredAt: number;
   outboundTag: string;
@@ -41,7 +50,6 @@ type Result = {
   elapsedMs?: number;
   value: Progress;
 };
-type Sample = { elapsed: number; download: number; upload: number };
 const defaultOutbound = "default";
 const diagnosticTitles = { networkQuality: "Network quality", stun: "STUN / NAT" };
 
@@ -102,8 +110,8 @@ function DiagnosticTool({
   const [http3, setHttp3] = useState(false);
   const [compare, setCompare] = useState(false);
   const [result, setResult] = useState<Result>();
-  const [progress, setProgress] = useState<Progress>();
-  const [samples, setSamples] = useState<Sample[]>([]);
+  const [liveProgress, setProgress] = useState<LiveProgress>();
+  const [samples, setSamples] = useState<CapacitySample[]>([]);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
   const [feedback, setFeedback] = useState("");
@@ -157,19 +165,20 @@ function DiagnosticTool({
     setProgress(undefined);
     setSamples([]);
     const outboundTag = outbound === defaultOutbound ? "" : outbound.slice(4);
-    let elapsedMs: number | undefined;
+    const trace: CapacityTrace = { elapsedMs: 0n, announced: new Set() };
     const onProgress = (message: Progress) => {
       if (controller.signal.aborted || request.current !== controller) return;
-      setProgress(message);
-      if (message.$typeName === "daemon.NetworkQualityTestProgress" && message.phase > 0 && message.elapsedMs > 0n) {
-        elapsedMs = Number(message.elapsedMs);
-        const sample = {
-          elapsed: elapsedMs / 1000,
-          download: Number(message.downloadCapacity) / 1e6,
-          upload: Number(message.uploadCapacity) / 1e6,
-        };
-        setSamples((current) => [...current, sample].slice(-240));
+      if (message.$typeName === "daemon.NetworkQualityTestProgress") {
+        const sample = capacitySample(message, serial, trace);
+        if (sample) {
+          setSamples((current) => {
+            const points = current.at(-1)?.elapsed === sample.elapsed ? current.slice(0, -1) : current;
+            return [...points, sample].slice(-240);
+          });
+        }
       }
+      const { download, upload, downloadRPM, uploadRPM, elapsedMs } = trace;
+      setProgress({ value: message, download, upload, downloadRPM, uploadRPM, elapsedMs: Number(elapsedMs) });
     };
     try {
       const value = quality
@@ -182,11 +191,12 @@ function DiagnosticTool({
           }, controller.signal, onProgress)
         : await session.runSTUN({ server: trimmedTarget, outboundTag }, controller.signal, onProgress);
       if (request.current !== controller || controller.signal.aborted) return;
+      onProgress(value);
       const report = {
         value,
         measuredAt: Date.now(),
         outboundTag: session.redactText(outboundTag),
-        elapsedMs,
+        elapsedMs: trace.elapsedMs > 0n ? Number(trace.elapsedMs) : undefined,
         source: profile.mode,
         coreVersion: snapshot.version?.version,
         apiVersion: snapshot.version?.apiVersion,
@@ -196,9 +206,12 @@ function DiagnosticTool({
     } catch (cause) {
       if (request.current !== controller) return;
       const canceled = ConnectError.from(cause).code === Code.Canceled;
-      setError(canceled
-        ? "Diagnostic canceled before completion."
-        : cause instanceof DiagnosticExecutionError ? cause.message : describeError(cause));
+      if (canceled) setError("Diagnostic canceled before completion.");
+      else if (cause instanceof DiagnosticExecutionError)
+        setError(quality
+          ? cause.message
+          : "The core could not complete STUN. Check the core logs for UDP or timeout details.");
+      else setError(describeError(cause));
     } finally {
       if (request.current === controller) {
         request.current = undefined;
@@ -207,8 +220,11 @@ function DiagnosticTool({
     }
   }
 
+  const progress = liveProgress?.value;
   const value = result?.value ?? progress;
-  const elapsed = result?.elapsedMs ?? (samples.at(-1)?.elapsed ?? 0) * 1000;
+  const elapsed = result?.elapsedMs ?? liveProgress?.elapsedMs ?? 0;
+  const loneDownload = samples.filter(({ download }) => download !== undefined).length === 1;
+  const loneUpload = samples.filter(({ upload }) => upload !== undefined).length === 1;
   const phase = value ? t((quality ? networkQualityPhases : stunPhases)[value.phase] ?? "Unknown") : undefined;
   const targetLabel = quality ? "Test configuration URL" : "STUN server";
   const disabled = !ready || capability.status === "unsupported";
@@ -307,9 +323,9 @@ function DiagnosticTool({
               <progress className="h-2 w-full accent-primary" aria-label={t("Measurement progress")}
                 max={Number(runtime)} value={elapsed > 0 ? Math.min(elapsed / 1000, Number(runtime) * 0.99) : undefined} />
             )}
-            {value?.$typeName === "daemon.NetworkQualityTestProgress" && <QualityReadout value={value} elapsed={elapsed} />}
+            {value?.$typeName === "daemon.NetworkQualityTestProgress" && <QualityReadout value={value} elapsed={elapsed} capacity={liveProgress} />}
             {value?.$typeName === "daemon.STUNTestProgress" && <STUNReadout value={value} completed={Boolean(result)} />}
-            {samples.length > 1 && (
+            {samples.length > 0 && (
               <div>
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
                   <span>{t("Capacity (Mbit/s)")}</span>
@@ -332,9 +348,9 @@ function DiagnosticTool({
                       <YAxis width={48} />
                       <Tooltip labelFormatter={(seconds) => `${seconds}s`} />
                       <Line type="monotone" dataKey="download" name={t("Download")}
-                        stroke="var(--chart-1)" dot={false} isAnimationActive={false} />
+                        stroke="var(--chart-1)" dot={loneDownload} isAnimationActive={false} />
                       <Line type="monotone" dataKey="upload" name={t("Upload")}
-                        stroke="var(--chart-2)" dot={false} isAnimationActive={false} />
+                        stroke="var(--chart-2)" dot={loneUpload} isAnimationActive={false} />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -401,16 +417,29 @@ function DiagnosticMetrics({ values }: { values: [name: string, value: string, d
   );
 }
 
-function QualityReadout({ value, elapsed }: { value: DiagnosticProgress<"networkQuality">; elapsed?: number }) {
+function QualityReadout({
+  value,
+  elapsed,
+  capacity,
+}: {
+  value: DiagnosticProgress<"networkQuality">;
+  elapsed?: number;
+  capacity?: CapacityReadout;
+}) {
   const { t } = useWorkspace();
-  const confidence = (accuracy: number) => value.phase === 3
+  const measured = value.phase === 3;
+  const download = measured ? value.downloadCapacity : capacity?.download;
+  const upload = measured ? value.uploadCapacity : capacity?.upload;
+  const downloadRPM = (measured ? value.downloadRPM : capacity?.downloadRPM) ?? 0;
+  const uploadRPM = (measured ? value.uploadRPM : capacity?.uploadRPM) ?? 0;
+  const confidence = (accuracy: number) => measured
     ? t("{level} confidence", { level: t(accuracyLabels[accuracy] ?? "Unknown") })
     : undefined;
   return <DiagnosticMetrics values={[
-    ["Download capacity", bitrate(value.downloadCapacity), value.downloadCapacity > 0n ? confidence(value.downloadCapacityAccuracy) : undefined],
-    ["Upload capacity", bitrate(value.uploadCapacity), value.uploadCapacity > 0n ? confidence(value.uploadCapacityAccuracy) : undefined],
-    ["Download RPM", value.downloadRPM > 0 ? String(value.downloadRPM) : "—", value.downloadRPM > 0 ? confidence(value.downloadRPMAccuracy) : undefined],
-    ["Upload RPM", value.uploadRPM > 0 ? String(value.uploadRPM) : "—", value.uploadRPM > 0 ? confidence(value.uploadRPMAccuracy) : undefined],
+    ["Download capacity", bitrate(download), confidence(value.downloadCapacityAccuracy)],
+    ["Upload capacity", bitrate(upload), confidence(value.uploadCapacityAccuracy)],
+    ["Download RPM", downloadRPM > 0 ? String(downloadRPM) : "—", downloadRPM > 0 ? confidence(value.downloadRPMAccuracy) : undefined],
+    ["Upload RPM", uploadRPM > 0 ? String(uploadRPM) : "—", uploadRPM > 0 ? confidence(value.uploadRPMAccuracy) : undefined],
     ["Idle latency", value.phase > 0 && value.idleLatencyMs >= 0 ? `${value.idleLatencyMs} ms` : "—"],
     ["Measured elapsed time", elapsed ? `${(elapsed / 1000).toFixed(1)} s` : "—"],
   ]} />;

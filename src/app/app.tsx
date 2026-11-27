@@ -128,7 +128,10 @@ function Navigation({
   onNavigate?: () => void;
   mobile?: boolean;
 }) {
-  const { t } = useWorkspace();
+  const { t, snapshot } = useWorkspace();
+  const { networkQuality, stun } = snapshot.capabilities;
+  const diagnosticsUnsupported =
+    networkQuality.status === "unsupported" && stun.status === "unsupported";
   return (
     <TooltipProvider delayDuration={400}>
       <nav aria-label={t(mobile ? "Mobile navigation" : "Main navigation")}>
@@ -146,7 +149,11 @@ function Navigation({
               </a>
             </TooltipTrigger>
             <TooltipContent side={mobile ? "top" : "right"}>
-              {t(description)}
+              {t(
+                href === "/diagnostics" && diagnosticsUnsupported
+                  ? "This capability is unavailable on the connected instance."
+                  : description,
+              )}
             </TooltipContent>
           </Tooltip>
         ))}
@@ -309,27 +316,35 @@ export default function App() {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [path]);
+  const [showInventory, setShowInventory] = useState(false);
+  const workspaceOpen = snapshot.loaded.status && !disconnecting;
+  const inventoryBatch = snapshot.latencyTestSource === "outbounds" &&
+    !snapshot.stoppingLatencyTests;
+  const inventoryEnabled = Boolean(
+    workspaceOpen &&
+      (path === "/diagnostics" || (path === "/proxies" && (showInventory || inventoryBatch))),
+  );
   useEffect(() => {
-    session.setInventoryEnabled(path === "/proxies" || path === "/diagnostics");
-  }, [path, session]);
+    session.setInventoryEnabled(inventoryEnabled);
+    if (inventoryEnabled) return () => session.setInventoryEnabled(false);
+  }, [inventoryEnabled, session]);
   const [collapsed, setCollapsed] = useState(false),
     [menu, setMenu] = useState(false);
+  const pageKey = `${profile.id}:${session.profile.endpoint}`;
   const Page =
     path === "/"
       ? Overview
-      : path === "/proxies"
-        ? Proxies
-        : path === "/connections"
-          ? Connections
-          : path === "/logs"
-            ? Logs
-            : path === "/diagnostics"
-              ? Diagnostics
-              : path === "/configuration-health"
-                ? ConfigurationHealth
-                : path === "/settings"
-                  ? SettingsPage
-                  : null;
+      : path === "/connections"
+        ? Connections
+        : path === "/logs"
+          ? Logs
+          : path === "/diagnostics"
+            ? Diagnostics
+            : path === "/configuration-health"
+              ? ConfigurationHealth
+              : path === "/settings"
+                ? SettingsPage
+                : null;
   const partial = Object.entries(snapshot.streamErrors).filter(
     ([channel, error]) => channel !== "status" && error,
   );
@@ -449,8 +464,14 @@ export default function App() {
                 </div>
               }
             >
-              {Page ? (
-                <Page key={`${profile.id}:${session.profile.endpoint}`} />
+              {path === "/proxies" ? (
+                <Proxies
+                  key={pageKey}
+                  showInventory={showInventory}
+                  onInventoryChange={setShowInventory}
+                />
+              ) : Page ? (
+                <Page key={pageKey} />
               ) : (
                 <EmptyState
                   title={t("Page not found")}

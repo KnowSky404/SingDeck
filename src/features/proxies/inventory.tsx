@@ -26,7 +26,7 @@ export function OutboundInventory() {
   const { snapshot, session, language, t } = useWorkspace();
   const action = useAction();
   const [search, setSearch] = useState("");
-  const [type, setType] = useState("all");
+  const [type, setType] = useState<string>();
   const [sort, setSort] = useState("tag");
   const [view, setView] = useState("list");
   const [page, setPage] = useState(0);
@@ -47,10 +47,11 @@ export function OutboundInventory() {
     () => new Set(groups?.map((group) => group.selected)),
     [groups],
   );
-  const types = useMemo(
-    () => [...new Set(outbounds?.map(({ type }) => type).filter(Boolean))].sort(),
-    [outbounds],
-  );
+  const types = useMemo(() => {
+    const reported = new Set(outbounds?.map(({ type }) => type).filter(Boolean));
+    if (type) reported.add(type);
+    return [...reported].sort();
+  }, [outbounds, type]);
   const duplicateTags = useMemo(() => {
     const seen = new Set<string>();
     const duplicates = new Set<string>();
@@ -64,7 +65,7 @@ export function OutboundInventory() {
     const matches = (outbounds ?? [])
       .filter((item) =>
         item.tag.toLowerCase().includes(query) &&
-        (type === "all" || item.type === type),
+        (type === undefined || item.type === type),
       )
       .map((item, index) => ({ item, index, measuredAt: testedAt(item) }));
     return matches.sort((a, b) => {
@@ -145,14 +146,17 @@ export function OutboundInventory() {
         </div>
         <Choice
           label="Protocol filter"
-          value={type}
+          value={type === undefined ? "all" : String(types.indexOf(type))}
           onChange={(value) => {
-            setType(value);
+            setType(value === "all" ? undefined : types[Number(value)]);
             setPage(0);
           }}
           options={[
             { value: "all", label: t("All protocols") },
-            ...types.map((value) => ({ value, label: value })),
+            ...types.map((value, index) => ({
+              value: String(index),
+              label: session.redactText(value),
+            })),
           ]}
         />
         <Choice
@@ -208,7 +212,7 @@ export function OutboundInventory() {
           )}
         </div>
       </div>
-      {action.error && <Notice title="Test failed">{action.error}</Notice>}
+      {action.error && <Notice title="Test failed">{session.redactText(action.error)}</Notice>}
       {currentSent && (
         <p role="status" className="text-sm text-muted-foreground">
           {t(
@@ -217,12 +221,14 @@ export function OutboundInventory() {
               : snapshot.testingManualLatency
                 ? "Test requested for {name}. Waiting for new latency history."
                 : "Test requested for {name}. A new result could not be confirmed.",
-            { name: currentSent.tag },
+            { name: session.redactText(currentSent.tag) },
           )}
         </p>
       )}
       {capability.status === "unsupported" && !snapshot.loaded.outbounds ? (
-        <Notice title="Outbound inventory unavailable">{capability.error}</Notice>
+        <Notice title="Outbound inventory unavailable">
+          {capability.error && session.redactText(capability.error)}
+        </Notice>
       ) : (
         <ChannelState channel="outbounds" empty={outbounds?.length === 0}>
           {rows.length ? (
@@ -235,6 +241,7 @@ export function OutboundInventory() {
                 const group = duplicate ? undefined : groupsByTag.get(item.tag);
                 const selected = !duplicate && selectedTags.has(item.tag);
                 const isGroup = group || item.type === "selector" || item.type === "urltest";
+                const displayedTag = session.redactText(item.tag);
                 return (
                   <li
                     key={duplicate ? JSON.stringify([item.tag, index]) : item.tag}
@@ -242,8 +249,10 @@ export function OutboundInventory() {
                   >
                     <div className="min-w-0 py-1">
                       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-                        <strong className="wrap-anywhere text-sm">{item.tag}</strong>
-                        <span className="wrap-anywhere text-xs text-muted-foreground">{item.type}</span>
+                        <strong className="wrap-anywhere text-sm">{displayedTag}</strong>
+                        <span className="wrap-anywhere text-xs text-muted-foreground">
+                          {session.redactText(item.type)}
+                        </span>
                         {duplicate && (
                           <span className="text-xs text-muted-foreground">{t("Ambiguous tag")}</span>
                         )}
@@ -264,7 +273,11 @@ export function OutboundInventory() {
                             {now - measuredAt.valueOf() >= recentForMs && <span>{t("Older than 5 min")}</span>}
                           </>
                         )}
-                        {group?.selected && <span className="wrap-anywhere">{t("Selected: {name}", { name: group.selected })}</span>}
+                        {group?.selected && (
+                          <span className="wrap-anywhere">
+                            {t("Selected: {name}", { name: session.redactText(group.selected) })}
+                          </span>
+                        )}
                       </div>
                     </div>
                     <div className="proxy-node-actions">
@@ -272,7 +285,7 @@ export function OutboundInventory() {
                       <Button
                         variant="ghost"
                         size="icon-sm"
-                        aria-label={t("Test {name}", { name: item.tag })}
+                        aria-label={t("Test {name}", { name: displayedTag })}
                         disabled={!canTest || testing || duplicate || (!!isGroup && !groupsReady)}
                         onClick={() => void test(item)}
                       >

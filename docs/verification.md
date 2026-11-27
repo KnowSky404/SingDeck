@@ -4,21 +4,22 @@ Implementation validation: 2026-11-17, Linux x86_64, Bun 1.4.4, Node 26.13.0, Ty
 
 ## Phase 1 — Native Diagnostics
 
-Validation runs on Linux x86_64 with Bun 1.4.4, official sing-box v1.14.0 release revision `0b8995879f29a9b98ee027bc17b75e101445b238`, and Playwright Chromium. The released SingDeck v0.8.1 checkout at `dfb16e8` is the comparison baseline. Browser plugin was unavailable, so browser checks used Playwright directly.
+Validation on 2026-11-27 used Linux x86_64, Bun 1.4.4, official sing-box v1.14.0 release revision `0b8995879f29a9b98ee027bc17b75e101445b238`, and Playwright Chromium. The released SingDeck v0.8.1 checkout at `dfb16e8` is the comparison baseline. Browser plugin was unavailable, so browser checks used Playwright directly.
 
 | Check | Result and scope |
 | --- | --- |
 | Frozen install, lint, typecheck, and production build | Pass |
 | Proto and license regeneration | Pass with no generated diff. The pinned schema is unchanged. |
-| Unit tests | 66 pass, including capability classification, side-effect-free active test discovery, STARTED-gated warning discovery, drained warning retention and redaction, request slot switching with closed history retention, stream recovery, diagnostic terminal semantics, and cancellation. |
+| Unit tests | 98 pass, including capability classification, side-effect-free active test discovery, STARTED-gated warning discovery, drained warning retention and redaction, request slot switching with closed history retention, stream recovery, diagnostic terminal semantics, and cancellation. |
 | Official v1.14.0 integration | 12 pass across native SDK, diagnostics and built-in hosting suites. Fixtures used loopback API, HTTP and UDP endpoints, including a local dashboard archive download. No production services were accessed. |
-| Chromium desktop and emulated mobile | 28 pass in the workspace and new Phase 1 suites. Feature interactions use the explicit demo. Connection failure and credential persistence checks are separately scoped in the suite. |
-| Chromium with official v1.14.0 | 2 desktop cases pass and the two duplicate mobile fixture executions skip intentionally. Covered cross-origin diagnostics and inventory, real selector confirmation, navigation and reload under the built-in dashboard, credential behavior and viewport-safe latency feedback. |
+| Chromium desktop and emulated mobile | 28 pass in the workspace and new Phase 1 suites. Feature interactions use the explicit demo. Four native fixture cases skip in this run because the native binary is excluded. Connection failure and credential persistence checks are separately scoped in the suite. |
+| Chromium with official v1.14.0 | 2 pass in a separate desktop-only run. Covered cross-origin diagnostics and inventory, real selector confirmation, navigation and reload under the built-in dashboard, credential behavior and viewport-safe latency feedback. |
 
 The native integration tests streamed inventory including an ungrouped direct outbound and measured network quality using a paced HTTP fixture. STUN used loopback UDP responders with and without RFC 5780 support. The suite covered a missing outbound, an in-band diagnostic failure and an abort that closed a pending core HTTP request. The pinned CLI fixture emitted a DNS deprecation in logs and returned an empty warning list. [Native integration](../tests/native.integration.test.ts) · [Diagnostic integration](../tests/diagnostics.integration.test.ts)
 
 Additional controlled local checks against official binaries:
 
+- `SubscribeOutbounds` on v1.14.0 returned a configured userspace WireGuard endpoint alongside a direct outbound. The endpoint row exposed its tag, native `wireguard` type and zero-valued test history. The API provides no separate endpoint field. This check used a loopback peer and exercised inventory only.
 - The official v1.14.0 SFL Linux daemon returned a nonempty deprecation warning, including its version fields and migration anchor. A second unary returned an empty list, confirming drain semantics. Chromium rendered the warning, preserved it across refresh in the same core lifetime, and recovered after a managed reload with a new start time and a different warning. A same-origin production rerun delayed delivery of the new warning by 2.5 seconds. The browser made one warning request and retained its result.
 - Chromium confirmed the API used HTTP/1.1. Six permanent subscriptions queued additional calls. The shared fifth stream slot allowed the warning-refresh unary to run, and retrying server-canceled subscriptions restored live monitoring after reload.
 - The v1.14.0 QUIC build negotiated HTTP/3 with a loopback Caddy measurement fixture using a trusted temporary certificate. Both capacities completed with positive native values. The v1.14.0 direct outbound failed the literal-IP STUN case. The v1.14.5 official binary completed it with the same UDP fixture.
@@ -28,11 +29,11 @@ Phase 1 trust checks verified that explicit diagnostics wait for a user action, 
 
 ### Browser performance and rendering
 
-In the final production build, initial HTML-declared JavaScript and CSS, including preloads, grew from 210,795 to 216,975 gzip bytes (+2.93%). Total emitted JavaScript and CSS grew from 330,777 to 352,750 bytes (+6.64%). These totals were measured by compressing each emitted asset separately at gzip level 9 and exclude HTML and fonts. Diagnostics and Configuration Health are lazy routes.
+In the final production build, initial HTML-declared JavaScript and CSS, including preloads, grew from 210,795 to 218,287 gzip bytes (+3.55%). Total emitted JavaScript and CSS grew from 330,777 to 354,690 bytes (+7.23%). These totals were measured by compressing each emitted asset separately at gzip level 9 and exclude HTML and fonts. Diagnostics and Configuration Health are lazy routes.
 
 A prefinal candidate and the `dfb16e8` baseline were measured with Chromium 159 at 1280×800 on a Linux x86_64 2-vCPU workstation, using unthrottled loopback static hosting. The median first animation frame with **Explore demo** visible moved from 197 to 242 ms with a cold cache and from 103 to 103 ms with a warm cache. The click-to-**Connected** and Overview median moved from 471 to 312 ms cold and from 442 to 262 ms warm. Each build had 12 interleaved samples after one warmup. Host workload and timing varied, so these are local observations. Workload, long-run and real network measurements are Phase 5 gates.
 
-Visual inspection used desktop light and emulated mobile dark screenshots, plus 320–1440 CSS pixel checks for layout overflow. Screenshots used demo inputs without private instance data. Desktop and mobile browser tests distinguish demo interactions from real-core browser coverage.
+Visual inspection of a prefinal candidate used desktop light and emulated mobile dark screenshots, plus 320–1440 CSS pixel checks for layout overflow. Screenshots used demo inputs without private instance data. Desktop and mobile browser tests distinguish demo interactions from real-core browser coverage.
 
 ## v0.3.0 local regression record
 
