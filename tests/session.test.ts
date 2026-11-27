@@ -206,6 +206,8 @@ describe("session lifecycle", () => {
     vi.useFakeTimers();
     const client = createMockClient();
     const connections = vi.fn(client.subscribeConnections);
+    const modes = vi.fn(client.subscribeClashMode);
+    const inventory = vi.fn(client.subscribeOutbounds);
     const notifications = vi.fn<typeof client.subscribeNotifications>(async function* () {
       yield create(NotificationEventSchema, {
         event: { case: "send", value: { identifier: "taildrop/peer/password=reset.txt", typeID: 1, title: "Live message" } },
@@ -215,7 +217,10 @@ describe("session lifecycle", () => {
         event: { case: "send", value: { identifier: "late", typeID: 1, title: "Late message" } },
       });
     });
-    const s = session(undefined, { ...client, subscribeConnections: connections, subscribeNotifications: notifications });
+    const s = session(undefined, {
+      ...client, subscribeConnections: connections, subscribeNotifications: notifications,
+      subscribeClashMode: modes, subscribeOutbounds: inventory,
+    });
     s.connect();
     await vi.advanceTimersByTimeAsync(400);
     expect(notifications).not.toHaveBeenCalled();
@@ -228,14 +233,49 @@ describe("session lifecycle", () => {
     expect(s.getSnapshot().notifications[0]).toMatchObject({ source: "native", title: "Live message" });
     expect(s.getSnapshot().notifications[0].id).toMatch(/^native:\d+$/);
     expect(JSON.stringify(s.getSnapshot().notifications)).not.toContain("password=reset.txt");
-    s.setDetailChannel("connections");
+    s.setDetailChannel("clashMode");
     expect(notifications.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(s.getSnapshot().loaded).toMatchObject({ notifications: false, clashMode: true, connections: false });
+    expect(modes.mock.calls.at(-1)?.[1]?.signal?.aborted).toBe(false);
+    s.setInventoryEnabled(true);
+    expect(modes.mock.calls.at(-1)?.[1]?.signal?.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(s.getSnapshot().loaded).toMatchObject({ clashMode: false, outbounds: true });
+    expect(inventory.mock.calls.at(-1)?.[1]?.signal?.aborted).toBe(false);
+    s.setDetailChannel("connections");
+    expect(inventory.mock.calls.at(-1)?.[1]?.signal?.aborted).toBe(true);
     await vi.advanceTimersByTimeAsync(2100);
     expect(s.getSnapshot().loaded.connections).toBe(true);
     expect(s.getSnapshot().notifications.filter((entry) => entry.source === "native")).toHaveLength(1);
     s.disconnect();
     expect(s.getSnapshot().notifications).toHaveLength(0);
     expect(session().getSnapshot().notifications).toHaveLength(0);
+  });
+  it("keeps the daemon notification subscription across service recovery", async () => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    const notifications = vi.fn(client.subscribeNotifications);
+    const s = session(undefined, {
+      ...client, subscribeNotifications: notifications,
+      async *subscribeServiceStatus(_, options) {
+        const signal = options!.signal!;
+        yield create(ServiceStatusSchema, { status: ServiceStatus_Type.STARTED });
+        await delay(1200, signal);
+        yield create(ServiceStatusSchema, { status: ServiceStatus_Type.STOPPING });
+        await delay(300, signal);
+        yield create(ServiceStatusSchema, { status: ServiceStatus_Type.STARTED });
+        await delay(60_000, signal);
+      },
+    });
+    s.connect();
+    await vi.advanceTimersByTimeAsync(500);
+    s.setDetailChannel("notifications");
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(s.getSnapshot().serviceActionsReady).toBe(true);
+    expect(s.getSnapshot().capabilities.notifications.status).toBe("supported");
+    expect(notifications).toHaveBeenCalledTimes(1);
+    expect(notifications.mock.calls[0][1]?.signal?.aborted).toBe(false);
   });
   it("shows a quiet native retry as awaiting an event", async () => {
     vi.useFakeTimers();
