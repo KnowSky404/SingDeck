@@ -1,6 +1,7 @@
 import { useDeferredValue, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
+  ArrowDownToLine,
   ArrowUp,
   ArrowUpDown,
   ChevronLeft,
@@ -38,6 +39,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { bytes } from "@/lib/format";
+import { serializeConnectionExport } from "./export";
 import {
   connectionMatcher,
   defaultConnectionFilters,
@@ -69,7 +71,7 @@ function hasStartTime(timestamp: bigint) {
 }
 
 export default function Connections() {
-  const { snapshot, session, language, t } = useWorkspace();
+  const { snapshot, session, profile, language, t } = useWorkspace();
   const [filters, setFilters] = useState(defaultConnectionFilters);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState<ConnectionSort>({
@@ -140,6 +142,7 @@ export default function Connections() {
   const current = snapshot.serviceActionsReady && hasCurrentConnections(snapshot);
   const enabled = current && !action.pending;
   const closeAllEnabled = enabled && activeCount > 0;
+  const canExport = current && query === search && rows.length > 0;
 
   function updateFilter<Key extends keyof ConnectionFilters>(key: Key, value: ConnectionFilters[Key]) {
     setFilters((previous) => ({ ...previous, [key]: value }));
@@ -150,6 +153,24 @@ export default function Connections() {
     void action.run(session.closeAllConnections).then((ok) => {
       if (ok) setConfirm(false);
     });
+  }
+
+  function exportConnections() {
+    if (!canExport) return;
+    const exportedAt = new Date();
+    const report = serializeConnectionExport(
+      rows,
+      profile.mode,
+      exportedAt,
+      snapshot.connectionOverflow,
+      (value) => session.redactText(value),
+    );
+    const url = URL.createObjectURL(new Blob([report], { type: "application/json" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `singdeck-connections-${exportedAt.getTime()}.json`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
   }
 
   return (
@@ -226,6 +247,15 @@ export default function Connections() {
             }}
           >
             {t("Clear filters")}
+          </Button>
+          <Button
+            variant="outline"
+            disabled={!canExport}
+            title={t("Includes matching records retained by this dashboard across all pages.")}
+            onClick={exportConnections}
+          >
+            <ArrowDownToLine aria-hidden="true" />
+            {t("Export matching connections")}
           </Button>
         </div>
         <CollapsibleContent>

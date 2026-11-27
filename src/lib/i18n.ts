@@ -216,6 +216,8 @@ const zh: Record<string, string> = {
   "Search destinations, sources, routes…": "搜索目标、来源、路由…",
   "Advanced filters": "高级筛选",
   "Clear filters": "清除筛选",
+  "Export matching connections": "导出匹配的连接",
+  "Includes matching records retained by this dashboard across all pages.": "包含此面板保留的所有匹配记录，不受分页限制。",
   "All IP versions": "全部 IP 版本",
   "Network filter": "网络筛选",
   "All networks": "全部网络",
