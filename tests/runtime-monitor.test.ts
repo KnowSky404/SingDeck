@@ -35,7 +35,38 @@ it("bounds observations and keeps outbound counts independent of traffic trackin
   });
   const afterGap = recordRuntimeSample(runtime, status, 700_000, false, true);
   expect(afterGap.samples).toHaveLength(1);
-  expect(afterGap.samples[0]).toMatchObject({ connectionsOut: undefined, gapBefore: true });
+  expect(afterGap.samples[0]).toMatchObject({ connectionsOut: 3, gapBefore: true });
+});
+
+it("leaves an unreported outbound count unknown after lifecycle stream failure", async () => {
+  vi.useFakeTimers();
+  const client = createMockClient();
+  vi.spyOn(client, "subscribeServiceStatus").mockImplementation(async function* (_, options) {
+    yield create(ServiceStatusSchema, { status: ServiceStatus_Type.STARTED });
+    await delay(700, options!.signal!);
+    throw new ConnectError("service denied", Code.PermissionDenied);
+  });
+  vi.spyOn(client, "subscribeStatus").mockImplementation(async function* (_, options) {
+    const signal = options!.signal!;
+    while (!signal.aborted) {
+      yield create(StatusSchema, { connectionsOut: 0 });
+      await delay(1000, signal);
+    }
+  });
+  const session = new InstanceSession(client, mockProfile);
+  try {
+    session.connect();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(session.getSnapshot().runtime.samples.at(-1)?.connectionsOut).toBe(0);
+    await vi.advanceTimersByTimeAsync(1000);
+    const snapshot = session.getSnapshot();
+    expect(snapshot.streamErrors.service).toBeDefined();
+    expect(snapshot.service?.status).toBe(ServiceStatus_Type.STARTED);
+    expect(snapshot.runtime.samples.at(-1)?.connectionsOut).toBeUndefined();
+  } finally {
+    session.disconnect();
+    vi.useRealTimers();
+  }
 });
 
 it("records an observed service restart without turning its first interval into a rate", async () => {

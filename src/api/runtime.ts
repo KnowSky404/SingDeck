@@ -46,7 +46,10 @@ export function recordRuntimeSample(
     memory: status.memory,
     goroutines: status.goroutines,
     connectionsIn: status.trafficAvailable ? status.connectionsIn : undefined,
-    connectionsOut: serviceRunning || status.trafficAvailable ? status.connectionsOut : undefined,
+    connectionsOut:
+      status.connectionsOut > 0 || serviceRunning || status.trafficAvailable
+        ? status.connectionsOut
+        : undefined,
     up: rate?.up,
     down: rate?.down,
     gapBefore: gapBefore && runtime.samples.length > 0,
