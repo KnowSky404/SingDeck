@@ -1,6 +1,6 @@
 # Native API capability matrix
 
-SingDeck v0.8.1 audit baseline: commit `dfb16e8`. The vendored `daemon.StartedService` defines **42 RPCs**: 22 unary, 17 server streaming and 3 bidirectional streaming. The generated descriptor exposes all 42. The typed `SingBoxClient` supports 14, with 12 consumed by the workspace and two Clash Mode methods exposed only in the SDK at this baseline. Phase 1 extends the typed client to **18** methods with four new workspace integrations. [Vendored proto](../proto/daemon/started_service.proto) · [SDK](../src/api/client.ts)
+The v0.8.1 audit baseline was commit `dfb16e8`. The vendored `daemon.StartedService` defines **42 RPCs**, comprising 22 unary, 17 server-streaming and 3 bidirectional methods. The generated descriptor exposes all 42. The typed `SingBoxClient` supported 14 at the baseline, with 12 workspace consumers and two Clash Mode methods exposed only in the SDK. Phase 1 extended the typed client to 18 methods. It exposes **22** methods at `54cb805`. [Vendored proto](../proto/daemon/started_service.proto) · [SDK](../src/api/client.ts)
 
 ## Contract and evidence
 
@@ -30,7 +30,7 @@ SingDeck v0.8.1 audit baseline: commit `dfb16e8`. The vendored `daemon.StartedSe
 | SubscribeOutbounds | Empty → OutboundList | S | Yes | All outbounds | Outbounds and endpoints share one list of tag, type and URL-test history. The wire item has no endpoint flag. Duplicate tags are ambiguous for tag-only operations. | HTTP | Verified | 1 |
 | URLTest | URLTestRequest → Empty | U | Yes | Group and node tests | Resolves a tag through the outbound manager. Acknowledges scheduling. Core context owns the probe. History is asynchronous, shared by resolved tag and deleted on failure. | HTTP | Verified | Base / 1 |
 | SelectOutbound | SelectOutboundRequest → Empty | U | Yes | Selector control | Requires a selector and member. Observe the group snapshot for selection confirmation. | HTTP | Verified | Base / 1 |
-| SetGroupExpand | SetGroupExpandRequest → Empty | U | — | — | Persists when the core has a cache file. Otherwise returns success without storing expansion. Later group snapshots may report the cached flag. | HTTP | — | 2 evaluated in source |
+| SetGroupExpand | SetGroupExpandRequest → Empty | U | — | — | An enabled core cache stores expansion by group tag. The RPC can acknowledge success with the cache absent. Fresh group snapshots read the flag. | HTTP | Cache presence, fresh subscription and process restart verified | 2 evaluated |
 | GetClashModeStatus | Empty → ClashModeStatus | U | Yes | Settings | Requires the core Clash mode manager, typically a `with_clash_api` build and `experimental.clash_api`. Returns NotFound if absent. | HTTP | Configured and absent | 2 |
 | SubscribeClashMode | Empty → ClashMode | S | Yes | Settings | Same mode manager, with initial and change events. At a stopped lifecycle state the mode can be empty. | HTTP | Initial and second-client updates | 2 |
 | SetClashMode | ClashMode → Empty | U | Yes | Settings | Same mode manager. The core ignores unknown modes and still acknowledges the RPC. Use reported names and confirm through live state. | HTTP | Confirmed change and ignored unknown mode | 2 |
@@ -41,6 +41,8 @@ SingDeck v0.8.1 audit baseline: commit `dfb16e8`. The vendored `daemon.StartedSe
 | GetDefaultLogLevel | Empty → DefaultLogLevel | U | Yes | Logs | Requires an instance log factory. Reports core default. | HTTP | Verified | Base |
 | ClearLogs | Empty → Empty | U | Yes | Confirm core buffer clear | Clears shared in-memory history and notifies active subscribers with a reset. The browser clear is independent. | HTTP | Verified | 2 |
 | SubscribeNotifications | Empty → NotificationEvent | S | Yes | Notifications | Capture runs while the page is open. The daemon observer sends live send/cancel events without a replay or heartbeat. | HTTP | Transport only, with send/cancel covered by fixtures | 2 |
+
+At `54cb805`, independent authenticated loopback clients used official sing-box 1.14.0 with and without an enabled cache file. With the cache enabled, expansion and explicit collapse appeared in fresh subscriptions and remained set across restart. With the cache absent, the setter acknowledged expansion and fresh subscriptions continued to show the initial collapsed state. In both fixtures an existing idle subscriber received no further snapshot in the two seconds after the setter acknowledged expansion. SingDeck keeps group disclosure as a browser view preference. [Group expansion contract](api-compatibility.md#wire-contract)
 
 ## Native services
 
@@ -64,8 +66,8 @@ SingDeck v0.8.1 audit baseline: commit `dfb16e8`. The vendored `daemon.StartedSe
 | SubscribeOpenVPNStatus | Empty → OpenVPNStatusUpdate | S | — | — | `with_openvpn` and an OpenVPN client endpoint. Reports tunnel and challenge state. | HTTP | — | 4 |
 | SubmitOpenVPNChallengeResponse | OpenVPNChallengeSubmission → Empty | U | — | — | Current OpenVPN challenge. Response can contain username, password or secret. | HTTP | — | 4 |
 | CancelOpenVPNChallenge | OpenVPNChallengeCancel → Empty | U | — | — | Configured client endpoint and current challenge ID. | HTTP | — | 4 |
-| SubscribeUSBIPServerStatus | Empty → USBIPServerStatusUpdate | S | Yes | Settings → Native services | `with_usbip` on Linux, Windows or macOS with cgo. Lists configured dynamic services. The view shows service tags and shared-device counts. Build stub returns NotFound. | HTTP | Verified for configured dynamic service with zero devices and for no configured service | 4 |
-| ProvideUSBDevices | USBProviderMessage → USBServerMessage | B | — | — | Supported USB/IP build, dynamic service and browser/device permissions. Build stub returns Unimplemented. | WS blocked | Transport only | 4 research |
+| SubscribeUSBIPServerStatus | Empty → USBIPServerStatusUpdate | S | Yes | Settings → Native services | `with_usbip` on Linux, Windows or macOS with cgo. Lists configured dynamic services. The view shows service tags and shared-device counts. Build stub returns NotFound. | HTTP | Verified absent service and a dynamic service with count changes from an inert software descriptor | 4 |
+| ProvideUSBDevices | USBProviderMessage → USBServerMessage | B | — | — | Supported USB/IP build, dynamic service and browser/device permissions. Build stub returns Unimplemented. | WS blocked | Software descriptor registration and removal verified | 4 research |
 
 Build-tag and implementation references: [Clash build tag](https://github.com/SagerNet/sing-box/blob/v1.14.0/include/clashapi.go) · [Clash mode behavior](https://github.com/SagerNet/sing-box/blob/v1.14.0/experimental/clashapi/server.go#L222-L250) · [Tailscale](https://github.com/SagerNet/sing-box/blob/v1.14.0/include/tailscale.go) · [Taildrop](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/started_service_taildrop.go) · [OpenConnect](https://github.com/SagerNet/sing-box/blob/v1.14.0/include/openconnect.go) · [OpenVPN](https://github.com/SagerNet/sing-box/blob/v1.14.0/include/openvpn.go) · [USB/IP](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/started_service_usbip.go) · [USB/IP build stub](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/started_service_usbip_stub.go)
 
