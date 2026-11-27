@@ -21,8 +21,16 @@ concurrency:
 permissions:
   contents: read
 jobs:
+  metadata:
+    name: PR metadata only
+    if: github.event_name == 'pull_request' && github.event.action == 'edited' && !github.event.changes.base.ref.from
+    permissions: {}
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - run: printf '%s\n' 'Verification applies to the existing source revision.' >> "$GITHUB_STEP_SUMMARY"
   check:
-    name: ${{ github.event.action == 'edited' && !github.event.changes.base.ref.from && 'PR metadata only' || 'check' }}
+    name: ${{ github.event.action == 'edited' && !github.event.changes.base.ref.from && 'Source verification skipped' || 'check' }}
     if: github.event.action != 'edited' || github.event.changes.base.ref.from
     runs-on: ubuntu-latest
     timeout-minutes: 15
