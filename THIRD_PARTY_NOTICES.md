@@ -8,7 +8,7 @@ SingDeck's original UI/application code is AGPL-3.0-or-later. The pre-existing r
 
 Copyright (C) 2022 by nekohasekai <contact-sagernet@sekai.icu>.
 
-The upstream project is GPL-3.0-or-later. The original complete notice and license are preserved in `proto/LICENSE.sing-box`. Generated `src/proto/daemon/started_service_pb.ts` derives from that schema. GPLv3 section 13 permits combining with AGPLv3; the combined application's AGPL obligations do not remove original notices. Supply corresponding source when distributing. The official dashboard was consulted for protocol reference only; none of its UI components/pages/styles were copied.
+The upstream project is GPL-3.0-or-later. The original v1.14.0 program notice is preserved verbatim in `proto/LICENSE.sing-box`. The full GNU GPLv3 text in `proto/LICENSE.GPL-3.0` comes from the system common-license file `/usr/share/common-licenses/GPL-3`. The generated third-party notice includes both texts. Generated `src/proto/daemon/started_service_pb.ts` derives from that schema. GPLv3 section 13 permits combining with AGPLv3; the combined application's AGPL obligations do not remove original notices. Supply corresponding source when distributing. The official dashboard was consulted for protocol reference only; none of its UI components/pages/styles were copied.
 
 Sources: [proto](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/started_service.proto), [license](https://github.com/SagerNet/sing-box/blob/v1.14.0/LICENSE), [GPLv3 section 13](https://www.gnu.org/licenses/gpl-3.0.html#section13).
 
