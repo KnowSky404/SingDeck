@@ -216,6 +216,15 @@ export class InstanceSession {
       topologyGeneration: this.topologyGeneration,
     };
   }
+  canInspectReportedOutbound(id: string, tag: string, expected: ConnectionBatchGeneration) {
+    const signal = this.signal;
+    const connection = this.pending.connections.get(id);
+    return !!signal && !signal.aborted && this.detailChannel === "connections" &&
+      this.topologyGeneration === expected.topologyGeneration &&
+      this.pending.connectionGeneration === expected.connectionGeneration &&
+      !this.pending.authenticationFailed && this.canRunServiceAction() &&
+      hasCurrentConnections(this.pending) && connection?.closedAt === 0n && connection.outbound === tag;
+  }
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
     return () => {
