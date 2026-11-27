@@ -72,7 +72,9 @@ In a separate controlled connection with the same build and core, an explicit in
 
 At `ccb84bd`, Chromium 159.0.8154.6 used a source-built `v1.14.0` fixture with a synthetic in-process producer. The upstream daemon observer and authenticated gRPC-Web served the notifications page in an isolated loopback-only namespace. A wrong Bearer was rejected. The browser kept two events with the same identifier and different types separate. A type-mismatched cancel affected neither. A matching cancel marked only its target canceled and read, and the other item remained unread.
 
-Leaving the page closed the browser observer. An independent observer received a notice while the browser was away. Returning opened a quiet subscription and kept the browser's two existing records without replay. A fresh event arrived on the new subscription. The tested notification URL and shared identifier stayed out of the page. The fixture text and Bearer were absent from Web Storage and IndexedDB. Separate checks with the official release CLI verified live idle subscription and teardown on route exit. Actual desktop notification delivery remains a separate check.
+Leaving the page closed the browser observer. An independent observer received a notice while the browser was away. Returning opened a quiet subscription and kept the browser's two existing records without replay. A fresh event arrived on the new subscription. The tested notification URL and shared identifier stayed out of the page. The fixture text and Bearer were absent from Web Storage and IndexedDB. Separate checks with the official release CLI verified live idle subscription and teardown on route exit.
+
+The `ccb84bd` production build ran in headed Chromium 159.0.8154.6 in a disposable profile under Xvfb and an isolated loopback network namespace. The dashboard button opened Chromium's notification permission prompt. XTest activated **Allow** and the permission changed from default to granted. A foreground Demo STUN completion made no desktop notification request. After selecting another browser tab, a Demo network quality completion in the hidden workspace sent one SingDeck notification containing the fixed completion text to a private Linux D-Bus notification service. A new native-source Demo event arrived in the hidden workspace without an additional desktop notification. This verifies Chromium delivery to the Linux notification service.
 
 ## Phase 2 — Local outbound group disclosure
 
@@ -144,6 +146,8 @@ Three controlled traffic rounds on all 1,000 sockets delivered 512,000, 1,024,00
 
 A separate ramp used the same production build, native core, Chromium viewport and loopback isolation. At the 2,500-flow checkpoint, the native subscriber and browser both reported 2,500 active connections and the browser rendered 50 rows. The fixture stopped after opening 3,250 socket pairs when the host's available memory reached about 529 MiB, below its configured 560 MiB reserve. The fixture closed all sockets and listeners. A 10,000-flow run and traffic updates above the earlier 1,000-flow baseline remain unverified.
 
+A separate bounded churn run used the same production build, native core and loopback isolation. It opened and closed 10,200 TCP flows over time, with at most 400 simultaneously active. The native observer recorded distinct creation and close events for each flow. Chromium showed 10,000 retained closed records across 200 pages and mounted 50 rows on page 2. With another 200 flows active at the cap, the browser retained all 200 active records, 9,800 closed records and the 10,000-record limit notice. Once all flows closed, the dashboard again retained 10,000 closed records on the same Connections subscription. During this roughly 39-second run, unforced Chromium JS heap samples were 8.1 and 26.6 MiB, with 13 tasks of at least 50 ms and a maximum of 91 ms. These observations cover bounded connection churn and retained history. The preceding ramp measures simultaneous activity separately.
+
 ## Phase 5 — Sustained Runtime Monitor updates
 
 At `1fd28e9`, a foreground Chromium 159.0.8154.6 context at 1280 × 720 with reduced motion ran the production build in explicit Demo mode at its default one-second interval. The shared Linux host exposed two CPUs. Seven checkpoints over 330.03 seconds stayed Live. The browser observed 330 distinct status receipt timestamps. Each of the six plotted series rendered 299 points at the final five-minute checkpoint. Switching to a one-minute window reduced each series to 60 points. Restoring five minutes returned each to 300 points.
@@ -171,6 +175,17 @@ The initial run used source `845ce6c`, Bun 1.4.4, Playwright 1.65.1 and headless
 Pagination bounded mounted rows in every run. The timings varied under shared host load and cover first display and one search. Real-core throughput, repeated stream churn and multi-group scale require separate measurements.
 
 One separate CPU profile used `98347c4`, the same browser, viewport and synthetic 20,000-row fixture. Outbounds navigation to visible controls took 852 ms with no task of at least 50 ms. Selecting **All outbounds** to the first 60 rows took 346 ms with a 106 ms long task. Exact tag search took 87 ms. During the inventory phase, sampled inclusive stack time was about 108 ms for React and DOM work, 37 ms for mock acquisition and Protobuf cloning, 13 ms for inventory filtering, mapping and sorting, and 1 ms for indexing. Garbage collection accounted for about 41 ms. These categories can overlap. This single observed long task was shorter than the earlier 20,000-row samples, and the profile did not attribute their long tasks or measure a real core.
+
+### Collapsed outbound groups
+
+Production builds used `834bdd3` as the baseline and deferred member filtering and rendering until a group was expanded in the candidate. The same explicit Demo fixture supplied 20 groups of 500 members. One Chromium 159.0.8154.6 browser at 1280 × 720 with reduced motion ran on a shared two-CPU Linux host. After one warm-up per build, three alternating pairs used fresh contexts. For each state, the settled sampling window lasted 2.66–2.74 seconds.
+
+| Group state | Median main-thread task time before → after | Median sampled time with the Proxies chunk on stack before → after |
+| --- | ---: | ---: |
+| All collapsed | 502.0 → 150.9 ms | 113.4 → 5.2 ms |
+| One expanded | 779.6 → 489.3 ms | 104.1 → 16.1 ms |
+
+Across the three collapsed windows the baseline recorded 12 tasks of at least 50 ms, with a maximum of 168 ms. The candidate recorded zero. Both builds mounted zero member rows when collapsed and 500 when one group opened by keyboard. Closing it returned to zero, and an exact search showed one matching row after automatic expansion. These timings cover this synthetic group workload.
 
 ## Phase 5 — High-volume core log fixture
 
