@@ -40,8 +40,17 @@ jobs:
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           scope=full
           tested_commit=$(git rev-list --parents -n 1 HEAD)
-          if [[ "$GITHUB_EVENT_NAME" == pull_request &&
-                "$tested_commit" == "$GITHUB_SHA $BASE_SHA $PR_HEAD_SHA" ]]; then
+          {
+            printf -- '- Checked-out commit and its parents: `%s`\n' "$tested_commit"
+            if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+              printf -- '- Event base and head: `%s %s`\n' "$BASE_SHA" "$PR_HEAD_SHA"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
+            if [[ "$tested_commit" != "$GITHUB_SHA $BASE_SHA $PR_HEAD_SHA" ]]; then
+              echo "::error::The checked-out commit does not verify the PR event's base and head."
+              exit 1
+            fi
             git diff --check "$BASE_SHA" HEAD
             classifier="$RUNNER_TEMP/singdeck-ci-scope.sh"
             if git show "$BASE_SHA:scripts/ci-scope.sh" > "$classifier" 2>/dev/null &&
@@ -54,15 +63,9 @@ jobs:
           fi
           echo "scope=$scope" >> "$GITHUB_OUTPUT"
           {
+            echo
             echo "### Verification scope: $scope"
             echo
-            printf -- '- Checked-out commit and its parents: `%s`\n' "$tested_commit"
-            if [[ "$GITHUB_EVENT_NAME" == pull_request ]]; then
-              printf -- '- Event base and head: `%s %s`\n' "$BASE_SHA" "$PR_HEAD_SHA"
-              if [[ "$tested_commit" != "$GITHUB_SHA $BASE_SHA $PR_HEAD_SHA" ]]; then
-                echo '- Event and tested parents differ. This result cannot confirm the event pair.'
-              fi
-            fi
             if [[ "$scope" == docs ]]; then
               echo "- Allowlisted documentation: diff and production build."
             else
@@ -82,9 +85,6 @@ jobs:
           RELEASE_VERSION: ${{ inputs.release-version }}
           RELEASE_IS_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
-          git -c credential.helper= -c 'credential.helper=!gh auth git-credential' fetch --no-tags origin \
-            '+refs/heads/main:refs/singdeck/verified-main'
-          git merge-base --is-ancestor "$GITHUB_SHA" refs/singdeck/verified-main
           case "$GITHUB_EVENT_NAME" in
             release)
               test "$GITHUB_REF" = "refs/tags/$RELEASE_VERSION"
@@ -98,11 +98,17 @@ jobs:
             workflow_dispatch)
               test "$GITHUB_REF" = refs/heads/main
               [[ "$RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
-              test "$(git rev-parse --verify "refs/tags/$RELEASE_VERSION^{commit}")" = "$GITHUB_SHA"
-              test "$(gh release view "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease --jq '.isDraft == false and .isPrerelease == false')" = true
               ;;
             *) exit 1 ;;
           esac
+          git -c credential.helper= -c 'credential.helper=!gh auth git-credential' fetch --no-tags origin \
+            '+refs/heads/main:refs/singdeck/verified-main' \
+            "+refs/tags/$RELEASE_VERSION:refs/singdeck/verified-tag"
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/singdeck/verified-main
+          test "$(git rev-parse --verify 'refs/singdeck/verified-tag^{commit}')" = "$GITHUB_SHA"
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            test "$(gh release view "$RELEASE_VERSION" --repo "$GITHUB_REPOSITORY" --json isDraft,isPrerelease --jq '.isDraft == false and .isPrerelease == false')" = true
+          fi
           bun -e 'if (process.env.RELEASE_VERSION !== `v${require("./package.json").version}`) throw new Error("Expected release version must match package.json");'
       - run: bun install --frozen-lockfile
       - name: Verify classifier and generated inputs
