@@ -46,6 +46,7 @@ export interface Snapshot {
   warnings?: DeprecatedWarning[];
   checkingWarnings?: boolean;
   testingLatencies?: boolean;
+  latencyTestSource?: "groups" | "outbounds";
   stoppingLatencyTests?: boolean;
   testingManualLatency?: boolean;
   latencyTestError?: string;

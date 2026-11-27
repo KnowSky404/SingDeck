@@ -22,14 +22,19 @@ export function describeError(error: unknown): string {
   }
 }
 
-export function canRetry(error: unknown): boolean {
+export function canRetryCode(code: Code): boolean {
   return [
+    Code.Canceled,
     Code.Unavailable,
     Code.Unknown,
     Code.Internal,
     Code.DeadlineExceeded,
     Code.ResourceExhausted,
-  ].includes(ConnectError.from(error).code);
+  ].includes(code);
+}
+
+export function canRetry(error: unknown): boolean {
+  return canRetryCode(ConnectError.from(error).code);
 }
 
 export function delay(ms: number, signal: AbortSignal): Promise<void> {

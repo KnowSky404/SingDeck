@@ -21,14 +21,15 @@ export function OutboundDetails({
   referencedGroup?: Group;
   groupsByTag: ReadonlyMap<string, Group>;
 }) {
-  const { t } = useWorkspace();
+  const { session, t } = useWorkspace();
+  const displayedTag = session.redactText(item.tag);
   const isGroup =
     Boolean(referencedGroup) ||
     item.type === "selector" ||
     item.type === "urltest";
   const label = t(
     isGroup ? "Group details for {name}" : "Node details for {name}",
-    { name: item.tag },
+    { name: displayedTag },
   );
   return (
     <Dialog>
@@ -48,7 +49,7 @@ export function OutboundDetails({
         className="max-h-[calc(100dvh-2rem)] overflow-y-auto"
       >
         <DialogHeader>
-          <DialogTitle className="pr-8 wrap-anywhere">{item.tag}</DialogTitle>
+          <DialogTitle className="pr-8 wrap-anywhere">{displayedTag}</DialogTitle>
           <DialogDescription>
             {t(
               isGroup
@@ -72,25 +73,25 @@ function OutboundFacts({
   referencedGroup?: Group;
   groupsByTag: ReadonlyMap<string, Group>;
 }) {
-  const { language, t } = useWorkspace();
+  const { language, session, t } = useWorkspace();
   const measuredAt = testedAt(item);
   const route = referencedGroup && selectedRoute(referencedGroup, groupsByTag);
   return (
     <dl className="detail-list">
       <div>
         <dt>{t("Outbound type")}</dt>
-        <dd>{referencedGroup?.type || item.type}</dd>
+        <dd>{session.redactText(referencedGroup?.type || item.type)}</dd>
       </div>
       {referencedGroup && (
         <div>
           <dt>{t("Selected member")}</dt>
-          <dd>{referencedGroup.selected || "—"}</dd>
+          <dd>{session.redactText(referencedGroup.selected) || "—"}</dd>
         </div>
       )}
       {route && route.length > 2 && (
         <div>
           <dt>{t("Selected route")}</dt>
-          <dd className="wrap-anywhere">{route.join(" → ")}</dd>
+          <dd className="wrap-anywhere">{session.redactText(route.join(" → "))}</dd>
         </div>
       )}
       <div>

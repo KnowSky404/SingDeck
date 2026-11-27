@@ -153,6 +153,13 @@ test("browser uses the official native service through CORS and built-in dashboa
   core: { secret },
 }) => {
   test.setTimeout(120_000);
+  const detailRequests = { inventory: 0, connections: 0 };
+  page.on("request", (request) => {
+    if (request.method() !== "POST") return;
+    const path = new URL(request.url()).pathname;
+    if (path === "/daemon.StartedService/SubscribeOutbounds") detailRequests.inventory++;
+    if (path === "/daemon.StartedService/SubscribeConnections") detailRequests.connections++;
+  });
   try {
     await page.clock.install();
     await page.goto("/#/settings");
@@ -194,6 +201,9 @@ test("browser uses the official native service through CORS and built-in dashboa
         exact: true,
       }),
     ).toBeVisible();
+    expect(detailRequests.inventory).toBe(0);
+    const groupConnectionRequests = detailRequests.connections;
+    expect(groupConnectionRequests).toBeGreaterThan(0);
     await page.getByRole("radio", { name: "All outbounds", exact: true }).click();
     const inventory = page.getByRole("list", { name: "All outbounds", exact: true });
     await expect(
@@ -202,7 +212,14 @@ test("browser uses the official native service through CORS and built-in dashboa
     await expect(
       inventory.getByRole("listitem").filter({ has: page.getByText("direct-backup", { exact: true }) }),
     ).toContainText("Selected");
+    await expect.poll(() => detailRequests).toEqual({ inventory: 1, connections: groupConnectionRequests });
+    await page.getByRole("link", { name: "Diagnostics", exact: true }).first().click();
+    await expect(page.getByRole("heading", { name: "Diagnostics", exact: true })).toBeVisible();
+    await outboundsLink.click();
+    await expect(inventory).toBeVisible();
+    expect(detailRequests).toEqual({ inventory: 1, connections: groupConnectionRequests });
     await page.getByRole("radio", { name: "Groups", exact: true }).click();
+    await expect.poll(() => detailRequests).toEqual({ inventory: 1, connections: groupConnectionRequests + 1 });
     const grid = page.locator(".proxy-group-grid");
     const gridTop = (await grid.boundingBox())!.y;
     const testAll = page.getByRole("button", {

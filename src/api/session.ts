@@ -2,6 +2,7 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import {
   ServiceStatus_Type,
   type Version,
+  type DeprecatedWarning,
   type Group,
   type GroupItem,
 } from "@/proto/daemon/started_service_pb";
@@ -19,7 +20,7 @@ import type {
   NetworkQualityRequest,
   STUNRequest,
 } from "./diagnostics";
-import { canRetry, delay, describeError } from "./errors";
+import { canRetry, canRetryCode, delay, describeError } from "./errors";
 import {
   appendLogs,
   applyConnections,
@@ -33,20 +34,11 @@ import {
 import type { Profile } from "@/features/instances/profiles";
 
 const probeWindowMs = 15_250;
+type MetadataValidation = { generation: number; error?: unknown };
 type LatencyTestWave = {
   tags: string[];
   windows: number;
 };
-
-function probeMayHaveStarted(error: unknown) {
-  const { code } = ConnectError.from(error);
-  return (
-    canRetry(error) ||
-    code === Code.Canceled ||
-    code === Code.Unknown ||
-    code === Code.Internal
-  );
-}
 
 function probeMembers(group: Group, groups: ReadonlyMap<string, Group>) {
   const pending = new Map(group.items.map((item) => [item.tag, item]));
@@ -84,6 +76,16 @@ function hasStaleProbeHistory(
     hadHistory ||= item.urlTestTime !== 0n;
   }
   return hadHistory;
+}
+
+function mergeWarnings(
+  previous: DeprecatedWarning[] | undefined,
+  current: DeprecatedWarning[] | undefined,
+) {
+  const warnings = new Map<string, DeprecatedWarning>();
+  for (const warning of [...(previous ?? []), ...(current ?? [])])
+    warnings.set(JSON.stringify([warning.message, warning.deprecatedVersion]), warning);
+  return [...warnings.values()];
 }
 
 const streamCapabilities: Partial<Record<Channel, CapabilityName>> = {
@@ -132,8 +134,17 @@ export class InstanceSession {
   private inventoryEnabled = false;
   private retainClosedOnResume = false;
   private streamsStarted = false;
-  private revalidation?: Promise<void>;
+  private revalidation?: { controller: AbortController; promise: Promise<void> };
+  private revalidationGeneration = 0;
+  private serviceRecoveryGeneration?: number;
+  private bootScope?: AbortController;
+  private checkingBoot = false;
+  private lastBootMarker?: bigint;
+  private warningArchive?: DeprecatedWarning[];
+  private provisionalWarnings = false;
   private warningsScope?: AbortController;
+  private archivedWarningScope?: AbortController;
+  private retryWarningsAfterCurrent = false;
   private diagnosticScope?: AbortController;
 
   constructor(
@@ -177,9 +188,12 @@ export class InstanceSession {
     this.controller?.abort();
     this.streamsStarted = false;
     this.retainClosedOnResume = false;
-    this.revalidation = undefined;
+    this.lastBootMarker = undefined;
+    this.warningArchive = undefined;
+    this.provisionalWarnings = false;
+    this.cancelRevalidation();
     this.detailScope = undefined;
-    this.warningsScope = undefined;
+    this.cancelWarningRead();
     this.serviceReadsScope = undefined;
     this.diagnosticScope = undefined;
     this.resetLatencyTests();
@@ -210,10 +224,14 @@ export class InstanceSession {
   private interruptDiagnostic() {
     this.diagnosticScope?.abort(new ConnectError("Service interrupted", Code.Unavailable));
   }
-  private invalidateServiceReads() {
+  private invalidateServiceReads(keepWarnings = false) {
+    this.lastBootMarker = undefined;
+    this.warningArchive = undefined;
+    this.provisionalWarnings = false;
     this.serviceReadsScope?.abort();
     this.serviceReadsScope = undefined;
-    this.warningsScope = undefined;
+    const keepWarningRead = keepWarnings && !this.archivedWarningScope;
+    if (!keepWarningRead) this.cancelWarningRead();
     this.interruptDiagnostic();
     this.retainClosedOnResume = false;
     this.update({
@@ -221,9 +239,12 @@ export class InstanceSession {
       connectionOverflow: false,
       groups: undefined,
       outbounds: undefined,
-      warnings: undefined,
-      checkingWarnings: undefined,
-      capabilities: initialCapabilities(),
+      ...(!keepWarnings && { warnings: undefined }),
+      ...(!keepWarningRead && { checkingWarnings: undefined }),
+      capabilities: {
+        ...initialCapabilities(),
+        ...(keepWarnings && { deprecatedWarnings: this.pending.capabilities.deprecatedWarnings }),
+      },
       loaded: { ...this.pending.loaded, connections: false, groups: false, outbounds: false },
       streamErrors: {
         ...this.pending.streamErrors,
@@ -277,17 +298,23 @@ export class InstanceSession {
     const service = this.serviceReadsScope?.signal;
     if (!parent || !service || this.pending.service?.status !== ServiceStatus_Type.STARTED)
       return;
-    void this.refreshWarnings();
+    if (this.warningReadNeedsRetry()) void this.refreshWarnings();
     void this.probeClashMode(AbortSignal.any([parent, service]));
   }
+  get canRefreshWarnings() {
+    return this.pending.phase === "connected" &&
+      this.pending.service?.status === ServiceStatus_Type.STARTED &&
+      !this.pending.streamErrors.service && !this.revalidation && !this.checkingBoot &&
+      this.serviceRecoveryGeneration === undefined;
+  }
   refreshWarnings = async () => {
-    if (this.pending.service?.status !== ServiceStatus_Type.STARTED) return;
+    if (!this.canRefreshWarnings) return;
     const parent = this.signal;
     const service = this.serviceReadsScope?.signal;
     if (!parent || parent.aborted || !service || service.aborted || this.warningsScope) return;
     const scope = new AbortController();
     this.warningsScope = scope;
-    const signal = AbortSignal.any([parent, service, scope.signal]);
+    const signal = AbortSignal.any([parent, scope.signal]);
     this.update({ checkingWarnings: true });
     try {
       const data = await this.runUnary(
@@ -296,11 +323,7 @@ export class InstanceSession {
       );
       if (signal.aborted) return;
       const redact = (value: string) => this.redactText(value);
-      const key = (warning: { message: string; deprecatedVersion: string }) =>
-        JSON.stringify([warning.message, warning.deprecatedVersion]);
-      // Daemon mode drains its warning collector on read; retain reports for this core lifecycle.
-      const warnings = new Map(this.pending.warnings?.map((warning) => [key(warning), warning]));
-      for (const warning of data.warnings) {
+      const warnings = data.warnings.map((warning) => {
         const redacted = {
           ...warning,
           message: redact(warning.message),
@@ -316,17 +339,28 @@ export class InstanceSession {
         } catch {
           redacted.migrationLink = "";
         }
-        warnings.set(key(redacted), redacted);
+        return redacted;
+      });
+      // Daemon mode drains its warning collector on read.
+      if (this.archivedWarningScope === scope) {
+        this.warningArchive = mergeWarnings(this.warningArchive, warnings);
+      } else {
+        this.update({ warnings: mergeWarnings(this.pending.warnings, warnings) });
+        this.setCapability("deprecatedWarnings", { status: "supported" });
       }
-      this.update({ warnings: [...warnings.values()] });
-      this.setCapability("deprecatedWarnings", { status: "supported" });
     } catch (error) {
-      if (!signal.aborted)
+      if (!signal.aborted && this.archivedWarningScope !== scope)
         this.setCapability("deprecatedWarnings", capabilityFailure(error));
     } finally {
       if (this.warningsScope === scope) {
         this.warningsScope = undefined;
-        if (!signal.aborted) this.update({ checkingWarnings: false }, true);
+        if (this.archivedWarningScope === scope) this.archivedWarningScope = undefined;
+        const retry = this.retryWarningsAfterCurrent;
+        this.retryWarningsAfterCurrent = false;
+        if (!signal.aborted) {
+          this.update({ checkingWarnings: false }, true);
+          if (retry && this.warningReadNeedsRetry()) void this.refreshWarnings();
+        }
       }
     }
   };
@@ -339,68 +373,221 @@ export class InstanceSession {
       if (!signal.aborted) this.setCapability("clashMode", capabilityFailure(error));
     }
   }
-  private coreChanged(metadata: { version: Version; startedAt?: bigint }) {
-    const { version, startedAt } = this.pending;
-    return (
-      version?.version !== metadata.version.version ||
-      version?.apiVersion !== metadata.version.apiVersion ||
-      (startedAt !== undefined &&
-        metadata.startedAt !== undefined &&
-        startedAt !== metadata.startedAt)
-    );
+  private versionChanged(next: Version) {
+    const { version } = this.pending;
+    return version?.version !== next.version || version?.apiVersion !== next.apiVersion;
   }
   clearLogs = () => this.update({ logs: [] }, true);
   private async readMetadata(signal: AbortSignal) {
     const version = await this.client.getVersion({}, { signal });
     signal.throwIfAborted();
     assertCompatible(version);
-    const [started, level] = await Promise.allSettled([
-      this.runUnary((options) => this.client.getStartedAt({}, options), signal),
-      this.runUnary(
-        (options) => this.client.getDefaultLogLevel({}, options),
-        signal,
-      ),
-    ]);
-    return {
-      version,
-      startedAt:
-        started.status === "fulfilled" ? started.value.startedAt : undefined,
-      defaultLogLevel:
-        level.status === "fulfilled" ? level.value.level : undefined,
-    };
+    const level = await this.runUnary(
+      (options) => this.client.getDefaultLogLevel({}, options), signal,
+    ).catch(() => undefined);
+    return { version, defaultLogLevel: level?.level };
   }
-  private revalidateMetadata(signal: AbortSignal) {
-    if (this.revalidation) return this.revalidation;
-    const revalidation = this.readMetadata(signal)
+  private cancelBootRead() {
+    this.bootScope?.abort();
+    this.bootScope = undefined;
+    this.checkingBoot = false;
+  }
+  private cancelRevalidation() {
+    this.revalidationGeneration++;
+    this.serviceRecoveryGeneration = undefined;
+    this.cancelBootRead();
+    this.revalidation?.controller.abort();
+    this.revalidation = undefined;
+  }
+  private async revalidateMetadata(parent: AbortSignal, expectedGeneration?: number): Promise<MetadataValidation> {
+    while (
+      !parent.aborted && this.pending.phase !== "error" &&
+      (expectedGeneration === undefined || expectedGeneration === this.revalidationGeneration)
+    ) {
+      const generation = this.revalidationGeneration;
+      const current = this.revalidation ?? this.startRevalidation(parent);
+      try {
+        await current.promise;
+      } catch (error) {
+        if (!parent.aborted && generation === this.revalidationGeneration)
+          return { generation, error };
+        continue;
+      }
+      if (
+        generation === this.revalidationGeneration &&
+        !current.controller.signal.aborted &&
+        (!this.revalidation || this.revalidation === current)
+      ) return { generation };
+    }
+    return { generation: this.revalidationGeneration };
+  }
+  private startRevalidation(parent: AbortSignal) {
+    this.cancelBootRead();
+    const controller = new AbortController();
+    const signal = AbortSignal.any([parent, controller.signal]);
+    const promise = this.readMetadata(signal)
       .then((metadata) => {
         if (signal.aborted) return;
-        const changed = this.coreChanged(metadata);
-        this.update(metadata);
+        const changed = this.versionChanged(metadata.version);
+        this.update({
+          ...metadata,
+          ...(changed && { startedAt: undefined }),
+        });
         if (changed) this.invalidateServiceReads();
       })
+      .catch((error: unknown) => {
+        if (!signal.aborted) throw error;
+      })
       .finally(() => {
-        if (this.revalidation === revalidation) this.revalidation = undefined;
+        if (this.revalidation?.controller === controller) this.revalidation = undefined;
       });
-    this.revalidation = revalidation;
-    return revalidation;
+    this.revalidation = { controller, promise };
+    return this.revalidation;
   }
   private async recoverServiceReads(signal: AbortSignal) {
+    const generation = this.revalidationGeneration;
+    if (this.pending.phase === "error" || this.serviceRecoveryGeneration === generation) return;
+    this.serviceRecoveryGeneration = generation;
+    let attempt = 0;
     try {
-      await this.revalidateMetadata(signal);
-    } catch (error) {
-      if (signal.aborted) return;
-      if (error instanceof CompatibilityError) {
-        this.update({ phase: "error", error: error.message }, true);
-        this.controller?.abort();
-        return;
+      while (!signal.aborted && generation === this.revalidationGeneration) {
+        try {
+          const validation = await this.revalidateMetadata(signal, generation);
+          if (signal.aborted || generation !== this.revalidationGeneration) return;
+          if ("error" in validation) throw validation.error;
+          this.serviceRecoveryGeneration = undefined;
+          this.resumeServiceReads(signal);
+          return;
+        } catch (error) {
+          if (signal.aborted || generation !== this.revalidationGeneration) return;
+          if (
+            error instanceof CompatibilityError ||
+            !this.profile.preferences.autoReconnect ||
+            !canRetry(error)
+          ) {
+            this.update({
+              phase: "error",
+              checkingWarnings: false,
+              error: error instanceof CompatibilityError ? error.message : describeError(error),
+              authenticationFailed:
+                this.pending.authenticationFailed || ConnectError.from(error).code === Code.Unauthenticated,
+            }, true);
+            this.controller?.abort();
+            return;
+          }
+          try {
+            await delay(Math.min(1000 * 2 ** attempt++, 30000), signal);
+          } catch {
+            return;
+          }
+        }
+      }
+    } finally {
+      if (this.serviceRecoveryGeneration === generation) this.serviceRecoveryGeneration = undefined;
+    }
+  }
+  private resumeServiceReads(parent: AbortSignal) {
+    if (
+      parent.aborted || this.bootScope || this.revalidation ||
+      this.serviceRecoveryGeneration !== undefined ||
+      this.pending.phase !== "connected" ||
+      this.pending.service?.status !== ServiceStatus_Type.STARTED
+    ) return;
+    const scope = new AbortController();
+    this.bootScope = scope;
+    this.checkingBoot = true;
+    const signal = AbortSignal.any([parent, scope.signal]);
+    if (!this.serviceReadsScope) void this.refreshServiceReads(parent);
+    else if (this.pending.capabilities.clashMode.status === "unknown")
+      this.readServiceConfiguration();
+    void this.refreshBootMarker(parent, signal, scope);
+  }
+  private async refreshBootMarker(parent: AbortSignal, signal: AbortSignal, scope: AbortController) {
+    let attempt = 0;
+    try {
+      while (!signal.aborted) {
+        try {
+          const { startedAt } = await this.runUnary(
+            (options) => this.client.getStartedAt({}, { ...options, timeoutMs: 2000 }),
+            signal,
+          );
+          if (signal.aborted) return;
+          if (startedAt <= 0n) throw new ConnectError("Boot marker unavailable", Code.Unavailable);
+          this.confirmBootMarker(startedAt);
+          return;
+        } catch (error) {
+          if (signal.aborted) return;
+          const retry = this.profile.preferences.autoReconnect && canRetry(error);
+          // Two bounded attempts give warning reads a path even when uptime stays unavailable.
+          if (!retry || attempt === 1) this.releaseBootCheck(parent, true);
+          if (!retry) return;
+          try {
+            await delay(Math.min(1000 * 2 ** attempt++, 30000), signal);
+          } catch {
+            return;
+          }
+        }
+      }
+    } finally {
+      if (this.bootScope === scope) {
+        this.bootScope = undefined;
+        if (signal.aborted) this.checkingBoot = false;
+        else if (this.checkingBoot) this.releaseBootCheck(parent);
+        else if (!this.serviceReadsScope) void this.refreshServiceReads(parent);
       }
     }
-    if (
-      !signal.aborted &&
-      !this.serviceReadsScope &&
-      this.pending.service?.status === ServiceStatus_Type.STARTED
-    )
-      void this.refreshServiceReads(signal);
+  }
+  private confirmBootMarker(startedAt: bigint) {
+    const previous = this.lastBootMarker;
+    if (previous !== undefined && previous !== startedAt) {
+      this.invalidateServiceReads(this.provisionalWarnings);
+    } else if (previous === startedAt) {
+      if (this.warningArchive)
+        this.update({ warnings: mergeWarnings(this.warningArchive, this.pending.warnings) });
+    } else if (this.archivedWarningScope) {
+      this.cancelWarningRead();
+      this.update({ checkingWarnings: false });
+    }
+    this.archivedWarningScope = undefined;
+    this.lastBootMarker = startedAt;
+    this.warningArchive = undefined;
+    this.provisionalWarnings = false;
+    this.update({ startedAt });
+  }
+  private releaseBootCheck(parent: AbortSignal, unconfirmed = false) {
+    if (!this.checkingBoot) return;
+    this.checkingBoot = false;
+    if (unconfirmed && !this.provisionalWarnings) {
+      this.archiveWarnings();
+      this.provisionalWarnings = true;
+      this.update({ startedAt: undefined });
+    }
+    if (!this.serviceReadsScope) void this.refreshServiceReads(parent);
+    else if (this.warningsScope) this.retryWarningsAfterCurrent = true;
+    else if (this.warningReadNeedsRetry()) void this.refreshWarnings();
+    this.update({});
+  }
+  private archiveWarnings() {
+    if (this.pending.warnings)
+      this.warningArchive = mergeWarnings(this.warningArchive, this.pending.warnings);
+    this.archivedWarningScope = this.warningsScope;
+    this.update({
+      warnings: undefined,
+      capabilities: {
+        ...this.pending.capabilities,
+        deprecatedWarnings: { status: "unknown" },
+      },
+    });
+  }
+  private cancelWarningRead() {
+    this.warningsScope?.abort();
+    this.warningsScope = undefined;
+    this.archivedWarningScope = undefined;
+    this.retryWarningsAfterCurrent = false;
+  }
+  private warningReadNeedsRetry() {
+    const { status, code } = this.pending.capabilities.deprecatedWarnings;
+    return status === "unknown" || (code !== undefined && canRetryCode(code));
   }
   private async start(signal: AbortSignal) {
     let attempt = 0;
@@ -484,10 +671,11 @@ export class InstanceSession {
         };
         if (channel === "status") {
           if (attempt > 0) {
-            await this.revalidateMetadata(parentSignal);
+            let validation = await this.revalidateMetadata(parentSignal);
+            while (!parentSignal.aborted && validation.generation !== this.revalidationGeneration)
+              validation = await this.revalidateMetadata(parentSignal);
             if (parentSignal.aborted) return;
-            if (!this.serviceReadsScope && this.pending.service?.status === ServiceStatus_Type.STARTED)
-              void this.refreshServiceReads(parentSignal);
+            if ("error" in validation) throw validation.error;
           }
           refreshWatchdog();
           let first = true;
@@ -520,13 +708,14 @@ export class InstanceSession {
                     )
                     .slice(-300)
                 : [];
-            first = false;
             this.update({
               phase: "connected",
               error: undefined,
               status,
               traffic,
             });
+            if (first) this.resumeServiceReads(parentSignal);
+            first = false;
           }
         } else if (channel === "service") {
           for await (const service of this.client.subscribeServiceStatus(
@@ -539,16 +728,22 @@ export class InstanceSession {
             if (service.status === ServiceStatus_Type.STARTED) {
               const previous = this.pending.service?.status;
               this.update({ service });
-              if (recovering || (previous !== undefined && previous !== ServiceStatus_Type.STARTED))
+              if (previous !== ServiceStatus_Type.STARTED) {
+                // A metadata read started before readiness cannot establish this boot timestamp.
+                this.cancelRevalidation();
                 void this.recoverServiceReads(parentSignal);
-              else if (previous === undefined) this.readServiceConfiguration();
+              } else if (recovering) void this.recoverServiceReads(parentSignal);
             } else {
-              if (this.pending.service?.status !== service.status)
+              if (this.pending.service?.status !== service.status) {
+                this.cancelRevalidation();
                 this.invalidateServiceReads();
+              }
               this.resetLatencyTests();
               this.update({
                 service,
+                startedAt: undefined,
                 testingLatencies: undefined,
+                latencyTestSource: undefined,
                 stoppingLatencyTests: undefined,
                 testingManualLatency: undefined,
                 latencyTestSent: undefined,
@@ -632,10 +827,19 @@ export class InstanceSession {
         const capability = streamCapabilities[channel];
         if (capability) this.setCapability(capability, capabilityFailure(error));
         if (channel === "status") this.setCapability("trafficTracking", capabilityFailure(error));
+        if (channel === "service" && this.provisionalWarnings) {
+          // Only the lifecycle subscription can establish continuity across status reconnects.
+          this.archiveWarnings();
+          this.provisionalWarnings = false;
+        }
         const retry =
           this.profile.preferences.autoReconnect &&
-          (canRetry(error) || ConnectError.from(error).code === Code.Canceled) &&
+          canRetry(error) &&
           !(error instanceof CompatibilityError);
+        if (channel === "status" && !retry) {
+          this.cancelRevalidation();
+          this.cancelWarningRead();
+        }
         this.update(
           {
             streamErrors: { ...this.pending.streamErrors, [channel]: message },
@@ -643,7 +847,8 @@ export class InstanceSession {
               this.pending.authenticationFailed ||
               ConnectError.from(error).code === Code.Unauthenticated,
             ...(channel === "status"
-              ? { phase: retry ? "reconnecting" : "error", error: message }
+              ? { phase: retry ? "reconnecting" : "error", error: message,
+                  ...(!retry && { checkingWarnings: false }) }
               : {}),
           },
           true,
@@ -754,7 +959,7 @@ export class InstanceSession {
     this.update({ testingManualLatency: true }, true);
     const request = this.urlTest(tag, cooldown);
     void request
-      .then(() => true, probeMayHaveStarted)
+      .then(() => true, canRetry)
       .then(async (started) => {
         if (started && this.profile.mode === "native")
           await delay(probeWindowMs * windows, cooldown);
@@ -824,12 +1029,17 @@ export class InstanceSession {
         sessionSignal.removeEventListener("abort", stop);
         if (this.latencyTest?.controller !== controller) return;
         this.latencyTest = undefined;
-        this.update({ testingLatencies: undefined, stoppingLatencyTests: undefined }, true);
+        this.update({
+          testingLatencies: undefined,
+          latencyTestSource: undefined,
+          stoppingLatencyTests: undefined,
+        }, true);
       });
     this.latencyTest = { controller, promise, source };
     this.update(
       {
         testingLatencies: true,
+        latencyTestSource: source,
         latencyTestError: undefined,
         latencyTestSent: undefined,
       },
@@ -867,7 +1077,7 @@ export class InstanceSession {
       if (
         native &&
         results.some((result) =>
-          result.status === "fulfilled" || probeMayHaveStarted(result.reason),
+          result.status === "fulfilled" || canRetry(result.reason),
         )
       )
         await delay(probeWindowMs * windows, cooldown);

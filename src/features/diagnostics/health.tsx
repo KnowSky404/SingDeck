@@ -10,10 +10,7 @@ import {
 } from "@/components/shared";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  ServiceStatus_Type,
-  type DeprecatedWarning,
-} from "@/proto/daemon/started_service_pb";
+import { ServiceStatus_Type, type DeprecatedWarning } from "@/proto/daemon/started_service_pb";
 
 const releases = new Intl.Collator("en", { numeric: true });
 
@@ -45,7 +42,7 @@ function compareWarnings(a: DeprecatedWarning, b: DeprecatedWarning) {
 
 export default function ConfigurationHealth() {
   const { session, snapshot, t } = useWorkspace();
-  const { capabilities, checkingWarnings, phase, service, version, warnings } =
+  const { capabilities, checkingWarnings, phase, version, warnings } =
     snapshot;
   const capability = capabilities.deprecatedWarnings;
   const [urgency, setUrgency] = useState("all");
@@ -60,9 +57,15 @@ export default function ConfigurationHealth() {
         .sort(compareWarnings) ?? [],
     [warnings, urgency],
   );
+  const coreRunning = snapshot.service?.status === ServiceStatus_Type.STARTED;
+  const serviceError = snapshot.streamErrors.service;
+  const checking = checkingWarnings ||
+    (coreRunning && !serviceError && (
+      phase === "reconnecting" || (phase === "connected" && !session.canRefreshWarnings)
+    ));
   const canRefresh =
     phase === "connected" &&
-    service?.status === ServiceStatus_Type.STARTED &&
+    session.canRefreshWarnings &&
     capability.status !== "unsupported";
 
   async function copy(warning: DeprecatedWarning, migration?: string) {
@@ -119,14 +122,14 @@ export default function ConfigurationHealth() {
         />
         <Button
           variant="outline"
-          disabled={!canRefresh || checkingWarnings}
-          aria-busy={checkingWarnings || undefined}
+          disabled={!canRefresh || checking}
+          aria-busy={checking || undefined}
           onClick={() => {
             setCopyFeedback("");
             void session.refreshWarnings();
           }}
         >
-          {checkingWarnings ? (
+          {checking ? (
             <LoaderCircle className="spin" data-icon="inline-start" />
           ) : (
             <RefreshCw data-icon="inline-start" />
@@ -143,18 +146,20 @@ export default function ConfigurationHealth() {
           {warnings?.length ? t("Retained data may be stale.") : null}
         </Notice>
       )}
-      {checkingWarnings && (
+      {checking && (
         <p className="footnote" role="status">
           {t("Checking for deprecation warnings…")}
         </p>
       )}
-      {!checkingWarnings && !canRefresh && !capability.error && (
+      {!checking && !canRefresh && !capability.error && (
         <Notice title="Warnings unavailable">
-          The core must be running to check for warnings.
+          {t(serviceError ?? (coreRunning
+            ? "Reconnect to the core to check for warnings."
+            : "The core must be running to check for warnings."))}
         </Notice>
       )}
       {warnings?.length === 0 &&
-        !checkingWarnings &&
+        !checking &&
         capability.status === "supported" && (
           <EmptyState
             title="No warnings reported"

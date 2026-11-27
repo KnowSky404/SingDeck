@@ -256,9 +256,14 @@ function ProxyGroup({
     </Collapsible>
   );
 }
-export default function Outbounds() {
+export default function Outbounds({
+  showInventory,
+  onInventoryChange,
+}: {
+  showInventory: boolean;
+  onInventoryChange: (enabled: boolean) => void;
+}) {
   const { snapshot, t } = useWorkspace();
-  const [view, setView] = useState("groups");
   const probe = snapshot.capabilities.urlTest;
   return (
     <>
@@ -268,8 +273,10 @@ export default function Outbounds() {
         variant="outline"
         aria-label={t("Outbound view")}
         className="proxy-toolbar"
-        value={view}
-        onValueChange={(value) => value && setView(value)}
+        value={showInventory ? "inventory" : "groups"}
+        onValueChange={(value) => {
+          if (value) onInventoryChange(value === "inventory");
+        }}
       >
         <ToggleGroupItem value="groups">{t("Groups")}</ToggleGroupItem>
         <ToggleGroupItem value="inventory">{t("All outbounds")}</ToggleGroupItem>
@@ -285,7 +292,7 @@ export default function Outbounds() {
           {t("Queued tests stopped. The core may finish probes already sent.")}
         </p>
       )}
-      {view === "groups" ? <OutboundGroups /> : <OutboundInventory />}
+      {showInventory ? <OutboundInventory /> : <OutboundGroups />}
     </>
   );
 }
@@ -324,6 +331,7 @@ function OutboundGroups() {
   );
   const testAllLabel = t("Test all groups");
   const testing = Boolean(snapshot.testingLatencies);
+  const testingGroups = snapshot.latencyTestSource === "groups";
 
   function setExpanded(tags: string[], open: boolean) {
     const update = (current: Set<string>) => {
@@ -404,7 +412,7 @@ function OutboundGroups() {
             variant="outline"
             size="icon"
             aria-label={testAllLabel}
-            aria-busy={testing}
+            aria-busy={testingGroups}
             title={testAllLabel}
             disabled={
               !enabled ||
@@ -419,7 +427,7 @@ function OutboundGroups() {
                 .catch(() => undefined)
             }
           >
-            {testing ? (
+            {testingGroups ? (
               <LoaderCircle aria-hidden="true" className="spin" />
             ) : (
               <Zap aria-hidden="true" />

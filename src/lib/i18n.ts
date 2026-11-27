@@ -123,6 +123,7 @@ const zh: Record<string, string> = {
     "无法复制警告，请检查剪贴板权限。",
   "Warnings unavailable": "警告不可用",
   "Checking for deprecation warnings…": "正在检查弃用警告…",
+  "Reconnect to the core to check for warnings.": "请重新连接核心以检查警告。",
   "The core must be running to check for warnings.": "核心运行后才能检查警告。",
   "No warnings reported": "核心未报告警告",
   "Some instances report deprecations only in their logs. Use the core logs or sing-box check for broader configuration validation.":
@@ -406,6 +407,7 @@ const zh: Record<string, string> = {
   "Enter a test duration from 1 to 120 seconds.": "请输入 1 至 120 秒的测试时长。",
   "Diagnostic canceled before completion.": "诊断已取消，测试未完成。",
   "The core could not complete this diagnostic.": "核心无法完成此诊断。",
+  "The core could not complete STUN. Check the core logs for UDP or timeout details.": "核心未能完成 STUN 检测。请查看核心日志以确认 UDP 或超时详情。",
   "Test incomplete": "测试未完成",
   "Test report": "测试报告",
   "Test progress": "测试进度",

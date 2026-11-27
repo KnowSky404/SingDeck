@@ -277,26 +277,31 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
         ],
       });
     },
-    async *startNetworkQualityTest(_, opts) {
+    async *startNetworkQualityTest(request, opts) {
       const signal = opts?.signal ?? new AbortController().signal;
       for (let sample = 0; sample <= 10; sample++) {
         check();
+        const finished = sample === 10;
+        const phase = finished ? 3 : request.serial ? (sample < 5 ? 1 : 2) : 1 + sample % 2;
         const elapsedMs = BigInt(sample * 300);
+        const downloadElapsed = request.serial ? BigInt(Math.min(sample, 5) * 300) : elapsedMs;
+        const hasDownload = sample >= (request.serial ? 1 : 2);
+        const hasUpload = sample >= (request.serial ? 6 : 3);
         yield create(NetworkQualityTestProgressSchema, {
-          phase: sample === 10 ? 3 : sample < 5 ? 1 : 2,
-          downloadCapacity: 18_000_000n + elapsedMs * 4000n,
-          uploadCapacity: 4_000_000n + elapsedMs * 1100n,
-          downloadRPM: 610,
-          uploadRPM: 430,
+          phase,
+          downloadCapacity: hasDownload ? 18_000_000n + downloadElapsed * 4000n : 0n,
+          uploadCapacity: hasUpload ? 4_000_000n + elapsedMs * 1100n : 0n,
+          downloadRPM: hasDownload ? 610 : 0,
+          uploadRPM: hasUpload ? 430 : 0,
           idleLatencyMs: 31,
-          elapsedMs: sample === 10 ? 0n : elapsedMs,
+          elapsedMs: finished ? 0n : elapsedMs,
           downloadCapacityAccuracy: sample >= 5 ? 2 : 0,
           uploadCapacityAccuracy: sample >= 8 ? 2 : 0,
           downloadRPMAccuracy: 1,
           uploadRPMAccuracy: 1,
-          isFinal: sample === 10,
+          isFinal: finished,
         });
-        if (sample < 10) await delay(300, signal);
+        if (!finished) await delay(300, signal);
       }
     },
     async *startSTUNTest(_, opts) {
