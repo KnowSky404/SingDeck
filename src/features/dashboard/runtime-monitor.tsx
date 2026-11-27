@@ -9,7 +9,7 @@ import {
   YAxis,
 } from "recharts";
 import { useWorkspace } from "@/app/context";
-import { runtimeStaleIntervals } from "@/api/runtime";
+import { notificationStreamState, runtimeStaleIntervals } from "@/api/runtime";
 import type { Channel, Snapshot } from "@/api/state";
 import { Badge } from "@/components/ui/badge";
 import { Choice, EmptyState, Notice, Panel } from "@/components/shared";
@@ -78,14 +78,8 @@ function summarizeRates(samples: Sample[], key: "up" | "down") {
 }
 
 function streamState(snapshot: Snapshot, channel: Channel, statusStale: boolean, streamsAborted: boolean): string {
+  if (channel === "notifications") return notificationStreamState(snapshot, streamsAborted);
   if (snapshot.phase === "disconnected") return "Disconnected";
-  if (channel === "notifications") {
-    const capability = snapshot.capabilities.notifications.status;
-    if (streamsAborted || capability === "unsupported" || capability === "unavailable") return "Unavailable";
-    if (snapshot.detailChannel !== "notifications") return "Inactive";
-    if (snapshot.streamErrors.notifications) return "Interrupted";
-    return snapshot.loaded.notifications ? "Event received" : "Awaiting event";
-  }
   if (channel === "clashMode") return "Inactive";
   if (snapshot.streamErrors[channel]) return "Interrupted";
   if (channel === "outbounds") return "Inactive";

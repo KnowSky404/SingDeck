@@ -1,10 +1,19 @@
 import type { ServiceStatus_Type, Status } from "@/proto/daemon/started_service_pb";
-import type { Channel } from "./state";
+import type { Channel, Snapshot } from "./state";
 
 const sampleWindowMs = 300_000;
 const sampleLimit = 300;
 const eventLimit = 60;
 export const runtimeStaleIntervals = 3;
+
+export function notificationStreamState(snapshot: Snapshot, streamsAborted: boolean) {
+  if (snapshot.phase === "disconnected") return "Disconnected";
+  const capability = snapshot.capabilities.notifications.status;
+  if (streamsAborted || capability === "unsupported" || capability === "unavailable") return "Unavailable";
+  if (snapshot.detailChannel !== "notifications") return "Inactive";
+  if (snapshot.streamErrors.notifications) return "Interrupted";
+  return snapshot.loaded.notifications ? "Event received" : "Awaiting event";
+}
 
 export interface RuntimeSample {
   time: number;

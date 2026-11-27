@@ -2,7 +2,7 @@ import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { expect, it, vi } from "vitest";
 import { delay } from "@/api/errors";
-import { recordRuntimeEvent, recordRuntimeSample } from "@/api/runtime";
+import { notificationStreamState, recordRuntimeEvent, recordRuntimeSample } from "@/api/runtime";
 import { InstanceSession } from "@/api/session";
 import { initialSnapshot } from "@/api/state";
 import { mockProfile } from "@/features/instances/profiles";
@@ -13,6 +13,24 @@ import {
   StartedAtSchema,
   StatusSchema,
 } from "@/proto/daemon/started_service_pb";
+
+it("reports notification observation status without treating a quiet stream as live", () => {
+  const snapshot = initialSnapshot();
+  expect(notificationStreamState(snapshot, false)).toBe("Disconnected");
+  snapshot.phase = "connected";
+  expect(notificationStreamState(snapshot, false)).toBe("Inactive");
+  snapshot.detailChannel = "notifications";
+  expect(notificationStreamState(snapshot, false)).toBe("Awaiting event");
+  snapshot.loaded.notifications = true;
+  snapshot.capabilities.notifications = { status: "supported" };
+  expect(notificationStreamState(snapshot, false)).toBe("Event received");
+  snapshot.streamErrors.notifications = "Stream ended";
+  expect(notificationStreamState(snapshot, false)).toBe("Interrupted");
+  snapshot.detailChannel = "connections";
+  expect(notificationStreamState(snapshot, false)).toBe("Inactive");
+  snapshot.capabilities.notifications = { status: "unsupported" };
+  expect(notificationStreamState(snapshot, false)).toBe("Unavailable");
+});
 
 it("bounds observations and keeps outbound counts independent of traffic tracking", () => {
   const status = create(StatusSchema, { memory: 1024n, goroutines: 11, connectionsOut: 3 });

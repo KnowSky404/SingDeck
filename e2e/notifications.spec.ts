@@ -54,5 +54,12 @@ test("notification center isolates native messages, filters history, and request
   await expect(page.locator("html")).toHaveAttribute("data-permission-requested", "true");
   await expect(page.getByRole("button", { name: "Disable desktop alerts", exact: true })).toBeVisible();
   expect(await page.locator("header.topbar").evaluate((bar) => bar.scrollWidth <= bar.clientWidth)).toBe(true);
+  await page.evaluate(() => { location.hash = "/settings"; });
+  await expect(page.getByRole("combobox", { name: "Change Clash Mode" })).toBeEnabled();
+  await page.evaluate(() => { location.hash = "/runtime-monitor"; });
+  const notificationStream = page.getByRole("row", { name: /^Notifications\b/ });
+  await expect(notificationStream.getByText("Inactive", { exact: true })).toBeVisible();
+  await expect(notificationStream.locator("time")).toHaveAttribute("datetime", /\d/);
+  await expect(page.getByRole("row", { name: /^Connections\b/ }).getByText("Live", { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });
