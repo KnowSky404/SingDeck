@@ -65,6 +65,12 @@ function chartPoints(samples: Sample[]): ChartPoint[] {
   return points;
 }
 
+function isIsolatedPoint(points: ChartPoint[], index: number, key: SeriesKey) {
+  return points[index]?.[key] !== undefined &&
+    points[index - 1]?.[key] === undefined &&
+    points[index + 1]?.[key] === undefined;
+}
+
 function summarizeRates(samples: Sample[], key: "up" | "down") {
   const measured = samples.flatMap((sample) => {
     const value = sample[key];
@@ -435,12 +441,12 @@ function RuntimeChart({
                       stroke={color}
                       strokeWidth={2}
                       strokeDasharray={dash}
-                      dot={({ index, cx, cy }) => {
-                        const isolated = points[index]?.[key] !== undefined &&
-                          points[index - 1]?.[key] === undefined && points[index + 1]?.[key] === undefined;
-                        if (!isolated || cx === undefined || cy === undefined) return null;
-                        return <SeriesMarker seriesIndex={seriesIndex} x={cx} y={cy} />;
-                      }}
+                      dot={points.some((_, index) => isIsolatedPoint(points, index, key))
+                        ? ({ index, cx, cy }) => {
+                            if (!isIsolatedPoint(points, index, key) || cx === undefined || cy === undefined) return null;
+                            return <SeriesMarker seriesIndex={seriesIndex} x={cx} y={cy} />;
+                          }
+                        : false}
                       activeDot={({ cx, cy }) => cx === undefined || cy === undefined
                         ? null
                         : <SeriesMarker seriesIndex={seriesIndex} x={cx} y={cy} />}
