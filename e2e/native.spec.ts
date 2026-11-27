@@ -609,11 +609,32 @@ test("browser uses the official native service through CORS and built-in dashboa
     await page.close();
 
     let reopened = await context.newPage();
+    const restoredBoot = reopened.waitForResponse((response) =>
+      response.url().endsWith("/daemon.StartedService/GetStartedAt") && response.ok(),
+    );
     await reopened.goto(logsUrl);
     await expect(
       reopened.getByRole("heading", { name: "Logs", exact: true }),
     ).toBeVisible();
+    expect(await (await restoredBoot).finished()).toBeNull();
     const markerKey = "singdeck.remembered-connection";
+
+    const savedMarker = await reopened.evaluate((key) => localStorage.getItem(key), markerKey);
+    expect(savedMarker).toMatch(/^\+/);
+    const usbipRpc = "**/daemon.StartedService/SubscribeUSBIPServerStatus";
+    await reopened.route(usbipRpc, (route) => route.fulfill({ status: 401 }));
+    await reopened.getByRole("link", { name: "Settings", exact: true }).click();
+    const confirmedVersion = reopened.waitForResponse((response) =>
+      response.url().endsWith("/daemon.StartedService/GetVersion") && response.ok(),
+    );
+    await reopened.getByRole("link", { name: "USB/IP server status", exact: true }).click();
+    await expect(reopened.getByText("USB/IP status interrupted", { exact: true })).toBeVisible();
+    expect(await (await confirmedVersion).finished()).toBeNull();
+    expect(await reopened.evaluate((key) => localStorage.getItem(key), markerKey)).toBe(savedMarker);
+    await reopened.unroute(usbipRpc);
+    await reopened.goto(logsUrl);
+    await reopened.reload();
+    await expect(reopened.getByRole("heading", { name: "Logs", exact: true })).toBeVisible();
 
     await reopened.evaluate((key) => {
       const marker = localStorage.getItem(key)!;
