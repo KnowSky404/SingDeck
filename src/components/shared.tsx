@@ -188,6 +188,7 @@ export function ChannelState({
                 clashMode: "Clash Mode",
                 logs: "Logs",
                 connections: "Connections",
+                notifications: "Notifications",
               }[channel],
             ),
           })}

@@ -1,4 +1,5 @@
 import {
+  Bell,
   Cable,
   Check,
   LogOut,
@@ -195,8 +196,22 @@ export function WorkspaceControls({
   connection?: boolean;
 }) {
   const { t, profile, snapshot, connect, disconnect } = useWorkspace();
+  const unread = snapshot.notifications.filter((entry) => !entry.read).length;
+  const notificationsLabel = unread ? t("Notifications ({count} unread)", { count: unread }) : t("Notifications");
   return (
     <div className="topbar-actions">
+      {connection && (
+        <Button variant="ghost" size="icon" asChild>
+          <a href="#/notifications" className="relative" aria-label={notificationsLabel} title={notificationsLabel}>
+            <Bell aria-hidden="true" />
+            {unread > 0 && (
+              <span aria-hidden="true" className="absolute -top-0.5 -right-0.5 min-w-4 rounded-full bg-destructive px-0.5 text-center text-[10px] leading-4 text-destructive-foreground">
+                {unread}
+              </span>
+            )}
+          </a>
+        </Button>
+      )}
       <DisplaySettings />
       {connection && (
         <DropdownMenu>

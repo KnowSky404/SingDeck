@@ -16,6 +16,7 @@ export type SingBoxClient = Pick<
   | "uRLTest"
   | "subscribeLog"
   | "clearLogs"
+  | "subscribeNotifications"
   | "getDefaultLogLevel"
   | "subscribeConnections"
   | "closeConnection"

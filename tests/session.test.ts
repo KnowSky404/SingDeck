@@ -15,6 +15,7 @@ import {
   ServiceStatusSchema,
   ServiceStatus_Type,
   LogSchema,
+  NotificationEventSchema,
 } from "@/proto/daemon/started_service_pb";
 import { CONNECTION_LIMIT } from "@/api/state";
 import { delay, describeError } from "@/api/errors";
@@ -200,6 +201,39 @@ describe("session lifecycle", () => {
     expect(s.getSnapshot()).toMatchObject({ phase: "disconnected", logs: [] });
     expect(s.getSnapshot().connections.size).toBe(0);
     expect(s.getSnapshot().groups).toBeUndefined();
+  });
+  it("shares the detail subscription and ignores native data after leaving the notification page", async () => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    const connections = vi.fn(client.subscribeConnections);
+    const notifications = vi.fn<typeof client.subscribeNotifications>(async function* () {
+      yield create(NotificationEventSchema, {
+        event: { case: "send", value: { identifier: "live", typeID: 1, title: "Live message" } },
+      });
+      await delay(2000, new AbortController().signal);
+      yield create(NotificationEventSchema, {
+        event: { case: "send", value: { identifier: "late", typeID: 1, title: "Late message" } },
+      });
+    });
+    const s = session(undefined, { ...client, subscribeConnections: connections, subscribeNotifications: notifications });
+    s.connect();
+    await vi.advanceTimersByTimeAsync(400);
+    expect(notifications).not.toHaveBeenCalled();
+    expect(connections.mock.calls.at(-1)?.[1]?.signal?.aborted).toBe(false);
+    expect(s.getSnapshot().notifications).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "configuration" })]));
+    s.setDetailChannel("notifications");
+    expect(connections.mock.calls.at(-1)?.[1]?.signal?.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(notifications).toHaveBeenCalledTimes(1);
+    expect(s.getSnapshot().notifications[0]).toMatchObject({ source: "native", title: "Live message" });
+    s.setDetailChannel("connections");
+    expect(notifications.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(s.getSnapshot().loaded.connections).toBe(true);
+    expect(s.getSnapshot().notifications.filter((entry) => entry.source === "native")).toHaveLength(1);
+    s.disconnect();
+    expect(s.getSnapshot().notifications).toHaveLength(0);
+    expect(session().getSnapshot().notifications).toHaveLength(0);
   });
   it("bounds connection history and evicts closed records before active connections", async () => {
     vi.useFakeTimers();

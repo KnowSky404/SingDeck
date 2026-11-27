@@ -40,7 +40,7 @@ SingDeck v0.8.1 audit baseline: commit `dfb16e8`. The vendored `daemon.StartedSe
 | SubscribeLog | Empty → Log | S | Yes | Logs | Initial/replacement history can carry reset. Log records carry no server timestamp. | HTTP | Verified | Base / 2 |
 | GetDefaultLogLevel | Empty → DefaultLogLevel | U | Yes | Logs | Requires an instance log factory. Reports core default. | HTTP | Verified | Base |
 | ClearLogs | Empty → Empty | U | Yes | Confirm core buffer clear | Clears shared in-memory history and notifies active subscribers with a reset. The browser clear is independent. | HTTP | Verified | 2 |
-| SubscribeNotifications | Empty → NotificationEvent | S | — | — | Requires events emitted into the daemon observer. No replay or liveness heartbeat. Carries send and cancel variants. | HTTP | — | 2 |
+| SubscribeNotifications | Empty → NotificationEvent | S | Yes | Notifications | Capture runs while the page is open. The daemon observer sends live send/cancel events without a replay or heartbeat. | HTTP | Transport only, with send/cancel covered by fixtures | 2 |
 
 ## Native services
 

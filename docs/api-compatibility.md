@@ -40,6 +40,7 @@ Authorization and session redaction use the same effective Bearer token. Trailin
 | URLTest | outboundTag | Empty; observed results arrive through groups and the inventory subscription |
 | SubscribeLog | Empty | stream Log.messages[] (level/message), reset flag; no server timestamp |
 | ClearLogs | Empty | Empty. Resets shared in-memory history and sends current subscribers a Log reset frame. |
+| SubscribeNotifications | Empty | live `NotificationEvent` send/cancel stream without initial frame, heartbeat or replay. Cancellation matches identifier and type ID. |
 | GetDefaultLogLevel | Empty | DefaultLogLevel.level |
 | SubscribeConnections | interval int64 nanoseconds | stream ConnectionEvents (reset + NEW/UPDATE/CLOSED); UPDATE deltas increment totals, CLOSED stores final counters/closedAt; Active/Closed filters use the timestamp |
 | CloseConnection | id | Empty; closed state confirmed by stream |
@@ -82,6 +83,8 @@ Settings shows Clash Mode when the native service reports a mode manager. The co
 - The stock CLI's attached API may return an empty deprecation list because the context lacks the daemon's collector. Daemon collection is drained by reads. SingDeck retains reported warnings for a confirmed core lifecycle and displays an empty result as no warnings reported. Live monitoring can resume while the optional start timestamp retries. If two timestamp checks fail, SingDeck archives the prior warnings while it reads fresh reports. A match with the last confirmed timestamp restores archived reports. Reports from before a lifecycle gap are discarded if no previous timestamp can confirm their boot. A confirmed restart refreshes live data and retains fresh reports collected while the lifecycle stream remained connected. Run `sing-box check` or inspect the core logs for configuration validation. [Warning collector](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/deprecated.go)
 
 ## Browser security and deployment
+
+The Notifications page shares the fifth streaming slot with Connections and Outbounds to leave room for unary and diagnostic requests on HTTP/1.1. It captures native events during the visit and resumes the connection stream on departure. The resumed connection snapshot includes the core's bounded history. Connections opened and closed during the visit can fall outside that window. The app waits for the first native event before reporting receipt. Native text is bounded, stripped of controls, redacted, and rendered as plain text. The native `openURL` is ignored. Local alerts are recorded separately across the workspace for the active session and use predefined internal destinations. The most recent 100 records stay in memory until disconnect. Browser alerts require explicit permission and use fixed local messages only, while the workspace is in the background.
 
 Server CORS allows POST/GET/OPTIONS and Content-Type, Authorization, X-Grpc-Web, X-User-Agent, Grpc-Timeout; exposes gRPC status headers. Set explicit trusted origins (the upstream empty-list default is `*`). `access_control_allow_private_network` is opt-in; browser local-network permission policies can still block access. HTTPS pages cannot freely reach HTTP APIs. Certificate trust is enforced by the browser. Prefer same-origin HTTPS or loopback through SSH/Tailscale. Never automatically downgrade or strip authentication.
 

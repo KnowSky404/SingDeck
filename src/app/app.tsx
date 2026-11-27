@@ -48,6 +48,7 @@ import {
 } from "@/components/ui/tooltip";
 import { version } from "../../package.json";
 import { cn } from "@/lib/utils";
+import { useDesktopAlerts } from "@/features/notifications/desktop";
 
 const Overview = lazy(() => import("@/features/dashboard/page"));
 const RuntimeMonitor = lazy(() => import("@/features/dashboard/runtime-monitor"));
@@ -57,6 +58,7 @@ const Logs = lazy(() => import("@/features/logs/page"));
 const Diagnostics = lazy(() => import("@/features/diagnostics/page"));
 const ConfigurationHealth = lazy(() => import("@/features/diagnostics/health"));
 const SettingsPage = lazy(() => import("@/features/settings/page"));
+const Notifications = lazy(() => import("@/features/notifications/page"));
 const links = [
   {
     path: "/",
@@ -313,6 +315,7 @@ export default function App() {
     storageError,
     t,
   } = useWorkspace();
+  const desktopAlerts = useDesktopAlerts(session, snapshot.notifications, t);
   const path = useSyncExternalStore(subscribeHash, currentPath);
   useEffect(() => {
     window.scrollTo(0, 0);
@@ -329,7 +332,9 @@ export default function App() {
     ? "outbounds"
     : workspaceOpen && path === "/settings" && snapshot.capabilities.clashMode.status === "supported"
       ? "clashMode"
-      : "connections";
+      : workspaceOpen && path === "/notifications"
+        ? "notifications"
+        : "connections";
   useEffect(() => {
     session.setDetailChannel(detailChannel);
   }, [detailChannel, session]);
@@ -477,6 +482,8 @@ export default function App() {
                   showInventory={showInventory}
                   onInventoryChange={setShowInventory}
                 />
+              ) : path === "/notifications" ? (
+                <Notifications key={pageKey} desktop={desktopAlerts} />
               ) : Page ? (
                 <Page key={pageKey} />
               ) : (

@@ -30,6 +30,7 @@ const streamLabels: Record<Channel, string> = {
   logs: "Logs",
   outbounds: "Outbound inventory",
   clashMode: "Clash Mode",
+  notifications: "Notifications",
 };
 const serviceLabels = ["Idle", "Starting", "Running", "Stopping", "Fatal"];
 const phaseLabels = {
@@ -78,6 +79,13 @@ function summarizeRates(samples: Sample[], key: "up" | "down") {
 
 function streamState(snapshot: Snapshot, channel: Channel, statusStale: boolean, streamsAborted: boolean): string {
   if (snapshot.phase === "disconnected") return "Disconnected";
+  if (channel === "notifications") {
+    const capability = snapshot.capabilities.notifications.status;
+    if (streamsAborted || capability === "unsupported" || capability === "unavailable") return "Unavailable";
+    if (snapshot.detailChannel !== "notifications") return "Inactive";
+    if (snapshot.streamErrors.notifications) return "Interrupted";
+    return snapshot.loaded.notifications ? "Event received" : "Awaiting event";
+  }
   if (channel === "clashMode") return "Inactive";
   if (snapshot.streamErrors[channel]) return "Interrupted";
   if (channel === "outbounds") return "Inactive";

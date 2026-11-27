@@ -25,6 +25,7 @@ import {
   StartedAtSchema,
   ClashModeSchema,
   ClashModeStatusSchema,
+  NotificationEventSchema,
 } from "@/proto/daemon/started_service_pb";
 
 export class MockControl {
@@ -403,6 +404,23 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
       await mutation(opts?.signal);
       logGeneration++;
       return empty();
+    },
+    async *subscribeNotifications(_, opts) {
+      const signal = opts?.signal ?? new AbortController().signal;
+      await delay(300, signal);
+      check();
+      yield create(NotificationEventSchema, {
+        event: { case: "send", value: { identifier: "demo-event", typeID: 1, title: "Demo core notification" } },
+      });
+      await delay(500, signal);
+      check();
+      yield create(NotificationEventSchema, {
+        event: { case: "cancel", value: { identifier: "demo-event", typeID: 1 } },
+      });
+      while (!signal.aborted) {
+        await delay(2000, signal);
+        check();
+      }
     },
     async *subscribeConnections(request, opts) {
       const signal = opts?.signal ?? new AbortController().signal;
