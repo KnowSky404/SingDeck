@@ -16,3 +16,14 @@ it("suppresses a field containing both forms of a value with a literal percent e
   const mixed = `literal=${marker}&escaped=${encodeURIComponent(marker)}`;
   expect(redactNativeConnectionText(mixed, redact)).toBe("[redacted]");
 });
+
+it("detects nested percent and form variants while retaining unrelated native text", () => {
+  const marker = "synthetic+ space/marker";
+  const redact = (value: string) => value.replaceAll(marker, "[redacted]");
+  const encodedForm = new URLSearchParams({ marker }).toString().slice("marker=".length);
+  const doublyEncoded = encodeURIComponent(encodedForm);
+  expect(redactNativeConnectionText(doublyEncoded, redact)).toBe("[redacted]");
+  expect(redactNativeConnectionText("p=synthetic%2B+space%2Fmarker", redact))
+    .toBe("[redacted]");
+  expect(redactNativeConnectionText("safe+value%252F", redact)).toBe("safe+value%252F");
+});
