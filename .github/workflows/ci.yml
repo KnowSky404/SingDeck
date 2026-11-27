@@ -115,7 +115,11 @@ jobs:
           bash scripts/test-ci-scope.sh
           bun run proto:generate
           bun run licenses:generate
-          git diff --exit-code -- src/proto public/third-party-licenses.txt
+          changes=$(git status --porcelain=v1 --untracked-files=all -- src/proto public/third-party-licenses.txt) || exit 1
+          if [[ -n "$changes" ]]; then
+            printf '%s\n' 'Generated inputs changed after regeneration.' "$changes"
+            exit 1
+          fi
       - run: bun run lint
         if: steps.coverage.outputs.scope != 'docs'
       - run: bun run test
