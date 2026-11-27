@@ -41,7 +41,9 @@ import {
   receiveLocalNotification,
   receiveNativeNotification,
   setNotificationRead,
+  visibleNotifications,
   type LocalNotification,
+  type NotificationRecord,
 } from "./notifications";
 
 const probeWindowMs = 15_250;
@@ -162,6 +164,7 @@ export class InstanceSession {
   private pending = initialSnapshot();
   private logSequence = { value: 0 };
   private notificationSequence = 0;
+  private notificationHistory: NotificationRecord[] = [];
   private latencyTest?: {
     controller: AbortController;
     promise: Promise<void>;
@@ -244,19 +247,23 @@ export class InstanceSession {
     this.listeners.forEach((listener) => listener());
   }
   private appendLocalNotification(kind: LocalNotification) {
-    this.pending.notifications = receiveLocalNotification(
-      this.pending.notifications, kind, Date.now(), ++this.notificationSequence,
-    );
+    this.pending.notifications = this.setNotificationHistory(receiveLocalNotification(
+      this.notificationHistory, kind, Date.now(), ++this.notificationSequence,
+    ));
+  }
+  private setNotificationHistory(history: NotificationRecord[]) {
+    this.notificationHistory = history;
+    return visibleNotifications(history);
   }
   private notify(kind: LocalNotification) {
     this.appendLocalNotification(kind);
     this.update({});
   }
   markNotificationRead = (read: boolean, id?: string) => {
-    this.update({ notifications: setNotificationRead(this.pending.notifications, read, id) }, true);
+    this.update({ notifications: this.setNotificationHistory(setNotificationRead(this.notificationHistory, read, id)) }, true);
   };
   dismissNotification = (id: string) => {
-    this.update({ notifications: dismissNotification(this.pending.notifications, id) }, true);
+    this.update({ notifications: this.setNotificationHistory(dismissNotification(this.notificationHistory, id)) }, true);
   };
   connect = () => {
     this.disconnect();
@@ -271,6 +278,7 @@ export class InstanceSession {
   };
   disconnect = () => {
     this.controller?.abort();
+    this.notificationHistory = [];
     this.topologyGeneration++;
     this.streamsStarted = false;
     this.retainClosedOnResume = false;
@@ -985,10 +993,10 @@ export class InstanceSession {
             if (parentSignal.aborted) return;
             if (!event.event.case) continue;
             received();
-            this.update({ notifications: receiveNativeNotification(
-              this.pending.notifications, event, Date.now(), ++this.notificationSequence,
+            this.update({ notifications: this.setNotificationHistory(receiveNativeNotification(
+              this.notificationHistory, event, Date.now(), ++this.notificationSequence,
               (value) => this.redactText(value),
-            ) });
+            )) });
           }
         } else {
           for await (const events of this.client.subscribeConnections(

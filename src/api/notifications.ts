@@ -25,24 +25,34 @@ export type NotificationEntry = NotificationContent & {
   count: number;
   read: boolean;
 };
+export type NotificationRecord = NotificationEntry & { nativeIdentity?: string };
+
+export function visibleNotifications(history: NotificationRecord[]): NotificationEntry[] {
+  return history.map((record) => {
+    const entry = { ...record };
+    delete entry.nativeIdentity;
+    return entry;
+  });
+}
 
 function receive(
-  history: NotificationEntry[],
+  history: NotificationRecord[],
   id: string,
   content: NotificationContent,
   receivedAt: number,
   sequence: number,
-): NotificationEntry[] {
+  nativeIdentity?: string,
+): NotificationRecord[] {
   const previous = history.find((entry) => entry.id === id);
   const count = previous && !(previous.source === "native" && previous.canceled) ? previous.count + 1 : 1;
   return [
-    { ...content, id, receivedAt, sequence, count, read: false },
+    { ...content, id, receivedAt, sequence, count, read: false, nativeIdentity },
     ...history.filter((entry) => entry.id !== id).slice(0, NOTIFICATION_LIMIT - 1),
   ];
 }
 
 export function receiveLocalNotification(
-  history: NotificationEntry[], kind: LocalNotification, receivedAt: number, sequence: number,
+  history: NotificationRecord[], kind: LocalNotification, receivedAt: number, sequence: number,
 ) {
   return receive(history, `local:${kind}`, { source: "local", kind }, receivedAt, sequence);
 }
@@ -67,35 +77,35 @@ function safeNativeText(value: string, redact: (value: string) => string, limit:
 }
 
 export function receiveNativeNotification(
-  history: NotificationEntry[], event: NotificationEvent, receivedAt: number, sequence: number,
+  history: NotificationRecord[], event: NotificationEvent, receivedAt: number, sequence: number,
   redact: (value: string) => string,
 ) {
   const { value } = event.event;
-  if (!value?.identifier || value.identifier.length > 512 ||
-    safeNativeText(value.identifier, redact, 512) === "[redacted]") return history;
-  const id = `native:${JSON.stringify([value.typeID, value.identifier])}`;
+  if (!value?.identifier || value.identifier.length > 512) return history;
+  const nativeIdentity = JSON.stringify([value.typeID, value.identifier]);
   if (event.event.case === "cancel") {
-    return history.map((entry) => entry.id === id && entry.source === "native" && !entry.canceled
+    return history.map((entry) => entry.nativeIdentity === nativeIdentity && entry.source === "native" && !entry.canceled
       ? { ...entry, canceled: true, read: true }
       : entry);
   }
   if (event.event.case !== "send") return history;
   const notification = event.event.value;
+  const id = history.find((entry) => entry.nativeIdentity === nativeIdentity)?.id ?? `native:${sequence}`;
   return receive(history, id, {
     source: "native",
     title: safeNativeText(notification.title, redact, 160),
     subtitle: safeNativeText(notification.subtitle, redact, 240),
     body: safeNativeText(notification.body, redact, 1000),
-  }, receivedAt, sequence);
+  }, receivedAt, sequence, nativeIdentity);
 }
 
-export function setNotificationRead(history: NotificationEntry[], read: boolean, id?: string) {
+export function setNotificationRead(history: NotificationRecord[], read: boolean, id?: string) {
   return history.map((entry) => ((!id || entry.id === id) && entry.read !== read &&
     (read || entry.source !== "native" || !entry.canceled))
     ? { ...entry, read }
     : entry);
 }
 
-export function dismissNotification(history: NotificationEntry[], id: string) {
+export function dismissNotification(history: NotificationRecord[], id: string) {
   return history.filter((entry) => entry.id !== id);
 }
