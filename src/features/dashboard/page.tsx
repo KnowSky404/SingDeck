@@ -6,7 +6,7 @@ import {
   Cpu,
   Activity,
 } from "lucide-react";
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useLayoutEffect, type ReactNode } from "react";
 import {
   AreaChart,
   Area,
@@ -51,7 +51,8 @@ function OverviewPanels({ order, ...panels }: Record<OverviewPanel, ReactNode> &
 }
 
 export default function Dashboard() {
-  const { profile, snapshot, overviewLayout, setOverviewLayout, t } = useWorkspace();
+  const { profile, snapshot, overviewLayout, setOverviewLayout, refreshOverviewLayout, t } = useWorkspace();
+  useLayoutEffect(refreshOverviewLayout, [refreshOverviewLayout]);
   const { status, version, runtime, service } = snapshot;
   const latest = runtime.samples.at(-1);
   const { samples: traffic, windowSeconds, selectWindow } = useRuntimeWindow(runtime.samples, profile.preferences.windowSeconds);

@@ -62,6 +62,14 @@ export function loadDisplayPreferences(): DisplayPreferences {
   }
 }
 
+export function loadSavedOverviewLayout(): OverviewLayout | null {
+  try {
+    return readStoredDisplayPreferences()?.overviewLayout ?? loadOverviewLayout();
+  } catch {
+    return null;
+  }
+}
+
 export function saveDisplayPreferences(preferences: DisplayPreferences): boolean {
   try {
     localStorage.setItem(storageKey, serializeDisplayPreferenceFile(preferences));
