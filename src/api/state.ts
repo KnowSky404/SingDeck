@@ -1,5 +1,6 @@
 import { initialCapabilities, type Capabilities } from "./capabilities";
 import { plainLog } from "@/lib/ansi";
+import type { NotificationEntry } from "./notifications";
 import { create } from "@bufbuild/protobuf";
 import {
   ConnectionSchema,
@@ -26,7 +27,7 @@ export interface LogEntry {
   message: string;
   text: string;
 }
-export type DetailChannel = "connections" | "outbounds" | "clashMode";
+export type DetailChannel = "connections" | "outbounds" | "clashMode" | "notifications";
 export type Channel = "service" | "status" | "groups" | "logs" | DetailChannel;
 export interface Snapshot {
   phase: "disconnected" | "connecting" | "connected" | "reconnecting" | "error";
@@ -36,6 +37,7 @@ export interface Snapshot {
   service?: ServiceStatus;
   serviceActionsReady: boolean;
   topologyGeneration: number;
+  detailChannel: DetailChannel;
   status?: Status;
   startedAt?: bigint;
   defaultLogLevel?: LogLevel;
@@ -54,6 +56,7 @@ export interface Snapshot {
   latencyTestError?: string;
   latencyTestSent?: boolean;
   logs: LogEntry[];
+  notifications: NotificationEntry[];
   connections: ReadonlyMap<string, Connection>;
   connectionGeneration: number;
   connectionOverflow: boolean;
@@ -65,8 +68,10 @@ export const initialSnapshot = (): Snapshot => ({
   phase: "disconnected",
   serviceActionsReady: false,
   topologyGeneration: 0,
+  detailChannel: "connections",
   capabilities: initialCapabilities(),
   logs: [],
+  notifications: [],
   connections: new Map(),
   connectionGeneration: 0,
   connectionOverflow: false,

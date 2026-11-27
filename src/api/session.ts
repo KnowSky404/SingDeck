@@ -36,6 +36,13 @@ import {
   type Snapshot,
 } from "./state";
 import type { Profile } from "@/features/instances/profiles";
+import {
+  dismissNotification,
+  receiveLocalNotification,
+  receiveNativeNotification,
+  setNotificationRead,
+  type LocalNotification,
+} from "./notifications";
 
 const probeWindowMs = 15_250;
 type MetadataValidation = { generation: number; error?: unknown };
@@ -109,7 +116,12 @@ const streamCapabilities: Partial<Record<Channel, CapabilityName>> = {
   outbounds: "outboundInventory",
   groups: "groupManagement",
   status: "runtimeMonitoring",
+  notifications: "notifications",
 };
+
+function usesServiceDetailScope(channel: DetailChannel) {
+  return channel === "outbounds" || channel === "clashMode";
+}
 
 function sameInventory(before: GroupItem[], after: GroupItem[]) {
   if (before === after) return true;
@@ -149,6 +161,7 @@ export class InstanceSession {
   private flushTimer?: ReturnType<typeof setTimeout>;
   private pending = initialSnapshot();
   private logSequence = { value: 0 };
+  private notificationSequence = 0;
   private latencyTest?: {
     controller: AbortController;
     promise: Promise<void>;
@@ -203,7 +216,12 @@ export class InstanceSession {
     };
   };
   private update(patch: Partial<Snapshot>, immediate = false) {
+    const previous = this.pending;
     this.pending = { ...this.pending, ...patch };
+    if ((patch.error && patch.error !== previous.error) || (patch.authenticationFailed && !previous.authenticationFailed))
+      this.appendLocalNotification("apiConnection");
+    if (patch.service?.status === ServiceStatus_Type.FATAL && previous.service?.status !== ServiceStatus_Type.FATAL)
+      this.appendLocalNotification("serviceFatal");
     if (this.latencyTest && !this.canTestLatencyBatch(this.latencyTest.source))
       this.latencyTest.controller.abort();
     if (this.connectionBatch && !this.canCloseConnectionBatch(this.connectionBatch))
@@ -221,9 +239,25 @@ export class InstanceSession {
       ...this.pending,
       serviceActionsReady: this.canRunServiceAction(),
       topologyGeneration: this.topologyGeneration,
+      detailChannel: this.detailChannel,
     };
     this.listeners.forEach((listener) => listener());
   }
+  private appendLocalNotification(kind: LocalNotification) {
+    this.pending.notifications = receiveLocalNotification(
+      this.pending.notifications, kind, Date.now(), ++this.notificationSequence,
+    );
+  }
+  private notify(kind: LocalNotification) {
+    this.appendLocalNotification(kind);
+    this.update({});
+  }
+  markNotificationRead = (read: boolean, id?: string) => {
+    this.update({ notifications: setNotificationRead(this.pending.notifications, read, id) }, true);
+  };
+  dismissNotification = (id: string) => {
+    this.update({ notifications: dismissNotification(this.pending.notifications, id) }, true);
+  };
   connect = () => {
     this.disconnect();
     this.pending = initialSnapshot();
@@ -301,6 +335,7 @@ export class InstanceSession {
       ...(!keepWarningRead && { checkingWarnings: undefined }),
       capabilities: {
         ...initialCapabilities(),
+        notifications: this.pending.capabilities.notifications,
         ...(keepWarnings && { deprecatedWarnings: this.pending.capabilities.deprecatedWarnings }),
       },
       loaded: { ...this.pending.loaded, connections: false, groups: false, outbounds: false, clashMode: false },
@@ -317,7 +352,7 @@ export class InstanceSession {
     const scope = new AbortController();
     this.serviceReadsScope = scope;
     const signal = AbortSignal.any([parent, scope.signal]);
-    if (this.detailChannel !== "connections") this.startDetailStream();
+    if (usesServiceDetailScope(this.detailChannel)) this.startDetailStream();
     this.readServiceConfiguration();
     await this.stream("groups", signal);
   }
@@ -335,12 +370,13 @@ export class InstanceSession {
     this.detailScope?.abort();
     this.update({
       outbounds: undefined,
-      loaded: { ...this.pending.loaded, connections: false, outbounds: false, clashMode: false },
+      loaded: { ...this.pending.loaded, connections: false, outbounds: false, clashMode: false, notifications: false },
       streamErrors: {
         ...this.pending.streamErrors,
         connections: undefined,
         outbounds: undefined,
         clashMode: undefined,
+        notifications: undefined,
       },
     }, true);
     this.startDetailStream();
@@ -349,7 +385,7 @@ export class InstanceSession {
     const parent = this.signal;
     if (!parent || parent.aborted || !this.streamsStarted) return;
     const channel = this.detailChannel;
-    const service = channel === "connections" ? parent : this.serviceReadsScope?.signal;
+    const service = usesServiceDetailScope(channel) ? this.serviceReadsScope?.signal : parent;
     if (!service || service.aborted) return;
     // Keep a request slot free on native HTTP/1.1 origins with a six-socket limit.
     this.detailScope?.abort();
@@ -406,10 +442,13 @@ export class InstanceSession {
         return redacted;
       });
       // Daemon mode drains its warning collector on read.
+      const previous = this.archivedWarningScope === scope ? this.warningArchive : this.pending.warnings;
+      const combined = mergeWarnings(previous, warnings);
+      if (combined.length > (previous?.length ?? 0)) this.notify("configuration");
       if (this.archivedWarningScope === scope) {
-        this.warningArchive = mergeWarnings(this.warningArchive, warnings);
+        this.warningArchive = combined;
       } else {
-        this.update({ warnings: mergeWarnings(this.pending.warnings, warnings) });
+        this.update({ warnings: combined });
         this.setCapability("deprecatedWarnings", { status: "supported" });
       }
     } catch (error) {
@@ -728,7 +767,7 @@ export class InstanceSession {
         this.update({ ...metadata, error: undefined });
         this.streamsStarted = true;
         void this.refreshServiceReads(signal);
-        if (this.detailChannel === "connections") this.startDetailStream();
+        if (!usesServiceDetailScope(this.detailChannel)) this.startDetailStream();
         await Promise.all(
           (["service", "status", "logs"] as const).map(
             (channel) => this.stream(channel, signal),
@@ -937,6 +976,16 @@ export class InstanceSession {
               ),
             });
           }
+        } else if (channel === "notifications") {
+          for await (const event of this.client.subscribeNotifications({}, options)) {
+            if (parentSignal.aborted) return;
+            if (!event.event.case) continue;
+            received();
+            this.update({ notifications: receiveNativeNotification(
+              this.pending.notifications, event, Date.now(), ++this.notificationSequence,
+              (value) => this.redactText(value),
+            ) });
+          }
         } else {
           for await (const events of this.client.subscribeConnections(
             request,
@@ -1059,6 +1108,14 @@ export class InstanceSession {
     const signal = this.signal;
     if (!signal || signal.aborted)
       throw new ConnectError("Disconnected", Code.Canceled);
+    try {
+      await this.confirmOutboundSelection(groupTag, outboundTag, signal);
+    } catch (error) {
+      if (!signal.aborted && ConnectError.from(error).code !== Code.Canceled) this.notify("selectionFailed");
+      throw error;
+    }
+  };
+  private async confirmOutboundSelection(groupTag: string, outboundTag: string, signal: AbortSignal) {
     if (!this.canRunServiceAction() || !this.pending.groups || this.pending.streamErrors.groups)
       throw new ConnectError("Group state unavailable", Code.Unavailable);
     await this.runUnary((options) =>
@@ -1370,8 +1427,10 @@ export class InstanceSession {
       if (!final) throw new ConnectError("Diagnostic ended before final result", Code.Unavailable);
       if (final.error) throw new DiagnosticExecutionError();
       if (final.phase !== 3) throw new ConnectError("Diagnostic ended before completion", Code.Unavailable);
+      this.notify(name === "stun" ? "stunCompleted" : "networkQualityCompleted");
       return final;
     } catch (error) {
+      if (!parent.aborted && !pageSignal.aborted) this.notify(name === "stun" ? "stunFailed" : "networkQualityFailed");
       if (signal.aborted) {
         if (scope.signal.reason instanceof ConnectError) throw scope.signal.reason;
         throw new ConnectError("Diagnostic canceled", Code.Canceled);
