@@ -220,6 +220,7 @@ suite("official sing-box 1.14.0 native integration (not mock)", () => {
     const addr = target.address();
     if (!addr || typeof addr === "string")
       throw new Error("Missing target port");
+    await client.selectOutbound({ groupTag: "Primary route", outboundTag: "direct" });
     proxyRequest = request(
       {
         hostname: "127.0.0.1",
@@ -231,7 +232,7 @@ suite("official sing-box 1.14.0 native integration (not mock)", () => {
     proxyRequest.on("error", () => {});
     proxyRequest.end();
     const s = scope();
-    let active = "";
+    let active: ConnectionEvent["connection"];
     for await (const batch of client.subscribeConnections(
       { interval: 100_000_000n },
       { signal: s.signal },
@@ -241,14 +242,24 @@ suite("official sing-box 1.14.0 native integration (not mock)", () => {
           e.connection?.destination === `127.0.0.1:${addr.port}` &&
           e.connection.closedAt === 0n,
       );
-      if (created) {
-        active = created.id;
+      if (created?.connection) {
+        active = created.connection;
         break;
       }
     }
     s.abort();
-    expect(active).toBeTruthy();
-    await client.closeConnection({ id: active });
+    if (!active) throw new Error("Expected a native connection");
+    expect(active).toMatchObject({
+      outbound: "direct",
+      outboundType: "direct",
+      chainList: ["direct", "Primary route"],
+      inbound: "mixed-in",
+      inboundType: "mixed",
+      network: "tcp",
+      ipVersion: 4,
+    });
+    expect(active.createdAt).toBeGreaterThan(0n);
+    await client.closeConnection({ id: active.id });
     await client.closeAllConnections({});
     const verify = scope();
     const snapshot = await first(
@@ -257,12 +268,9 @@ suite("official sing-box 1.14.0 native integration (not mock)", () => {
         { signal: verify.signal },
       ),
     );
-    expect(
-      snapshot.value?.events.filter(
-        (e: ConnectionEvent) =>
-          e.connection?.id === active && e.connection.closedAt === 0n,
-      ),
-    ).toHaveLength(0);
+    const closed = snapshot.value?.events.find((e: ConnectionEvent) => e.id === active.id)?.connection;
+    expect(closed).toMatchObject({ chainList: active.chainList, createdAt: active.createdAt });
+    expect(closed?.closedAt).toBeGreaterThanOrEqual(active.createdAt);
     verify.abort();
   });
   it("serves production assets and hash routes under /dashboard/ and enforces configured CORS", async () => {

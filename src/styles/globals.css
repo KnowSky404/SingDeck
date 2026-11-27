@@ -1110,17 +1110,6 @@ h3 {
   max-width: 260px;
   overflow-wrap: anywhere;
 }
-.connection-json {
-  max-height: 65dvh;
-  overflow: auto;
-  background: var(--muted);
-  border-radius: 8px;
-  padding: 16px;
-  font-size: 11px;
-  line-height: 1.8;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
 .settings-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.35fr) minmax(260px, 1fr);

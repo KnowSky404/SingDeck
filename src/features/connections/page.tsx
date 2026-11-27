@@ -1,4 +1,4 @@
-import { useDeferredValue, useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -32,7 +32,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { bytes } from "@/lib/format";
-import type { Connection } from "@/proto/daemon/started_service_pb";
+import { ConnectionInspector } from "./inspector";
 
 const PAGE_SIZE = 50;
 const sortColumns = [
@@ -50,7 +50,7 @@ function hasStartTime(timestamp: bigint) {
 }
 
 export default function Connections() {
-  const { snapshot, session, token, language, t } = useWorkspace();
+  const { snapshot, session, language, t } = useWorkspace();
   const [search, setSearch] = useState(""),
     [network, setNetwork] = useState("all"),
     [state, setState] = useState("active"),
@@ -79,8 +79,10 @@ export default function Connections() {
       ].sort((a, b) => a.localeCompare(b)),
     [snapshot.connections, outbound],
   );
-  const [detail, setDetail] = useState<Connection | null>(null),
+  const [detailId, setDetailId] = useState<string | null>(null),
     [confirm, setConfirm] = useState(false);
+  const detailTrigger = useRef<HTMLButtonElement>(null);
+  const searchInput = useRef<HTMLInputElement>(null);
   const action = useAction();
   const query = useDeferredValue(search.toLowerCase());
   const rows = useMemo(
@@ -136,21 +138,6 @@ export default function Connections() {
     });
   }
 
-  const selected = detail
-    ? (snapshot.connections.get(detail.id) ?? detail)
-    : null;
-  const details = selected
-    ? JSON.stringify(
-        selected,
-        (key, value: unknown) =>
-          key === "$typeName"
-            ? undefined
-            : typeof value === "bigint"
-              ? value.toString()
-              : value,
-        2,
-      )
-    : "";
   return (
     <>
       <PageHeading title={t("Connections")} />
@@ -171,6 +158,7 @@ export default function Connections() {
         <div className="search-field">
           <Search />
           <Input
+            ref={searchInput}
             aria-label={t("Search connections")}
             placeholder={t("Search destinations, sources, routes…")}
             value={search}
@@ -335,7 +323,10 @@ export default function Connections() {
                             variant="ghost"
                             size="icon-sm"
                             aria-label={t("Details for {id}", { id: c.id })}
-                            onClick={() => setDetail(c)}
+                            onClick={(event) => {
+                              detailTrigger.current = event.currentTarget;
+                              setDetailId(c.id);
+                            }}
                           >
                             <Info />
                           </Button>
@@ -427,25 +418,16 @@ export default function Connections() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      <Dialog
-        open={!!selected}
-        onOpenChange={(open) => {
-          if (!open) setDetail(null);
+      <ConnectionInspector
+        connectionId={detailId}
+        dateFormat={startTimeFormat}
+        onClose={() => setDetailId(null)}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          const trigger = detailTrigger.current;
+          (trigger?.isConnected ? trigger : searchInput.current)?.focus();
         }}
-      >
-        <DialogContent closeLabel={t("Close")} className="details-dialog">
-          <DialogHeader>
-            <DialogTitle>{t("Connection details")}</DialogTitle>
-            <DialogDescription>
-              {selected?.domain || selected?.destination} ·{" "}
-              {t(selected?.closedAt === 0n ? "Active" : "Closed")}
-            </DialogDescription>
-          </DialogHeader>
-          <pre className="connection-json">
-            {token ? details.split(token).join("[redacted]") : details}
-          </pre>
-        </DialogContent>
-      </Dialog>
+      />
     </>
   );
 }
