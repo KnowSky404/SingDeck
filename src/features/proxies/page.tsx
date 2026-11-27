@@ -253,9 +253,16 @@ function ProxyGroup({
     </Collapsible>
   );
 }
+type GroupDisclosure = {
+  openGroups: ReadonlySet<string>;
+  setOpenGroups: (update: (current: ReadonlySet<string>) => ReadonlySet<string>) => void;
+};
+
 export default function Outbounds({
   showInventory,
   reportedTag,
+  openGroups,
+  setOpenGroups,
   onShowAll,
   onInventoryChange,
 }: {
@@ -263,7 +270,7 @@ export default function Outbounds({
   reportedTag?: string;
   onShowAll: () => void;
   onInventoryChange: (enabled: boolean) => void;
-}) {
+} & GroupDisclosure) {
   const { snapshot, t } = useWorkspace();
   const probe = snapshot.capabilities.urlTest;
   return (
@@ -293,19 +300,20 @@ export default function Outbounds({
           {t("Queued tests stopped. The core may finish probes already sent.")}
         </p>
       )}
-      {showInventory ? <OutboundInventory reportedTag={reportedTag} onShowAll={onShowAll} /> : <OutboundGroups />}
+      {showInventory
+        ? <OutboundInventory reportedTag={reportedTag} onShowAll={onShowAll} />
+        : <OutboundGroups openGroups={openGroups} setOpenGroups={setOpenGroups} />}
     </>
   );
 }
 
-function OutboundGroups() {
+function OutboundGroups({ openGroups, setOpenGroups }: GroupDisclosure) {
   const { session, snapshot, t } = useWorkspace();
   const [search, setSearch] = useState(""),
     [type, setType] = useState("all"),
     [view, setView] = useState("list"),
     [groupView, setGroupView] = useState("cards");
   const query = useDeferredValue(search.toLowerCase());
-  const [openGroups, setOpenGroups] = useState(() => new Set<string>());
   const [filteredDisclosure, setFilteredDisclosure] = useState(() => ({
     query,
     type,
@@ -333,7 +341,7 @@ function OutboundGroups() {
   const testingGroups = snapshot.latencyTestSource === "groups";
 
   function setExpanded(tags: string[], open: boolean) {
-    const update = (current: Set<string>) => {
+    const update = (current: ReadonlySet<string>) => {
       const exceptions = new Set(current);
       for (const tag of tags) {
         if (open === filtering) exceptions.delete(tag);
