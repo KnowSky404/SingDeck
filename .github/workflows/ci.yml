@@ -82,7 +82,9 @@ jobs:
           RELEASE_VERSION: ${{ inputs.release-version }}
           RELEASE_IS_PRERELEASE: ${{ github.event.release.prerelease }}
         run: |
-          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          git -c credential.helper= -c 'credential.helper=!gh auth git-credential' fetch --no-tags origin \
+            '+refs/heads/main:refs/singdeck/verified-main'
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/singdeck/verified-main
           case "$GITHUB_EVENT_NAME" in
             release)
               test "$GITHUB_REF" = "refs/tags/$RELEASE_VERSION"
