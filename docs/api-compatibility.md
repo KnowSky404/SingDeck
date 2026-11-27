@@ -37,6 +37,7 @@ Metadata: `authorization: Bearer <secret>`. No query credentials. Unary deadline
 | SelectOutbound | groupTag, outboundTag | Empty; await server response and groups subscription for selection |
 | URLTest | outboundTag | Empty; observed results arrive through groups and the inventory subscription |
 | SubscribeLog | Empty | stream Log.messages[] (level/message), reset flag; no server timestamp |
+| ClearLogs | Empty | Empty. Resets shared in-memory history and sends current subscribers a Log reset frame. |
 | GetDefaultLogLevel | Empty | DefaultLogLevel.level |
 | SubscribeConnections | interval int64 nanoseconds | stream ConnectionEvents (reset + NEW/UPDATE/CLOSED); UPDATE deltas increment totals, CLOSED stores final counters/closedAt; Active/Closed filters use the timestamp |
 | CloseConnection | id | Empty; closed state confirmed by stream |
@@ -48,6 +49,10 @@ Metadata: `authorization: Bearer <secret>`. No query credentials. Unary deadline
 Status rates divide the native byte deltas by the requested interval in seconds. The initial sample, gaps, and counter resets leave the rate unavailable. Status frames carry no timestamps. Runtime Monitor uses browser receipt time for its observed history. Inbound counts and cumulative traffic require the core's traffic manager. The outbound count comes from the separate connection manager and is available on a running service even when traffic tracking is disabled. Memory is the process measurement exposed by the core's platform implementation. Zero memory is shown as unavailable. `GetStartedAt` measures service start time and can change after a reload in the same process. [Pinned status implementation](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/started_service.go#L463-L511) · [Core attachment](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/attached_service.go)
 
 Group `urlTestTime` is Unix **seconds**, with 0 meaning no history. Failed tests delete history, so a missing measurement can indicate an untested or failed probe. A zero delay with a valid timestamp can represent a truncated sub-millisecond result. Negative delays are invalid. Log receipt times are local.
+
+Clear local logs empties the panel buffer. The separate confirmed core action calls `ClearLogs` and the panel applies the subscribed reset frame. The core RPC only clears in-memory history, and new log messages continue to arrive.
+
+Outbound group expansion remains a browser view preference. In the v1.14.0 implementation, `SetGroupExpand` stores a flag by group tag if the core has a cache file and otherwise returns success without storing it. `SubscribeGroups` reads that flag when it builds a snapshot. An absent cache entry and an explicitly collapsed group look the same on the wire. The setter does not emit a group update itself. [Core setter](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/started_service.go#L773-L787) · [Group snapshot](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/started_service.go#L586-L609)
 
 Connection `chainList` runs from the resolved outbound back through its selecting groups. Connection Inspector reverses the reported list for display. The native `outbound` and `outboundType` identify the resolved outbound, while `fromOutbound` comes from the original connection metadata. The chain describes selection. It omits transport detours. The rule contains the matched predicate when supplied. Connection creation and close times are Unix milliseconds. Process information and other absent fields are shown as unavailable. [Pinned tracker](https://github.com/SagerNet/sing-box/blob/v1.14.0/common/trafficcontrol/tracker.go#L67-L104) · [Connection encoding](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/started_service.go#L1043-L1080)
 

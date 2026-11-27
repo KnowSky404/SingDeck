@@ -1,7 +1,7 @@
 import { useDeferredValue, useEffect, useRef, useState } from "react";
 import { Copy, Download, Pause, Play, Search, Trash2 } from "lucide-react";
 import { useWorkspace } from "@/app/context";
-import { LOG_LIMIT, type LogEntry } from "@/api/state";
+import { hasCurrentLogs, LOG_LIMIT, type LogEntry } from "@/api/state";
 import {
   ChannelState,
   Choice,
@@ -10,6 +10,16 @@ import {
   Panel,
 } from "@/components/shared";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Field, FieldLabel } from "@/components/ui/field";
@@ -17,6 +27,7 @@ import { LogLine } from "./log-line";
 import { logSource } from "./log-source";
 import { LogLevel } from "@/proto/daemon/started_service_pb";
 import { levelName } from "@/lib/format";
+import { useAction } from "@/hooks/use-action";
 
 export default function Logs() {
   const { snapshot, session, t } = useWorkspace();
@@ -26,6 +37,9 @@ export default function Logs() {
     [autoScroll, setAutoScroll] = useState(true);
   const [paused, setPaused] = useState<LogEntry[] | null>(null);
   const [feedback, setFeedback] = useState("");
+  const [confirmClear, setConfirmClear] = useState(false);
+  const coreClear = useAction();
+  const canClearCore = hasCurrentLogs(snapshot) && !coreClear.pending;
   const viewport = useRef<HTMLDivElement>(null);
   const query = useDeferredValue(search.toLowerCase());
   const entries = (paused ?? snapshot.logs).filter(
@@ -64,6 +78,13 @@ export default function Logs() {
     link.click();
     URL.revokeObjectURL(url);
     setFeedback("Filtered logs exported.");
+  }
+  async function clearCoreBuffer() {
+    if (await coreClear.run(session.clearCoreLogs)) {
+      setConfirmClear(false);
+      setPaused(null);
+      setFeedback("Core log buffer clear requested.");
+    }
   }
   return (
     <>
@@ -174,6 +195,48 @@ export default function Logs() {
             >
               <Trash2 />
             </Button>
+            <Dialog
+              open={confirmClear}
+              onOpenChange={(open) => {
+                if (!coreClear.pending) setConfirmClear(open);
+              }}
+            >
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm" disabled={!canClearCore}>
+                  {t("Clear core buffer")}
+                </Button>
+              </DialogTrigger>
+              <DialogContent
+                closeLabel={t("Close")}
+                showCloseButton={!coreClear.pending}
+              >
+                <DialogHeader>
+                  <DialogTitle>{t("Clear the core log buffer?")}</DialogTitle>
+                  <DialogDescription>
+                    {t(
+                      "This clears the in-memory log history shared by clients of this core. New messages will continue to arrive.",
+                    )}
+                  </DialogDescription>
+                </DialogHeader>
+                {coreClear.error && (
+                  <Notice title="Core log clear failed">{coreClear.error}</Notice>
+                )}
+                <DialogFooter>
+                  <DialogClose asChild>
+                    <Button variant="outline" disabled={coreClear.pending}>
+                      {t("Cancel")}
+                    </Button>
+                  </DialogClose>
+                  <Button
+                    variant="destructive"
+                    disabled={!canClearCore}
+                    onClick={() => void clearCoreBuffer()}
+                  >
+                    {t("Clear core buffer")}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         }
       >

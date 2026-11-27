@@ -47,6 +47,7 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
   let revision = 0;
   let count = 0;
   let mode = "rule";
+  let logGeneration = 0;
   const groups = [
     create(GroupSchema, {
       tag: "Primary route",
@@ -354,6 +355,7 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
     async *subscribeLog(_, opts) {
       const signal = opts?.signal ?? new AbortController().signal;
       let i = 0;
+      let seenGeneration = logGeneration;
       const messages = [
         "\u001b[37mDEBUG\u001b[0m[16737] [\u001b[38;5;168m1679805080\u001b[0m 0ms] router: pre-match[0] inbound=[mixed-in tun-in] => sniff(500ms)",
         "core: sing-box 1.14.0 started",
@@ -362,44 +364,39 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
         "dns: exchanged query for cdn.example.org",
         "urltest: Singapore 01 available, 68ms",
       ];
+      const initial = [
+        { level: LogLevel.DEBUG, message: messages[0] },
+        { level: LogLevel.TRACE, message: "demo trace: route lookup" },
+        ...messages.slice(1, 5).map((message) => ({
+          level: LogLevel.INFO,
+          message,
+        })),
+        { level: LogLevel.WARN, message: "demo warning: retrying a probe" },
+        { level: LogLevel.ERROR, message: "demo error: simulated probe failure" },
+      ];
       while (!signal.aborted) {
         check();
+        const reset = i === 0 || seenGeneration !== logGeneration;
+        seenGeneration = logGeneration;
         yield create(LogSchema, {
-          reset: i === 0,
-          messages:
-            i === 0
-              ? [
-                  { level: LogLevel.DEBUG, message: messages[0] },
-                  {
-                    level: LogLevel.TRACE,
-                    message: "demo trace: route lookup",
-                  },
-                  ...messages.slice(1, 5).map((message) => ({
-                    level: LogLevel.INFO,
-                    message,
-                  })),
-                  {
-                    level: LogLevel.WARN,
-                    message: "demo warning: retrying a probe",
-                  },
-                  {
-                    level: LogLevel.ERROR,
-                    message: "demo error: simulated probe failure",
-                  },
-                ]
-              : [
-                  {
-                    level:
-                      i % messages.length === 0
-                        ? LogLevel.DEBUG
-                        : LogLevel.INFO,
-                    message: messages[i % messages.length],
-                  },
-                ],
+          reset,
+          messages: reset
+            ? (logGeneration > 0 ? [] : initial)
+            : [
+                {
+                  level: i % messages.length === 0 ? LogLevel.DEBUG : LogLevel.INFO,
+                  message: messages[i % messages.length],
+                },
+              ],
         });
         i++;
         await delay(1400, signal);
       }
+    },
+    async clearLogs(_, opts) {
+      await mutation(opts?.signal);
+      logGeneration++;
+      return empty();
     },
     async *subscribeConnections(request, opts) {
       const signal = opts?.signal ?? new AbortController().signal;

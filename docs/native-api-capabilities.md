@@ -30,7 +30,7 @@ SingDeck v0.8.1 audit baseline: commit `dfb16e8`. The vendored `daemon.StartedSe
 | SubscribeOutbounds | Empty → OutboundList | S | Yes | All outbounds | Outbounds and endpoints share one list of tag, type and URL-test history. The wire item has no endpoint flag. Duplicate tags are ambiguous for tag-only operations. | HTTP | Verified | 1 |
 | URLTest | URLTestRequest → Empty | U | Yes | Group and node tests | Resolves a tag through the outbound manager. Acknowledges scheduling. Core context owns the probe. History is asynchronous, shared by resolved tag and deleted on failure. | HTTP | Verified | Base / 1 |
 | SelectOutbound | SelectOutboundRequest → Empty | U | Yes | Selector control | Requires a selector and member. Observe the group snapshot for selection confirmation. | HTTP | Verified | Base / 1 |
-| SetGroupExpand | SetGroupExpandRequest → Empty | U | — | — | Persists only when the core has a cache file. Otherwise returns success without storing expansion. | HTTP | — | 2 evaluation |
+| SetGroupExpand | SetGroupExpandRequest → Empty | U | — | — | Persists when the core has a cache file. Otherwise returns success without storing expansion. Later group snapshots may report the cached flag. | HTTP | Source reviewed | 2 evaluated |
 | GetClashModeStatus | Empty → ClashModeStatus | U | Yes | — | Requires the core Clash mode manager, typically a `with_clash_api` build and `experimental.clash_api`. Returns NotFound if absent. | HTTP | Absent only | 2 |
 | SubscribeClashMode | Empty → ClashMode | S | — | — | Same mode manager, with initial and change events. At a stopped lifecycle state the mode can be empty. | HTTP | — | 2 |
 | SetClashMode | ClashMode → Empty | U | Yes | — | Same mode manager. The core ignores unknown modes and still acknowledges the RPC. Use reported names and confirm through live state. | HTTP | Absent only | 2 |
@@ -39,7 +39,7 @@ SingDeck v0.8.1 audit baseline: commit `dfb16e8`. The vendored `daemon.StartedSe
 | CloseAllConnections | Empty → Empty | U | Yes | Confirm close all | Closes managed connections and tracked flows where managers exist. Empty success carries no affected count. | HTTP | Call only | Base / 2 |
 | SubscribeLog | Empty → Log | S | Yes | Logs | Initial/replacement history can carry reset. Log records carry no server timestamp. | HTTP | Verified | Base / 2 |
 | GetDefaultLogLevel | Empty → DefaultLogLevel | U | Yes | Logs | Requires an instance log factory. Reports core default. | HTTP | Verified | Base |
-| ClearLogs | Empty → Empty | U | — | Local clear only | Core RPC resets its in-memory log buffer. The workspace currently clears its own visible buffer. | HTTP | — | 2 evaluation |
+| ClearLogs | Empty → Empty | U | Yes | Confirm core buffer clear | Clears shared in-memory history and notifies active subscribers with a reset. The browser clear is independent. | HTTP | Verified | 2 |
 | SubscribeNotifications | Empty → NotificationEvent | S | — | — | Requires events emitted into the daemon observer. No replay or liveness heartbeat. Carries send and cancel variants. | HTTP | — | 2 |
 
 ## Native services

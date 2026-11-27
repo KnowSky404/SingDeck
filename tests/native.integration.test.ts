@@ -144,6 +144,21 @@ suite("official sing-box 1.14.0 native integration (not mock)", () => {
     expect(connections.value?.reset).toBe(true);
     s.abort();
   });
+  it("observes an active log subscriber reset after clearing the core buffer", async () => {
+    const s = scope();
+    const signal = AbortSignal.any([s.signal, AbortSignal.timeout(5000)]);
+    const stream = client.subscribeLog({}, { signal })[Symbol.asyncIterator]();
+    try {
+      const initial = await stream.next();
+      expect(initial.value?.reset).toBe(true);
+      await client.clearLogs({}, { signal });
+      let frame = await stream.next();
+      while (!frame.done && !frame.value.reset) frame = await stream.next();
+      expect(frame.value?.reset).toBe(true);
+    } finally {
+      s.abort();
+    }
+  });
   it("streams configured outbounds with their tags and types, including ungrouped entries", async () => {
     const s = scope();
     try {

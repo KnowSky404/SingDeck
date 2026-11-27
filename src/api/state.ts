@@ -75,6 +75,13 @@ export function hasCurrentConnections(snapshot: Snapshot) {
     !snapshot.streamErrors.connections;
 }
 
+export function hasCurrentLogs(snapshot: Snapshot) {
+  return snapshot.phase === "connected" &&
+    snapshot.loaded.logs === true &&
+    !snapshot.authenticationFailed &&
+    !snapshot.streamErrors.logs;
+}
+
 export function appendLogs(
   current: LogEntry[],
   batch: Log,

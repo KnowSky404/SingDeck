@@ -315,6 +315,12 @@ const zh: Record<string, string> = {
   "Copy filtered logs": "复制筛选日志",
   "Export filtered logs": "导出筛选日志",
   "Clear local logs": "清空面板日志",
+  "Clear core buffer": "清空核心缓冲区",
+  "Clear the core log buffer?": "清空核心的日志缓冲区？",
+  "This clears the in-memory log history shared by clients of this core. New messages will continue to arrive.":
+    "这会清空该核心的所有客户端共享的内存日志历史。新日志仍会继续接收。",
+  "Core log clear failed": "清空核心日志失败",
+  "Core log buffer clear requested.": "已请求清空核心日志缓冲区。",
   "Log messages": "日志内容",
   "Filtered logs copied.": "已复制筛选日志。",
   "Clipboard unavailable. Use Export to save filtered logs.":
