@@ -71,12 +71,27 @@ All cases use one browser process and fresh contexts, with one discarded warmup 
 
 The 12,000-record smoke retained 9,599 active and 401 closed records, showed the display-limit notice and kept the 50-row page. Its longest task was 224 ms. In one 10,000-record sample, traffic values changed during the eight-second update observation after the timed work. Heap use went from 50.1 to 45.1 MiB during that observation. These are short synthetic measurements on a shared host. Long-run memory behavior and real-core throughput need separate measurements.
 
+## Phase 5 — Outbound inventory capacity baseline
+
+Run `bun scripts/measure-outbound-capacity.ts` after the frozen install with the pinned Playwright Chromium available. The [script](../scripts/measure-outbound-capacity.ts) builds a disposable production-mode fixture, adds synthetic tags to the explicit demo inventory and blocks requests outside its loopback origin. The JSON report records application HEAD, worktree status, the measurement script hash and raw samples.
+
+The initial run used source `845ce6c`, Bun 1.4.4, Playwright 1.65.1 and headless Chromium 159.0.8154.6 at 1280 × 720 on shared Linux x86_64 with two available CPUs. One browser process ran a discarded 1,000-row warmup, then three runs in fixed order from 1,000 to 20,000 rows using fresh contexts. Inventory time begins after the Outbounds navigation click and includes any wait for the **All outbounds** control. Search finds the last synthetic tag. Both timings include Playwright actions, assertions and two animation frames. Heap is sampled after the inventory renders without forced collection. The longest task is the maximum observed from before inventory selection through visible search results.
+
+| Synthetic input | Rows rendered per page | Inventory median | Exact tag search median | Heap median | Longest observed task |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 1,000 | 60 | 772 ms | 110 ms | 11.7 MiB | 161 ms |
+| 10,000 | 60 | 757 ms | 159 ms | 13.9 MiB | 304 ms |
+| 20,000 | 60 | 1,224 ms | 229 ms | 16.7 MiB | 492 ms |
+
+Pagination bounded mounted rows in every run. The timings varied under shared host load and cover first display and one search. Real-core throughput, repeated stream churn and multi-group scale require separate measurements.
+
 ## Phase 5 — Local browser and HTTPS compatibility
 
 CI runs Chromium on desktop and with a mobile device profile. These local desktop Linux smoke checks use production builds and Playwright 1.65.1. [CI browser configuration](../playwright.config.ts)
 
 - At `bcb7ee85`, Firefox 159.0 (revision 1572) and WebKit 27.2 (revision 2388) each loaded 19 assets from a static `/preview/` mount and rendered 28 Connections rows after explicitly starting Demo. Reload preserved the route URL. Starting Demo again restored access to the route. Both engines also connected over cross-origin loopback HTTP to official sing-box 1.14.0. The core rejected an incorrect Bearer token and accepted the valid test token on API 4. Remember was off by default. Explicitly enabling it restored the Logs route after reload. The token was absent from localStorage and sessionStorage. Both engines recorded zero page errors and zero failed asset requests.
 - At `16a4ac58`, the same Firefox build negotiated TLS 1.3 for `/preview/` and the separate API origin. Caddy 2.11.9 forwarded API calls to official sing-box 1.14.0 over loopback HTTP. CORS allowed the configured origin to send `Authorization` and the gRPC-Web headers, and omitted the allow-origin header for an unapproved origin. Authenticated `GetVersion` and `SubscribeStatus` each returned HTTP 200 over gRPC-Web. Runtime reported the status stream as Live and its last-received timestamp advanced on the next frame. The page reported zero runtime errors.
+- At `845ce6c`, Chromium 159.0.8154.6 loaded `/dashboard/#/runtime-monitor` from official sing-box 1.14.0 through a disposable OpenSSH 10.0p2 loopback forward. It inferred the forwarded origin, the core rejected an incorrect Bearer, and valid credentials reached API 4. Runtime reported the service and status streams as Live, and the displayed last-received timestamp advanced. Reload preserved the route and cleared the unremembered token. The browser reported zero page errors and zero requests outside the forwarded origin. The forwarded HTML matched the production candidate byte for byte. The SSH server required the disposable public key, preserved pre-authentication isolation and permitted only the API forward. The client pinned the temporary host key. Closing SSH closed the forwarded listener while the loopback core remained reachable. Temporary credentials, server and browser processes, and listeners were cleaned up.
 
 Firefox required an approved exception to the workspace execution sandbox to start its content processes. Firefox's own content sandbox and certificate validation remained enabled. The HTTPS test CA was trusted only in a disposable NSS profile. A fresh profile rejected both HTTPS origins with `SEC_ERROR_UNKNOWN_ISSUER`. Public-origin Private Network Access (PNA), real TLS deployments and physical mobile devices still need validation. [Browser security and deployment](api-compatibility.md#browser-security-and-deployment) · [Independent static hosting](deployment.md#b-independent-static-hosting)
 
