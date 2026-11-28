@@ -211,6 +211,25 @@ Production builds used `834bdd3` as the baseline and deferred member filtering a
 
 Across the three collapsed windows the baseline recorded 12 tasks of at least 50 ms, with a maximum of 168 ms. The candidate recorded zero. Both builds mounted zero member rows when collapsed and 500 when one group opened by keyboard. Closing it returned to zero, and an exact search showed one matching row after automatic expansion. These timings cover this synthetic group workload.
 
+### Expanded outbound groups
+
+At `e86ad4e` and the pagination change now on `542bf32`, two production-mode builds used the same Demo fixture of 20 groups with 500 members each. Headless Chromium 159.0.8154.6 used a 1280 × 720 viewport with reduced motion on a shared Linux host with two CPUs. After one warm-up per build, three paired runs used fresh contexts and alternating build order. The one-group state was sampled for 2.72–3.03 seconds. The keyboard interaction timing includes Playwright actions, assertions and two animation frames.
+
+| Measurement | Before pagination | After pagination |
+| --- | ---: | ---: |
+| Mounted rows, one group open | 500 | 60 |
+| Mounted rows, one Expand all check per build | 10,000 | 1,200 |
+| Median main-thread task time in the one-open sampling window | 771.2 ms | 322.0 ms |
+| Median keyboard open through visible rows | 1,155.4 ms | 262.8 ms |
+
+Both builds mounted zero member rows while collapsed. Closing the test group by keyboard returned to zero, and an exact search found the last configured member. These performance numbers describe the synthetic Demo workload on this host. [Pagination change](https://github.com/KnowSky404/SingDeck/pull/73)
+
+A separate native check used the uninstrumented `542bf32` production build, stock sing-box 1.14.0/API 4, and Chromium 159.0.8154.6 at 1280 × 800. The core ran inside a disposable loopback-only Linux network namespace with 1,000 configured direct members in one selector. An independent subscriber and the browser agreed on order across all 17 pages. The browser mounted at most 60 rows, found the first and last members with exact searches from distant pages, and returned to page one after clearing search. A single explicit fixture selection of the last member appeared in the native subscription and the UI. The browser kept one gRPC-Web Groups subscription, with no outside requests or generated proxy traffic.
+
+The same native build and browser configuration handled a separate selector with 10,000 direct members. An independent subscriber matched every member in order and counted 10,001 outbounds including the selector itself. The browser traversed all 167 group pages by keyboard, mounted at most 60 rows, and showed 40 on the last page. The rows on pages 1, 2, 84, 166 and 167 matched the corresponding native order. Exact searches reached both ends of the group, and collapsing and reopening preserved the current page. In All outbounds, the browser showed 60 rows on the first page and found the last tag by exact search. At settled checkpoints the detail slot switched from Connections to Outbounds and back, while the Groups subscription remained open. The fixture generated no proxy traffic, mutation requests or outside requests.
+
+In this single shared-host run, keyboard open to the first verified group rows took 455 ms, traversing the group pages took 12.5 seconds, and switching to the first verified inventory rows took 311 ms. Unforced Chromium JavaScript heap samples ranged from 8.1 to 21.9 MiB. These observations cover capacity and interaction on a configured loopback fixture. Native traffic churn and longer memory behavior are separate cases.
+
 ## Phase 5 — High-volume core log fixture
 
 At `c08b35a`, two fresh Chromium 159.0.8154.6 contexts used the production app with explicit demo mode and synthetic ANSI messages at 1280 × 720. A 1,000-message reset retained all 1,000 messages. The 12,000-message case applied the same reset and eleven 1,000-message appends, checking the latest displayed sequence after each batch. It retained exactly the latest 2,000 messages. The adjacent evicted sequence was absent from search. Both cases mounted at most 200 rows, showed the expected bold styling and exported one searched latest row as plain text without ANSI escapes. There were no page errors or off-origin requests.
