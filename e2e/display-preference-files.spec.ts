@@ -30,12 +30,16 @@ function activate(button: Locator, isMobile: boolean) {
 }
 
 async function expectLayoutReview(dialog: Locator, isMobile: boolean) {
-  await expect(dialog.getByText("Overview layout changed. Review it and continue editing.", { exact: true })).toBeVisible();
+  const notice = dialog.getByText("Layout changed. Review the order.", { exact: true });
+  await expect(notice).toBeVisible();
   const continueEditing = dialog.getByRole("button", { name: "Continue editing", exact: true });
   await expect(continueEditing).toBeEnabled();
   await expect(continueEditing).toBeFocused();
   await expect(dialog.getByRole("button", { name: /^(Move |Reset layout$)/, disabled: false })).toHaveCount(0);
-  if (isMobile) await expect(continueEditing).toBeInViewport({ ratio: 1 });
+  if (isMobile) {
+    await expect(notice).toBeInViewport({ ratio: 1 });
+    await expect(continueEditing).toBeInViewport({ ratio: 1 });
+  }
   return continueEditing;
 }
 
@@ -350,7 +354,7 @@ for (const input of ["keyboard", "pointer"] as const) {
     else if (input === "keyboard") await page.setViewportSize({ width: 1280, height: 480 });
     await page.goto("/");
     if (isMobile) {
-      await page.addStyleTag({ content: '[data-slot="dialog-content"] button { font-size: 24px !important; }' });
+      await page.addStyleTag({ content: '[data-slot="dialog-content"] :is(button,[role="status"]) { font-size: 28px !important; }' });
     }
     await demo(page, "en");
     await activate(page.getByRole("button", { name: "Customize Overview", exact: true }), isMobile);

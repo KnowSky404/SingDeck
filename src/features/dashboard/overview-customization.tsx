@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { useWorkspace } from "@/app/context";
 import { Button } from "@/components/ui/button";
@@ -82,13 +82,16 @@ export function OverviewCustomization({ layout, onChange }: {
   const title = useRef<HTMLHeadingElement>(null);
   const actionButton = useRef<HTMLButtonElement>(null);
   const continueButton = useRef<HTMLButtonElement>(null);
+  const footer = useRef<HTMLDivElement>(null);
+  const announcementId = useId();
   const [announcement, setAnnouncement] = useState("");
-  const staleNotice = t("Overview layout changed. Review it and continue editing.");
+  const staleNotice = t("Layout changed. Review the order.");
   const showStaleNotice = announcement === staleNotice;
 
   useLayoutEffect(() => {
     const button = showStaleNotice ? continueButton.current : actionButton.current;
-    button?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    const scrollTarget = showStaleNotice ? footer.current : button;
+    scrollTarget?.scrollIntoView({ block: "nearest", inline: "nearest" });
     button?.focus({ preventScroll: true });
     if (!showStaleNotice) actionButton.current = null;
   }, [announcement, layout, showStaleNotice]);
@@ -133,10 +136,7 @@ export function OverviewCustomization({ layout, onChange }: {
       >
         <DialogHeader className="shrink-0 pr-8">
           <DialogTitle ref={title} tabIndex={-1}>{t("Customize Overview")}</DialogTitle>
-          <DialogDescription>
-            {!showStaleNotice && t("Move cards within each group.")}
-            <span role="status" className={showStaleNotice ? undefined : "sr-only"}>{announcement}</span>
-          </DialogDescription>
+          <DialogDescription>{t("Move cards within each group.")}</DialogDescription>
         </DialogHeader>
         <div
           role={showStaleNotice ? "region" : undefined}
@@ -159,12 +159,20 @@ export function OverviewCustomization({ layout, onChange }: {
             onMove={(panels, label, position, button) => move({ ...layout, panels }, label, position, panels.length, button)}
           />
         </div>
-        <div className="grid shrink-0 grid-cols-2 gap-2">
+        <div ref={footer} className="grid shrink-0 grid-cols-2 gap-2">
+          <p
+            id={announcementId}
+            role="status"
+            className={showStaleNotice ? "col-span-2 text-sm leading-none text-muted-foreground wrap-anywhere" : "sr-only"}
+          >
+            {announcement}
+          </p>
           {showStaleNotice && (
             <Button
               ref={continueButton}
               type="button"
-              className="h-auto min-h-8 max-w-full justify-self-start whitespace-normal wrap-anywhere"
+              aria-describedby={announcementId}
+              className="h-auto min-h-8 max-w-full justify-self-start px-1 leading-none whitespace-normal wrap-anywhere"
               onClick={() => setAnnouncement("")}
             >
               {t("Continue editing")}
@@ -173,7 +181,7 @@ export function OverviewCustomization({ layout, onChange }: {
           <Button
             type="button"
             variant="outline"
-            className="col-start-2 h-auto min-h-8 max-w-full justify-self-end whitespace-normal wrap-anywhere"
+            className="col-start-2 h-auto min-h-8 max-w-full justify-self-end px-1 leading-none whitespace-normal wrap-anywhere"
             disabled={showStaleNotice}
             onClick={(event) => change(defaultOverviewLayout, t("Default layout restored."), event.currentTarget)}
           >
