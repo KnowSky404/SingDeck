@@ -16,6 +16,7 @@ import {
   ServiceStatus_Type,
   LogSchema,
   NotificationEventSchema,
+  USBDeviceState,
   USBIPServerStatusUpdateSchema,
   type Version,
 } from "@/proto/daemon/started_service_pb";
@@ -288,7 +289,16 @@ describe("session lifecycle", () => {
       yield create(USBIPServerStatusUpdateSchema, {
         servers: opens === 1
           ? [
-            { serverTag: `raw-${reflected}`, devices: [{ busId: "ignored-device-detail" }] },
+            {
+              serverTag: `raw-${reflected}`,
+              devices: [
+                { state: USBDeviceState.USB_DEVICE_STATE_ATTACHED, busId: "ignored-device-detail" },
+                { state: USBDeviceState.USB_DEVICE_STATE_ATTACHED, stableId: "ignored-stable-id" },
+                {},
+                { state: USBDeviceState.USB_DEVICE_STATE_UNAVAILABLE },
+                { state: 99 as USBDeviceState },
+              ],
+            },
             { serverTag: encodeURIComponent(reflected) },
           ]
           : [],
@@ -309,9 +319,10 @@ describe("session lifecycle", () => {
     s.setDetailChannel("usbip");
     await vi.advanceTimersByTimeAsync(200);
     expect(connections.mock.calls.at(-1)?.[1]?.signal?.aborted).toBe(true);
-    const servers = s.getSnapshot().usbipServers;
-    expect(servers?.map(({ tag }) => tag === "[redacted]")).toEqual([true, true]);
-    expect(servers?.map(({ deviceCount }) => deviceCount)).toEqual([1, 0]);
+    expect(s.getSnapshot().usbipServers).toEqual([
+      { tag: "[redacted]", deviceCount: 5, attachedCount: 2 },
+      { tag: "[redacted]", deviceCount: 0, attachedCount: 0 },
+    ]);
 
     s.setDetailChannel("connections");
     expect(usbip.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);

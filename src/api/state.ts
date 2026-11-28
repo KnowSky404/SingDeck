@@ -47,7 +47,7 @@ export interface Snapshot {
   clashModeOptions?: string[];
   currentClashMode?: string;
   changingClashMode?: boolean;
-  usbipServers?: { tag: string; deviceCount: number }[];
+  usbipServers?: { tag: string; deviceCount: number; attachedCount: number }[];
   capabilities: Capabilities;
   warnings?: DeprecatedWarning[];
   checkingWarnings?: boolean;

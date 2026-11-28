@@ -1,6 +1,7 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import {
   ServiceStatus_Type,
+  USBDeviceState,
   type Version,
   type DeprecatedWarning,
   type Group,
@@ -1067,6 +1068,7 @@ export class InstanceSession {
               usbipServers: servers.map(({ serverTag, devices }) => ({
                 tag: safeNativeText(serverTag, (value) => this.redactText(value), 160),
                 deviceCount: devices.length,
+                attachedCount: devices.filter(({ state }) => state === USBDeviceState.USB_DEVICE_STATE_ATTACHED).length,
               })),
             });
           }
