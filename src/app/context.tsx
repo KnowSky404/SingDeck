@@ -4,6 +4,7 @@ import type { Snapshot } from "@/api/state";
 import type { Profile } from "@/features/instances/profiles";
 import type { Translate } from "@/lib/i18n";
 import type { DisplayPreferences } from "./display-preferences";
+import type { DefaultWorkspacePage } from "./default-workspace-page";
 
 export interface Workspace extends DisplayPreferences {
   profile: Profile;
@@ -15,6 +16,8 @@ export interface Workspace extends DisplayPreferences {
   setOverviewLayout: (layout: DisplayPreferences["overviewLayout"]) => boolean;
   refreshOverviewLayout: () => void;
   applyDisplayPreferences: (preferences: DisplayPreferences) => boolean;
+  defaultWorkspacePage: DefaultWorkspacePage;
+  setDefaultWorkspacePage: (page: DefaultWorkspacePage) => void;
   t: Translate;
   selectProfile: (id: string) => void;
   saveProfile: (profile: Profile, token: string, remember: boolean) => void;

@@ -39,6 +39,8 @@ function renderInventory(session: InstanceSession, snapshot: Snapshot, reportedT
       setOverviewLayout: () => true,
       refreshOverviewLayout: noop,
       applyDisplayPreferences: () => true,
+      defaultWorkspacePage: "/",
+      setDefaultWorkspacePage: noop,
       selectProfile: noop,
       saveProfile: noop,
       connect: noop,

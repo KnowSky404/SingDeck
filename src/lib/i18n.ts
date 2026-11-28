@@ -144,6 +144,7 @@ const zh: Record<string, string> = {
   "Mock mode": "演示模式",
   "No server is contacted.": "不会连接任何服务器。",
   "Display settings": "显示设置",
+  "Default workspace page": "默认工作台页面",
   "Display preferences": "显示偏好",
   "Save or load the theme, language and Overview card order.": "保存或载入主题、语言与概览卡片顺序。",
   "Export display preferences": "导出显示偏好",
