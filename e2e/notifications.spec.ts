@@ -1,5 +1,46 @@
 import { expect, test } from "@playwright/test";
 
+test("keyboard dismissal preserves focus in notification history", async ({ page, isMobile }) => {
+  if (isMobile) await page.setViewportSize({ width: 320, height: 740 });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  const first = page.getByRole("listitem").filter({
+    has: page.getByRole("heading", { name: "Demo core notification", exact: true }),
+  });
+  const second = page.getByRole("listitem").filter({
+    has: page.getByRole("heading", { name: "The core reported configuration deprecations.", exact: true }),
+  });
+  const firstDismiss = first.getByRole("button", { name: "Dismiss", exact: true });
+  const secondDismiss = second.getByRole("button", { name: "Dismiss", exact: true });
+  const source = page.getByRole("combobox", { name: "Notification source", exact: true });
+  async function openHistory() {
+    await page.goto("/");
+    await page.getByRole("button", { name: "Explore demo", exact: true }).click();
+    await page.getByRole("link", { name: /^Notifications\b/ }).click();
+    await expect(first).toBeVisible();
+    await expect(second).toBeVisible();
+  }
+
+  await openHistory();
+  await firstDismiss.press("Enter");
+  await expect(first).toHaveCount(0);
+  await expect(secondDismiss).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(second).toHaveCount(0);
+  await expect(page.getByText("No matching notifications", { exact: true })).toBeVisible();
+  await expect(page.getByText("Notification history", { exact: true })).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(source).toBeFocused();
+
+  await page.reload();
+  await openHistory();
+  await source.focus();
+  await firstDismiss.evaluate((button: HTMLButtonElement) => button.click());
+  await expect(first).toHaveCount(0);
+  await expect(source).toBeFocused();
+  expect(errors).toEqual([]);
+});
+
 test("notification center isolates native messages, filters history, and requests desktop permission on demand", async ({ page, isMobile }) => {
   if (isMobile) await page.setViewportSize({ width: 320, height: 740 });
   const errors: string[] = [];
@@ -36,8 +77,11 @@ test("notification center isolates native messages, filters history, and request
   await expect(local.getByRole("link", { name: "Open related page" })).toHaveAttribute("href", "#/configuration-health");
   await expect(local.getByText("SingDeck Local Notification")).toBeVisible();
 
-  await page.getByRole("button", { name: "Mark all as read", exact: true }).click();
+  const markAll = page.getByRole("button", { name: "Mark all as read", exact: true });
+  await markAll.press("Enter");
   await expect(page.getByRole("link", { name: "Notifications", exact: true })).toBeVisible();
+  await expect(markAll).toBeDisabled();
+  await expect(markAll).toBeFocused();
   await local.getByRole("button", { name: "Mark as unread", exact: true }).click();
   await expect(unread).toBeVisible();
   await page.getByRole("combobox", { name: "Notification source" }).click();
