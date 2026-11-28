@@ -63,3 +63,59 @@ test("notification center isolates native messages, filters history, and request
   await expect(page.getByRole("row", { name: /^Connections\b/ }).getByText("Live", { exact: true })).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test("diagnostic notices open the related tool without running a test", async ({ page, isMobile }) => {
+  if (isMobile) await page.setViewportSize({ width: 320, height: 740 });
+  await page.goto("/");
+  await page.getByRole("button", { name: "Explore demo", exact: true }).click();
+  const diagnostics = page.getByRole("link", { name: "Diagnostics", exact: true });
+  const quality = page.getByRole("radio", { name: "Network quality", exact: true });
+  const stun = page.getByRole("radio", { name: "STUN / NAT", exact: true });
+  const run = page.getByRole("button", { name: "Run test", exact: true });
+  const report = page.getByText(/^(Test progress|Test report)$/);
+  const expectIdleStun = async () => {
+    await expect(page).toHaveURL(/#\/diagnostics\/stun$/);
+    await expect(stun).toBeChecked();
+    await expect(diagnostics).toHaveAttribute("aria-current", "page");
+    await expect(page.getByRole("textbox", { name: "STUN server", exact: true })).toHaveValue("");
+    await expect(run).toBeEnabled();
+    await expect(report).toHaveCount(0);
+  };
+
+  await diagnostics.click();
+  await expect(page).toHaveURL(/#\/diagnostics$/);
+  await expect(quality).toBeChecked();
+  await page.getByRole("checkbox", { name: "Keep results for this page", exact: true }).check();
+  await run.click();
+  await expect(page.getByText("Test comparison", { exact: true })).toBeVisible();
+
+  await page.evaluate(() => { location.hash = "/diagnostics/stun"; });
+  await expectIdleStun();
+  await run.click();
+  await expect(page.getByText("203.0.113.24:42424", { exact: true })).toBeVisible();
+  await page.goBack();
+  await expect(quality).toBeChecked();
+  await expect(page.getByText("Test comparison", { exact: true })).toBeVisible();
+
+  await page.getByRole("link", { name: /^Notifications\b/ }).click();
+  const related = (name: string) => page.getByRole("listitem")
+    .filter({ has: page.getByRole("heading", { name, exact: true }) })
+    .getByRole("link", { name: "Open related page", exact: true });
+  const qualityNotice = related("Network quality test completed.");
+  const stunNotice = related("STUN test completed.");
+  await expect(qualityNotice).toHaveAttribute("href", "#/diagnostics");
+  await expect(stunNotice).toHaveAttribute("href", "#/diagnostics/stun");
+  await stunNotice.click();
+  await expectIdleStun();
+  await page.goBack();
+  await expect(stunNotice).toBeVisible();
+  await page.goForward();
+  await expectIdleStun();
+
+  await page.goBack();
+  await qualityNotice.click();
+  await expect(page).toHaveURL(/#\/diagnostics$/);
+  await expect(quality).toBeChecked();
+  await expect(report).toHaveCount(0);
+  await expect(page.getByText("Test comparison", { exact: true })).toHaveCount(0);
+});

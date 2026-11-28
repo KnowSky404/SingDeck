@@ -8,8 +8,8 @@ export const localNotifications = {
   configuration: { title: "The core reported configuration deprecations.", level: "warning", destination: "/configuration-health" },
   networkQualityCompleted: { title: "Network quality test completed.", level: "info", destination: "/diagnostics" },
   networkQualityFailed: { title: "Network quality test failed.", level: "error", destination: "/diagnostics" },
-  stunCompleted: { title: "STUN test completed.", level: "info", destination: "/diagnostics" },
-  stunFailed: { title: "STUN test failed.", level: "error", destination: "/diagnostics" },
+  stunCompleted: { title: "STUN test completed.", level: "info", destination: "/diagnostics/stun" },
+  stunFailed: { title: "STUN test failed.", level: "error", destination: "/diagnostics/stun" },
   selectionFailed: { title: "Outbound selection failed.", level: "error", destination: "/proxies" },
 } as const;
 

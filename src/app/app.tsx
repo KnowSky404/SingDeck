@@ -334,6 +334,9 @@ export default function App() {
     return () => removeEventListener("hashchange", onHashChange);
   }, []);
   const path = useSyncExternalStore(subscribeHash, currentPath);
+  const diagnosticTool = path === "/diagnostics/stun" ? "stun"
+    : path === "/diagnostics" ? "networkQuality" : undefined;
+  const pagePath = diagnosticTool ? "/diagnostics" : path;
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [path]);
@@ -367,7 +370,7 @@ export default function App() {
     !snapshot.stoppingLatencyTests;
   const inventoryEnabled = Boolean(
     workspaceOpen &&
-      (path === "/diagnostics" || (path === "/proxies" && (showInventory || inventoryBatch))),
+      (diagnosticTool || (path === "/proxies" && (showInventory || inventoryBatch))),
   );
   const detailChannel = inventoryEnabled
     ? "outbounds"
@@ -389,17 +392,15 @@ export default function App() {
       ? Overview
       : path === "/logs"
         ? Logs
-        : path === "/diagnostics"
-          ? Diagnostics
-          : path === "/configuration-health"
-            ? ConfigurationHealth
-            : path === "/runtime-monitor"
-              ? RuntimeMonitor
-              : path === "/settings"
-                ? SettingsPage
-                : path === "/settings/usbip"
-                  ? USBIPStatus
-                  : null;
+        : path === "/configuration-health"
+          ? ConfigurationHealth
+          : path === "/runtime-monitor"
+            ? RuntimeMonitor
+            : path === "/settings"
+              ? SettingsPage
+              : path === "/settings/usbip"
+                ? USBIPStatus
+                : null;
   const partial = Object.entries(snapshot.streamErrors).filter(
     ([channel, error]) => channel !== "status" && error,
   );
@@ -425,7 +426,7 @@ export default function App() {
       </a>
       <aside className="sidebar">
         <Brand />
-        <Navigation path={path} />
+        <Navigation path={pagePath} />
         <div className="sidebar-bottom">
           <div className="sidebar-about">
             <AboutDialog />
@@ -506,7 +507,7 @@ export default function App() {
               )}
             </Notice>
           )}
-          <AppErrorBoundary key={`${profile.id}:${path}`}>
+          <AppErrorBoundary key={`${profile.id}:${pagePath}`}>
             <Suspense
               fallback={
                 <div
@@ -546,6 +547,8 @@ export default function App() {
                 }} />
               ) : path === "/notifications" ? (
                 <Notifications key={pageKey} desktop={desktopAlerts} />
+              ) : diagnosticTool ? (
+                <Diagnostics key={pageKey} routeKind={diagnosticTool} />
               ) : Page ? (
                 <Page key={pageKey} />
               ) : (
@@ -585,7 +588,7 @@ export default function App() {
         </main>
       </div>
       <div className="mobile-bottom">
-        <Navigation path={path} mobile />
+        <Navigation path={pagePath} mobile />
       </div>
       <div className="latency-toast-viewport" role="status" aria-live="polite">
         {snapshot.latencyTestSent && (
@@ -603,7 +606,7 @@ export default function App() {
             <DialogTitle>{t("SingDeck navigation")}</DialogTitle>
             <DialogDescription>{t("Your network workspace")}</DialogDescription>
           </DialogHeader>
-          <Navigation path={path} onNavigate={() => setMenu(false)} mobile />
+          <Navigation path={pagePath} onNavigate={() => setMenu(false)} mobile />
         </DialogContent>
       </Dialog>
     </div>

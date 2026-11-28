@@ -52,13 +52,16 @@ type Result = {
 const defaultOutbound = "default";
 const diagnosticTitles = { networkQuality: "Network quality", stun: "STUN / NAT" };
 
-export default function Diagnostics() {
+export default function Diagnostics({ routeKind }: { routeKind: DiagnosticName }) {
   const { t } = useWorkspace();
-  const [kind, setKind] = useState<DiagnosticName>("networkQuality");
+  const [selection, setSelection] = useState({ routeKind, kind: routeKind });
   const [history, setHistory] = useState<Record<DiagnosticName, Result[]>>({
     networkQuality: [],
     stun: [],
   });
+  const kind = selection.routeKind === routeKind ? selection.kind : routeKind;
+  // A new Diagnostics link selects its tool without discarding this page's comparisons.
+  if (selection.routeKind !== routeKind) setSelection({ routeKind, kind });
   return (
     <div className="grid gap-4">
       <PageHeading title="Diagnostics" />
@@ -69,7 +72,7 @@ export default function Diagnostics() {
         spacing={0}
         value={kind}
         onValueChange={(value) => {
-          if (value === "networkQuality" || value === "stun") setKind(value);
+          if (value === "networkQuality" || value === "stun") setSelection({ routeKind, kind: value });
         }}
       >
         <ToggleGroupItem value="networkQuality">{t(diagnosticTitles.networkQuality)}</ToggleGroupItem>
