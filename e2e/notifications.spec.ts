@@ -1,5 +1,45 @@
 import { expect, test } from "@playwright/test";
 
+for (const focusTarget of ["read action", "source filter"] as const) {
+  test(`native notification cancellation preserves keyboard focus from the ${focusTarget}`, async ({ page, isMobile }) => {
+    if (isMobile) await page.setViewportSize({ width: 320, height: 740 });
+    await page.clock.install();
+    await page.goto("/");
+    await page.getByRole("button", { name: "Explore demo", exact: true }).click();
+    const bell = page.getByRole("link", { name: "Notifications (1 unread)", exact: true });
+    await expect(bell).toBeVisible();
+    await page.clock.pauseAt(await page.evaluate(() => Date.now() + 5_000));
+    await bell.press("Enter");
+    await expect(page).toHaveURL(/#\/notifications$/);
+    await page.clock.runFor(600);
+
+    const native = page.getByRole("listitem").filter({
+      has: page.getByRole("heading", { name: "Demo core notification", exact: true }),
+    });
+    const markRead = native.getByRole("button", { name: "Mark as read", exact: true });
+    const markUnread = native.getByRole("button", { name: "Mark as unread", exact: true });
+    const dismiss = native.getByRole("button", { name: "Dismiss", exact: true });
+    const source = page.getByRole("combobox", { name: "Notification source", exact: true });
+    const canceled = native.getByText("Canceled by core", { exact: true });
+    await expect(markRead).toBeVisible();
+    if (focusTarget === "read action") {
+      await markRead.press("Enter");
+      await expect(markUnread).toBeFocused();
+    } else {
+      await source.focus();
+      await expect(source).toBeFocused();
+    }
+    await expect(canceled).toHaveCount(0);
+
+    await page.clock.runFor(650);
+    await expect(canceled).toBeVisible();
+    await expect(markRead).toHaveCount(0);
+    await expect(markUnread).toHaveCount(0);
+    await page.clock.runFor(50);
+    await expect(focusTarget === "read action" ? dismiss : source).toBeFocused();
+  });
+}
+
 test("keyboard dismissal preserves focus in notification history", async ({ page, isMobile }) => {
   if (isMobile) await page.setViewportSize({ width: 320, height: 740 });
   const errors: string[] = [];
