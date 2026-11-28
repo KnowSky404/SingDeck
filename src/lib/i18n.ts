@@ -47,7 +47,7 @@ const zh: Record<string, string> = {
   "Moved {card} to position {position} of {count}.": "已将{card}移到第 {position} 位，共 {count} 位。",
   "Reset layout": "恢复默认布局",
   "Default layout restored.": "已恢复默认布局。",
-  "Overview layout changed. Review it and continue editing.": "概览布局已更改。请检查布局后继续编辑。",
+  "Layout changed. Review the order.": "布局已更改。请查看卡片顺序。",
   "Continue editing": "继续编辑",
   "Overview card order": "概览卡片顺序",
   Outbounds: "出站",
