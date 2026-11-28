@@ -354,7 +354,14 @@ export function OutboundInventory({ reportedTag, onShowAll }: {
                       </div>
                     </div>
                     <div className="proxy-node-actions">
-                      <OutboundDetails item={item} referencedGroup={group} groupsByTag={groupsByTag} />
+                      <OutboundDetails
+                        item={item}
+                        referencedGroup={group}
+                        groupsByTag={groupsByTag}
+                        language={language}
+                        session={session}
+                        t={t}
+                      />
                       <Button
                         variant="ghost"
                         size="icon-sm"

@@ -360,6 +360,13 @@ export default function App() {
       : { ...groupExpansion, tags };
   }, [canRetainGroupExpansion, groupExpansion, session, freshGroups]);
   if (groupExpansion !== retainedGroupExpansion) setGroupExpansion(retainedGroupExpansion);
+  const setOpenGroups = useCallback((update: (current: ReadonlySet<string>) => ReadonlySet<string>) => {
+    if (!canRetainGroupExpansion) return;
+    setGroupExpansion((current) => {
+      const tags = update(current?.session === session ? current.tags : noOpenGroups);
+      return tags.size ? { session, tags } : undefined;
+    });
+  }, [canRetainGroupExpansion, session]);
 
   const currentReportedOutbound = path === "/proxies" && workspaceOpen &&
     !snapshot.authenticationFailed && reportedOutbound?.session === session &&
@@ -526,13 +533,7 @@ export default function App() {
                   showInventory={showInventory}
                   reportedTag={currentReportedOutbound?.tag}
                   openGroups={retainedGroupExpansion?.tags ?? noOpenGroups}
-                  setOpenGroups={(update) => {
-                    if (!canRetainGroupExpansion) return;
-                    setGroupExpansion((current) => {
-                      const tags = update(current?.session === session ? current.tags : noOpenGroups);
-                      return tags.size ? { session, tags } : undefined;
-                    });
-                  }}
+                  setOpenGroups={setOpenGroups}
                   onShowAll={() => setReportedOutbound(undefined)}
                   onInventoryChange={(enabled) => {
                     setShowInventory(enabled);

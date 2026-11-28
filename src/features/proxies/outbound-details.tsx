@@ -1,5 +1,5 @@
 import { Info } from "lucide-react";
-import { useWorkspace } from "@/app/context";
+import type { Workspace } from "@/app/context";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,16 +12,14 @@ import {
 import type { Group, GroupItem } from "@/proto/daemon/started_service_pb";
 import { latency, latencyTone, selectedRoute, testedAt } from "./latency";
 
-export function OutboundDetails({
-  item,
-  referencedGroup,
-  groupsByTag,
-}: {
+type OutboundDetailsProps = Pick<Workspace, "language" | "session" | "t"> & {
   item: GroupItem;
   referencedGroup?: Group;
   groupsByTag: ReadonlyMap<string, Group>;
-}) {
-  const { session, t } = useWorkspace();
+};
+
+export function OutboundDetails(props: OutboundDetailsProps) {
+  const { item, referencedGroup, session, t } = props;
   const displayedTag = session.redactText(item.tag);
   const isGroup =
     Boolean(referencedGroup) ||
@@ -58,7 +56,7 @@ export function OutboundDetails({
             )}
           </DialogDescription>
         </DialogHeader>
-        <OutboundFacts item={item} referencedGroup={referencedGroup} groupsByTag={groupsByTag} />
+        <OutboundFacts {...props} />
       </DialogContent>
     </Dialog>
   );
@@ -68,12 +66,10 @@ function OutboundFacts({
   item,
   referencedGroup,
   groupsByTag,
-}: {
-  item: GroupItem;
-  referencedGroup?: Group;
-  groupsByTag: ReadonlyMap<string, Group>;
-}) {
-  const { language, session, t } = useWorkspace();
+  language,
+  session,
+  t,
+}: OutboundDetailsProps) {
   const measuredAt = testedAt(item);
   const route = referencedGroup && selectedRoute(referencedGroup, groupsByTag);
   return (
