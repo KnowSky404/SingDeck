@@ -348,18 +348,27 @@ test("mock workspace supports server-confirmed selection, filtering, log control
   await expect(
     page.getByRole("button", { name: "Details for mock-1", exact: true }),
   ).toHaveCount(0);
-  await page
-    .getByRole("button", { name: "Close all connections", exact: true })
-    .click();
-  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+  const confirmation = page.getByRole("dialog", { name: "Close all active connections?" });
+  const cancel = confirmation.getByRole("button", { name: "Cancel", exact: true });
+  await closeAll.focus();
+  await page.keyboard.press("Enter");
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(closeAll).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(closeAll).toBeFocused();
   await expect(
     page.getByRole("button", { name: "Details for mock-2", exact: true }),
   ).toBeVisible();
-  await page
-    .getByRole("button", { name: "Close all connections", exact: true })
-    .click();
-  await page.getByRole("button", { name: "Close all", exact: true }).click();
+  await page.keyboard.press("Enter");
+  const confirm = confirmation.getByRole("button", { name: "Close all", exact: true });
+  await confirm.focus();
+  await page.keyboard.press("Enter");
   await expect(page.getByText("Nothing to show yet")).toBeVisible();
+  await expect(closeAll).toBeDisabled();
+  await expect(page.getByRole("textbox", { name: "Search connections" })).toBeFocused();
   expect(errors).toEqual([]);
 });
 

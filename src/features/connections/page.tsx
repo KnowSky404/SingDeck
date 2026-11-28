@@ -1,4 +1,4 @@
-import { useDeferredValue, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowDownToLine,
@@ -160,9 +160,28 @@ export default function Connections({ onInspectOutbound }: {
   const [batch, setBatch] = useState<{ session: InstanceSession; selection: ConnectionBatchSelection }>();
   const [batchResult, setBatchResult] = useState<{ session: InstanceSession; result: ConnectionBatchResult }>();
   const batchController = useRef<AbortController | null>(null);
+  const closeAllTrigger = useRef<HTMLButtonElement>(null);
+  const closeAllSucceeded = useRef(false);
   const batchTrigger = useRef<HTMLButtonElement>(null);
   const detailTrigger = useRef<HTMLButtonElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
+  const rowRef = useCallback((row: HTMLTableRowElement | null) => {
+    if (!row) return;
+    const scope = session.signal;
+    const hash = location.hash;
+    return () => {
+      if (!row.contains(document.activeElement)) return;
+      const search = searchInput.current;
+      // Wait for the browser to clear focus when it removes the focused row.
+      requestAnimationFrame(() => {
+        if (!row.isConnected && search?.isConnected && searchInput.current === search &&
+          scope && !scope.aborted && session.signal === scope && location.hash === hash &&
+          document.activeElement === document.body &&
+          !document.querySelector('[role="dialog"][data-state="open"]'))
+          search.focus();
+      });
+    };
+  }, [session]);
   const action = useAction();
   useLayoutEffect(() => () => batchController.current?.abort(), [session]);
   const query = useDeferredValue(search);
@@ -225,7 +244,10 @@ export default function Connections({ onInspectOutbound }: {
 
   function confirmCloseAll() {
     void action.run(session.closeAllConnections).then((ok) => {
-      if (ok) setConfirm(false);
+      if (ok) {
+        closeAllSucceeded.current = true;
+        setConfirm(false);
+      }
     });
   }
 
@@ -329,7 +351,15 @@ export default function Connections({ onInspectOutbound }: {
           <Button ref={batchTrigger} variant="outline" disabled={!canSelectBatch} onClick={selectBatch}>
             {t("Close matching connections")}
           </Button>
-          <Button variant="outline" disabled={!closeAllEnabled} onClick={() => setConfirm(true)}>
+          <Button
+            ref={closeAllTrigger}
+            variant="outline"
+            disabled={!closeAllEnabled}
+            onClick={() => {
+              closeAllSucceeded.current = false;
+              setConfirm(true);
+            }}
+          >
             {t("Close all connections")}
           </Button>
         </div>
@@ -515,7 +545,7 @@ export default function Connections({ onInspectOutbound }: {
                     ? new Date(Number(c.closedAt))
                     : null;
                   return (
-                    <tr key={c.id}>
+                    <tr key={c.id} ref={rowRef}>
                       <td>
                         <strong>{c.domain || c.destination}</strong>
                         <span>{c.domain ? c.destination : c.source}</span>
@@ -641,7 +671,19 @@ export default function Connections({ onInspectOutbound }: {
         )}
       </p>
       <Dialog open={confirm} onOpenChange={setConfirm}>
-        <DialogContent closeLabel={t("Close")}>
+        <DialogContent
+          closeLabel={t("Close")}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            const trigger = closeAllTrigger.current;
+            // The connection stream can disable the opener after the RPC succeeds.
+            if (!closeAllSucceeded.current && trigger && !trigger.disabled) {
+              trigger.focus();
+            } else {
+              searchInput.current?.focus();
+            }
+          }}
+        >
           <DialogHeader>
             <DialogTitle>{t("Close all active connections?")}</DialogTitle>
             <DialogDescription>
