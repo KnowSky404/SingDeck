@@ -46,3 +46,113 @@ test("outbound inventory filters, follows nested selections and observes streame
   await expect(direct.locator("time")).toHaveAttribute("datetime", /T/);
   expect(errors).toEqual([]);
 });
+
+test("expanded outbound group pages all members and preserves keyboard access", async ({ page, isMobile }) => {
+  if (isMobile) await page.setViewportSize({ width: 320, height: 740 });
+  await page.route((url) => url.pathname === "/src/mocks/client.ts", async (route) => {
+    const source = await (await route.fetch()).text();
+    const anchor = "const groupsByTag = new Map(";
+    expect(source.split(anchor)).toHaveLength(2);
+    await route.fulfill({
+      contentType: "application/javascript",
+      body: source.replace(anchor, `
+        const largeGroup = groups.find(({ tag }) => tag === "Primary route");
+        const largeMembers = Array.from({ length: 121 }, (_, index) => create(GroupItemSchema, {
+          tag: "Capacity member " + String(index + 1).padStart(3, "0"),
+          type: index === 120 ? "wireguard" : "direct",
+        }));
+        largeGroup.items = largeMembers;
+        largeGroup.selected = largeMembers[0].tag;
+        window.addEventListener("test-group-member-count", ({ detail: count }) => {
+          largeGroup.items = largeMembers.slice(0, count);
+          if (!largeGroup.items.some(({ tag }) => tag === largeGroup.selected)) largeGroup.selected = largeMembers[0].tag;
+          revision++;
+        });
+        ${anchor}`),
+    });
+  });
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.goto("/");
+  await page.getByRole("button", { name: "Explore demo", exact: true }).click();
+  await page.getByRole("link", { name: "Outbounds", exact: true }).first().click();
+
+  const disclosure = page.getByRole("button", { name: /^(Expand|Collapse) Primary route$/ });
+  const group = page.locator(".proxy-group-card").filter({ has: disclosure });
+  const pager = group.getByRole("group", { name: "Member pages for Primary route", exact: true });
+  const previous = pager.getByRole("button", { name: "Previous page", exact: true });
+  const next = pager.getByRole("button", { name: "Next page", exact: true });
+  const rows = group.locator(".proxy-row");
+  const member = (number: number) => `Capacity member ${String(number).padStart(3, "0")}`;
+  const lastMember = rows.getByText(member(121), { exact: true });
+  const expectPage = async (current: number, count: number, first: number) => {
+    await expect(pager.getByRole("status")).toHaveText(`Page ${current} / 3`);
+    await expect(rows).toHaveCount(count);
+    await expect(rows.first().getByText(member(first), { exact: true })).toBeVisible();
+  };
+
+  await expect(rows).toHaveCount(0);
+  await expect(pager).toHaveCount(0);
+  await disclosure.press("Enter");
+  await expectPage(1, 60, 1);
+  await expect(previous).toBeDisabled();
+  await previous.press("Enter");
+  await expectPage(1, 60, 1);
+
+  await next.focus();
+  await page.keyboard.press("Enter");
+  await expectPage(2, 60, 61);
+  await expect(next).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expectPage(3, 1, 121);
+  await expect(next).toBeFocused();
+  await expect(next).toBeDisabled();
+  await page.keyboard.press("Enter");
+  await expectPage(3, 1, 121);
+  expect(await pager.evaluate((node) => {
+    const controls = Array.from(node.querySelectorAll("button"));
+    return document.documentElement.scrollWidth <= innerWidth && controls.every((control) => {
+      const { left, right } = control.getBoundingClientRect();
+      return left >= 0 && right <= innerWidth;
+    });
+  })).toBe(true);
+
+  await rows.getByRole("button", { name: `Select ${member(121)}`, exact: true }).press("Enter");
+  await expect(rows.getByRole("button", { name: `Selected: ${member(121)}`, exact: true })).toBeVisible();
+  await expect(disclosure).toHaveAccessibleDescription(`Selected: ${member(121)}`);
+  await expectPage(3, 1, 121);
+  await previous.press("Enter");
+  await expectPage(2, 60, 61);
+  await expect(lastMember).toHaveCount(0);
+
+  const protocol = page.getByRole("combobox", { name: "Protocol filter", exact: true });
+  await protocol.click();
+  await page.getByRole("option", { name: "wireguard", exact: true }).click();
+  await expect(lastMember).toBeVisible();
+  await expect(rows).toHaveCount(1);
+  await expect(pager).toHaveCount(0);
+  await protocol.click();
+  await page.getByRole("option", { name: "All protocols", exact: true }).click();
+  await expectPage(1, 60, 1);
+
+  const search = page.getByRole("textbox", { name: "Search outbounds", exact: true });
+  await search.fill(member(121));
+  await expect(lastMember).toBeVisible();
+  await expect(rows).toHaveCount(1);
+  await search.clear();
+  await expectPage(1, 60, 1);
+
+  await next.press("Enter");
+  await next.press("Enter");
+  await expectPage(3, 1, 121);
+  const resizeGroup = (count: number) => page.evaluate((detail) => {
+    window.dispatchEvent(new CustomEvent("test-group-member-count", { detail }));
+  }, count);
+  await resizeGroup(45);
+  await expect(pager).toHaveCount(0);
+  await expect(rows).toHaveCount(45);
+  await expect(disclosure).toBeFocused();
+  await resizeGroup(121);
+  await expectPage(1, 60, 1);
+  expect(errors).toEqual([]);
+});
