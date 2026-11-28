@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { memo, useEffect, useMemo, useRef, type ReactNode } from "react";
 import {
   CartesianGrid,
   Line,
@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Choice, EmptyState, Notice, Panel } from "@/components/shared";
 import { bytes, uptime } from "@/lib/format";
+import type { Language, Translate } from "@/lib/i18n";
 import { runtimeWindows, useRuntimeWindow } from "./use-runtime-window";
 import { useRuntimeStale } from "./use-runtime-stale";
 import { ServiceStatus_Type } from "@/proto/daemon/started_service_pb";
@@ -112,17 +113,8 @@ export default function RuntimeMonitor() {
   const canClearOlderSamples = runtime.samples.length > 1;
   const canClearServiceEvents = runtime.events.length > 0;
   const { samples, windowSeconds, selectWindow } = useRuntimeWindow(runtime.samples, profile.preferences.windowSeconds);
-  const points = useMemo(() => chartPoints(samples), [samples]);
-  const averages = useMemo(
-    () => ({ down: summarizeRates(samples, "down"), up: summarizeRates(samples, "up") }),
-    [samples],
-  );
   const timestamp = useMemo(
     () => new Intl.DateTimeFormat(language, { dateStyle: "medium", timeStyle: "medium" }),
-    [language],
-  );
-  const chartTime = useMemo(
-    () => new Intl.DateTimeFormat(language, { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
     [language],
   );
   const stale = useRuntimeStale(snapshot, profile.preferences.intervalMs);
@@ -220,64 +212,7 @@ export default function RuntimeMonitor() {
             </Button>
           </div>
         </div>
-        {samples.slice(1).some(({ gapBefore }) => gapBefore) && (
-          <p className="footnote">{t("Chart gaps show interruptions in observed data.")}</p>
-        )}
-        <div className="grid min-w-0 gap-4 lg:grid-cols-2">
-          <RuntimeChart
-            title="Traffic rate history"
-            points={points}
-            series={[{ key: "down", label: "Download" }, { key: "up", label: "Upload" }]}
-            format={rate}
-            chartTime={chartTime}
-          >
-            <table className="mt-3 w-full table-fixed text-start text-sm">
-              <thead>
-                <tr className="text-muted-foreground">
-                  <th scope="col" className="text-start font-medium">{t("Direction")}</th>
-                  <th scope="col" className="text-end font-medium">{t("Peak")}</th>
-                  <th scope="col" className="text-end font-medium">{t("Average")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {([
-                  ["Download", averages.down],
-                  ["Upload", averages.up],
-                ] as const).map(([label, values]) => (
-                  <tr key={label}>
-                    <th scope="row" className="py-1 text-start font-medium">{t(label)}</th>
-                    <td className="text-end tabular-nums">{rate(values?.peak)}</td>
-                    <td className="text-end tabular-nums">{rate(values?.average)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </RuntimeChart>
-          <RuntimeChart
-            title="Connection count history"
-            points={points}
-            series={[
-              { key: "connectionsIn", label: "Inbound connections" },
-              { key: "connectionsOut", label: "Outbound connections" },
-            ]}
-            format={count}
-            chartTime={chartTime}
-          />
-          <RuntimeChart
-            title="Memory history"
-            points={points}
-            series={[{ key: "memory", label: "Memory" }]}
-            format={bytes}
-            chartTime={chartTime}
-          />
-          <RuntimeChart
-            title="Goroutines history"
-            points={points}
-            series={[{ key: "goroutines", label: "Goroutines" }]}
-            format={count}
-            chartTime={chartTime}
-          />
-        </div>
+        <RuntimeCharts samples={samples} language={language} t={t} />
       </section>
 
       <div className="grid min-w-0 gap-4 lg:grid-cols-2">
@@ -359,6 +294,92 @@ export default function RuntimeMonitor() {
   );
 }
 
+const RuntimeCharts = memo(function RuntimeCharts({
+  samples,
+  language,
+  t,
+}: {
+  samples: Sample[];
+  language: Language;
+  t: Translate;
+}) {
+  const points = useMemo(() => chartPoints(samples), [samples]);
+  const averages = useMemo(
+    () => ({ down: summarizeRates(samples, "down"), up: summarizeRates(samples, "up") }),
+    [samples],
+  );
+  const chartTime = useMemo(
+    () => new Intl.DateTimeFormat(language, { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+    [language],
+  );
+  return (
+    <>
+      {samples.slice(1).some(({ gapBefore }) => gapBefore) && (
+        <p className="footnote">{t("Chart gaps show interruptions in observed data.")}</p>
+      )}
+      <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+        <RuntimeChart
+          title="Traffic rate history"
+          points={points}
+          series={[{ key: "down", label: "Download" }, { key: "up", label: "Upload" }]}
+          format={rate}
+          chartTime={chartTime}
+          t={t}
+        >
+          <table className="mt-3 w-full table-fixed text-start text-sm">
+            <thead>
+              <tr className="text-muted-foreground">
+                <th scope="col" className="text-start font-medium">{t("Direction")}</th>
+                <th scope="col" className="text-end font-medium">{t("Peak")}</th>
+                <th scope="col" className="text-end font-medium">{t("Average")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {([
+                ["Download", averages.down],
+                ["Upload", averages.up],
+              ] as const).map(([label, values]) => (
+                <tr key={label}>
+                  <th scope="row" className="py-1 text-start font-medium">{t(label)}</th>
+                  <td className="text-end tabular-nums">{rate(values?.peak)}</td>
+                  <td className="text-end tabular-nums">{rate(values?.average)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </RuntimeChart>
+        <RuntimeChart
+          title="Connection count history"
+          points={points}
+          series={[
+            { key: "connectionsIn", label: "Inbound connections" },
+            { key: "connectionsOut", label: "Outbound connections" },
+          ]}
+          format={count}
+          chartTime={chartTime}
+          t={t}
+        />
+        <RuntimeChart
+          title="Memory history"
+          points={points}
+          series={[{ key: "memory", label: "Memory" }]}
+          format={bytes}
+          chartTime={chartTime}
+          t={t}
+        />
+        <RuntimeChart
+          title="Goroutines history"
+          points={points}
+          series={[{ key: "goroutines", label: "Goroutines" }]}
+          format={count}
+          chartTime={chartTime}
+          t={t}
+        />
+      </div>
+    </>
+  );
+});
+
 function RuntimeTime({ value, formatter }: { value?: number; formatter: Intl.DateTimeFormat }) {
   if (value === undefined) return "—";
   return <time className="tabular-nums" dateTime={new Date(value).toISOString()}>{formatter.format(value)}</time>;
@@ -382,6 +403,7 @@ function RuntimeChart({
   series,
   format,
   chartTime,
+  t,
   children,
 }: {
   title: string;
@@ -389,9 +411,9 @@ function RuntimeChart({
   series: Series[];
   format: (value: number) => string;
   chartTime: Intl.DateTimeFormat;
+  t: Translate;
   children?: ReactNode;
 }) {
-  const { t } = useWorkspace();
   const hasData = points.some((point) => series.some(({ key }) => point[key] !== undefined));
   return (
     <Panel title={<h3>{t(title)}</h3>}>
