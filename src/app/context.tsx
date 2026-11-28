@@ -12,7 +12,7 @@ export interface Workspace extends DisplayPreferences {
   snapshot: Snapshot;
   setTheme: (theme: DisplayPreferences["theme"]) => void;
   setLanguage: (language: DisplayPreferences["language"]) => void;
-  setOverviewLayout: (layout: DisplayPreferences["overviewLayout"]) => void;
+  setOverviewLayout: (layout: DisplayPreferences["overviewLayout"]) => boolean;
   refreshOverviewLayout: () => void;
   applyDisplayPreferences: (preferences: DisplayPreferences) => boolean;
   t: Translate;

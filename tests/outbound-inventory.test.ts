@@ -36,7 +36,7 @@ function renderInventory(session: InstanceSession, snapshot: Snapshot, reportedT
       t: translate("en"),
       setTheme: noop,
       setLanguage: noop,
-      setOverviewLayout: noop,
+      setOverviewLayout: () => true,
       refreshOverviewLayout: noop,
       applyDisplayPreferences: () => true,
       selectProfile: noop,

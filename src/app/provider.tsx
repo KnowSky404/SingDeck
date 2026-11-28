@@ -35,9 +35,12 @@ import { WorkspaceContext } from "./context";
 import {
   loadDisplayPreferences,
   loadSavedOverviewLayout,
+  sameOverviewLayout,
   saveDisplayPreference,
   saveDisplayPreferences,
+  saveOverviewLayout,
   type DisplayPreferences,
+  type SavedOverviewLayout,
 } from "./display-preferences";
 import { translate } from "@/lib/i18n";
 
@@ -87,31 +90,55 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }>(null);
   const [storageError, setStorageError] = useState<string>();
-  const [displayPreferences, setDisplayPreferences] = useState(loadDisplayPreferences);
-  const { language, theme } = displayPreferences;
-  const overviewLayoutUnsaved = useRef(false);
+  const [displayPreferences, setDisplayPreferences] = useState<DisplayPreferences & {
+    savedOverviewLayout?: SavedOverviewLayout;
+    overviewLayoutMode: "saved" | "unsaved" | "temporary";
+  }>(() => {
+    const { preferences, savedOverviewLayout } = loadDisplayPreferences();
+    return { ...preferences, savedOverviewLayout, overviewLayoutMode: "saved" };
+  });
+  const { language, theme, overviewLayout, savedOverviewLayout, overviewLayoutMode } = displayPreferences;
   const refreshOverviewLayout = useCallback(() => {
-    // Keep this tab's unsaved layout when the user opens Overview again.
-    if (overviewLayoutUnsaved.current) return;
     const saved = loadSavedOverviewLayout();
     if (!saved) return;
     setDisplayPreferences((current) => {
-      const { metrics, panels } = current.overviewLayout;
-      const sameOrder = metrics.every((card, index) => card === saved.metrics[index]) &&
-        panels.every((card, index) => card === saved.panels[index]);
-      return sameOrder ? current : { ...current, overviewLayout: saved };
+      // Keep this tab's unsaved layout when the user opens Overview again.
+      if (current.overviewLayoutMode !== "saved") return current;
+      if (current.savedOverviewLayout?.revision === saved.revision &&
+          sameOverviewLayout(current.overviewLayout, saved.layout)) return current;
+      return { ...current, overviewLayout: saved.layout, savedOverviewLayout: saved };
     });
   }, []);
-  function setDisplayPreference<Key extends keyof DisplayPreferences>(key: Key, value: DisplayPreferences[Key]) {
-    const saved = saveDisplayPreference(key, value);
-    if (key === "overviewLayout") overviewLayoutUnsaved.current = !saved;
+  function setDisplayPreference<Key extends "theme" | "language">(key: Key, value: DisplayPreferences[Key]) {
+    saveDisplayPreference(key, value);
     setDisplayPreferences((current) => ({ ...current, [key]: value }));
   }
+  function setOverviewLayout(next: DisplayPreferences["overviewLayout"]) {
+    if (overviewLayoutMode === "temporary") {
+      // A denied file import applies to this visit, including edits based on it.
+      setDisplayPreferences((current) => ({ ...current, overviewLayout: next }));
+      return true;
+    }
+    // The edit was computed from the layout displayed by this render.
+    const result = saveOverviewLayout(next, savedOverviewLayout);
+    const saved = result.status === "unavailable" ? undefined : result.saved;
+    if (result.status === "stale" && !saved) return false;
+    setDisplayPreferences((current) => ({
+      ...current,
+      overviewLayout: saved?.layout ?? next,
+      savedOverviewLayout: saved ?? current.savedOverviewLayout,
+      overviewLayoutMode: result.status === "unavailable" ? "unsaved" : "saved",
+    }));
+    return result.status !== "stale";
+  }
   function applyDisplayPreferences(preferences: DisplayPreferences) {
-    const saved = saveDisplayPreferences(preferences);
-    overviewLayoutUnsaved.current = !saved;
-    setDisplayPreferences(preferences);
-    return saved;
+    const savedOverviewLayout = saveDisplayPreferences(preferences);
+    setDisplayPreferences({
+      ...preferences,
+      savedOverviewLayout,
+      overviewLayoutMode: savedOverviewLayout ? "saved" : "temporary",
+    });
+    return Boolean(savedOverviewLayout);
   }
   const t = useMemo(() => translate(language), [language]);
   useEffect(() => {
@@ -487,10 +514,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         profiles,
         session,
         snapshot,
-        ...displayPreferences,
+        theme,
+        language,
+        overviewLayout,
         setTheme: (theme) => setDisplayPreference("theme", theme),
         setLanguage: (language) => setDisplayPreference("language", language),
-        setOverviewLayout: (layout) => setDisplayPreference("overviewLayout", layout),
+        setOverviewLayout,
         refreshOverviewLayout,
         applyDisplayPreferences,
         t,

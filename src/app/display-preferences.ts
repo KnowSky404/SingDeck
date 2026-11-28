@@ -1,4 +1,9 @@
-import { loadOverviewLayout, parseOverviewLayout, type OverviewLayout } from "@/features/dashboard/overview-layout";
+import {
+  defaultOverviewLayout,
+  loadOverviewLayout,
+  parseOverviewLayout,
+  type OverviewLayout,
+} from "@/features/dashboard/overview-layout";
 import type { Theme } from "@/features/instances/profiles";
 import { loadLanguage, type Language } from "@/lib/i18n";
 
@@ -15,6 +20,11 @@ export interface DisplayPreferences {
   theme: Theme;
   language: Language;
   overviewLayout: OverviewLayout;
+}
+
+export interface SavedOverviewLayout {
+  layout: OverviewLayout;
+  revision: string | null;
 }
 
 function isTheme(value: unknown): value is Theme {
@@ -65,8 +75,8 @@ function loadLegacyTheme(): Theme {
   }
 }
 
-function loadLegacyDisplayPreferences(): DisplayPreferences {
-  return { theme: loadLegacyTheme(), language: loadLanguage(), overviewLayout: loadOverviewLayout() };
+function loadLegacyDisplayPreferences(overviewLayout = loadOverviewLayout()): DisplayPreferences {
+  return { theme: loadLegacyTheme(), language: loadLanguage(), overviewLayout };
 }
 
 function editKey(revision: string, field: keyof DisplayPreferences) {
@@ -88,9 +98,9 @@ function readStoredSnapshot() {
   }
 }
 
-function readLayoutEdit(revision: string): OverviewLayout | null {
-  const raw = localStorage.getItem(editKey(revision, "overviewLayout"));
-  if (raw === null || raw.length > displayPreferenceFileLimit) return null;
+function readLayoutEdit(revision: string | null): OverviewLayout | null {
+  const raw = localStorage.getItem(revision === null ? legacyKeys.overviewLayout : editKey(revision, "overviewLayout"));
+  if (raw === null || (revision !== null && raw.length > displayPreferenceFileLimit)) return null;
   try {
     return parseOverviewLayout(JSON.parse(raw));
   } catch {
@@ -98,7 +108,7 @@ function readLayoutEdit(revision: string): OverviewLayout | null {
   }
 }
 
-function readStoredDisplayPreferences(): DisplayPreferences | null {
+function readStoredDisplayPreferences(): { preferences: DisplayPreferences; revision: string } | null {
   let snapshot = readStoredSnapshot();
   for (let attempt = 0; snapshot && attempt < 2; attempt++) {
     const { raw, revision, preferences } = snapshot;
@@ -108,30 +118,54 @@ function readStoredDisplayPreferences(): DisplayPreferences | null {
     // A concurrent import can retire these edit keys while they are being read.
     if (raw === localStorage.getItem(storageKey)) {
       return {
-        theme: isTheme(theme) ? theme : preferences.theme,
-        language: isLanguage(language) ? language : preferences.language,
-        overviewLayout: overviewLayout ?? preferences.overviewLayout,
+        preferences: {
+          theme: isTheme(theme) ? theme : preferences.theme,
+          language: isLanguage(language) ? language : preferences.language,
+          overviewLayout: overviewLayout ?? preferences.overviewLayout,
+        },
+        revision,
       };
     }
     snapshot = readStoredSnapshot();
   }
-  return snapshot?.preferences ?? null;
+  return snapshot;
 }
 
-export function loadDisplayPreferences(): DisplayPreferences {
+export function loadDisplayPreferences(): { preferences: DisplayPreferences; savedOverviewLayout?: SavedOverviewLayout } {
   try {
-    return readStoredDisplayPreferences() ?? loadLegacyDisplayPreferences();
+    const stored = readStoredDisplayPreferences();
+    if (stored) return {
+      preferences: stored.preferences,
+      savedOverviewLayout: { layout: stored.preferences.overviewLayout, revision: stored.revision },
+    };
+    const savedOverviewLayout = readOverviewLayoutAt(null);
+    return { preferences: loadLegacyDisplayPreferences(savedOverviewLayout.layout), savedOverviewLayout };
   } catch {
-    return loadLegacyDisplayPreferences();
+    return { preferences: loadLegacyDisplayPreferences() };
   }
 }
 
-export function loadSavedOverviewLayout(): OverviewLayout | null {
+export function loadSavedOverviewLayout(): SavedOverviewLayout | undefined {
   try {
-    return readStoredDisplayPreferences()?.overviewLayout ?? loadOverviewLayout();
+    const stored = readStoredDisplayPreferences();
+    return stored
+      ? { layout: stored.preferences.overviewLayout, revision: stored.revision }
+      : readOverviewLayoutAt(null);
   } catch {
-    return null;
+    return undefined;
   }
+}
+
+export function sameOverviewLayout(left: OverviewLayout, right: OverviewLayout): boolean {
+  return left.metrics.length === right.metrics.length && left.panels.length === right.panels.length &&
+    left.metrics.every((card, index) => card === right.metrics[index]) &&
+    left.panels.every((card, index) => card === right.panels[index]);
+}
+
+function readOverviewLayoutAt(snapshot: ReturnType<typeof readStoredSnapshot>): SavedOverviewLayout {
+  const revision = snapshot?.revision ?? null;
+  const layout = readLayoutEdit(revision) ?? snapshot?.preferences.overviewLayout ?? defaultOverviewLayout;
+  return { layout, revision };
 }
 
 function discardEdits(revision: string) {
@@ -144,27 +178,64 @@ function discardEdits(revision: string) {
   }
 }
 
-export function saveDisplayPreferences(preferences: DisplayPreferences): boolean {
+export function saveDisplayPreferences(preferences: DisplayPreferences): SavedOverviewLayout | undefined {
   try {
     const previous = readStoredSnapshot();
     const revision = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
     localStorage.setItem(storageKey, JSON.stringify({ revision, document: preferenceDocument(preferences) }));
     if (previous) discardEdits(previous.revision);
+    return { layout: preferences.overviewLayout, revision };
+  } catch {
+    return undefined;
+  }
+}
+
+export function saveDisplayPreference<Key extends "theme" | "language">(key: Key, value: DisplayPreferences[Key]): boolean {
+  try {
+    const snapshot = readStoredSnapshot();
+    const destination = snapshot ? editKey(snapshot.revision, key) : legacyKeys[key];
+    localStorage.setItem(destination, value);
+    // An edit begun before an import belongs to the old revision.
+    if (snapshot && snapshot.raw !== localStorage.getItem(storageKey)) discardEdits(snapshot.revision);
     return true;
   } catch {
     return false;
   }
 }
 
-export function saveDisplayPreference<Key extends keyof DisplayPreferences>(key: Key, value: DisplayPreferences[Key]): boolean {
+type OverviewLayoutSaveResult =
+  | { status: "saved"; saved: SavedOverviewLayout }
+  | { status: "stale"; saved?: SavedOverviewLayout }
+  | { status: "unavailable" };
+
+function reportChangedOverviewLayout(snapshot: ReturnType<typeof readStoredSnapshot>): OverviewLayoutSaveResult {
+  try {
+    return { status: "stale", saved: readOverviewLayoutAt(snapshot) };
+  } catch {
+    // Keep the observed import when storage blocks its optional layout override.
+    return snapshot
+      ? { status: "stale", saved: { layout: snapshot.preferences.overviewLayout, revision: snapshot.revision } }
+      : { status: "stale" };
+  }
+}
+
+export function saveOverviewLayout(next: OverviewLayout, expected?: SavedOverviewLayout): OverviewLayoutSaveResult {
   try {
     const snapshot = readStoredSnapshot();
-    const destination = snapshot ? editKey(snapshot.revision, key) : legacyKeys[key];
-    localStorage.setItem(destination, typeof value === "string" ? value : JSON.stringify(value));
-    // An edit begun before an import belongs to the old revision.
-    if (snapshot && snapshot.raw !== localStorage.getItem(storageKey)) discardEdits(snapshot.revision);
-    return true;
+    if (expected && expected.revision !== (snapshot?.revision ?? null)) return reportChangedOverviewLayout(snapshot);
+    const saved = readOverviewLayoutAt(snapshot);
+    const current = readStoredSnapshot();
+    if (snapshot?.raw !== current?.raw) return reportChangedOverviewLayout(current);
+    if (!expected || !sameOverviewLayout(saved.layout, expected.layout)) return { status: "stale", saved };
+
+    // Keep the write on the checked revision even if an import races with setItem.
+    const destination = snapshot ? editKey(snapshot.revision, "overviewLayout") : legacyKeys.overviewLayout;
+    localStorage.setItem(destination, JSON.stringify(next));
+    const latest = readStoredSnapshot();
+    if (snapshot?.raw === latest?.raw) return { status: "saved", saved: { layout: next, revision: saved.revision } };
+    if (snapshot && snapshot.revision !== latest?.revision) discardEdits(snapshot.revision);
+    return reportChangedOverviewLayout(latest);
   } catch {
-    return false;
+    return { status: "unavailable" };
   }
 }
