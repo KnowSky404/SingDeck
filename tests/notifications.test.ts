@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { NotificationEventSchema } from "@/proto/daemon/started_service_pb";
 import {
   dismissNotification,
+  localNotifications,
   NOTIFICATION_LIMIT,
   receiveLocalNotification,
   receiveNativeNotification,
@@ -23,6 +24,11 @@ const send = (identifier: string, typeID = 1) => create(NotificationEventSchema,
 });
 
 describe("notification history", () => {
+  it("links both local STUN outcomes to the STUN tool", () => {
+    expect(localNotifications.stunCompleted.destination).toBe("/diagnostics/stun");
+    expect(localNotifications.stunFailed.destination).toBe("/diagnostics/stun");
+  });
+
   it("keeps source identity, reads, and native cancellation independent", () => {
     const local = receiveLocalNotification([], "selectionFailed", 1, 1);
     const mix = receiveNativeNotification(local, send("selectionFailed"), 2, 2, redact);
