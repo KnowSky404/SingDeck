@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useId, useRef, useState } from "react";
+import { memo, useCallback, useDeferredValue, useId, useRef, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -13,7 +13,7 @@ import {
   LockKeyhole,
   LoaderCircle,
 } from "lucide-react";
-import { useWorkspace } from "@/app/context";
+import { useWorkspace, type Workspace } from "@/app/context";
 import { useAction } from "@/hooks/use-action";
 import { ChannelState, Choice, Notice, PageHeading } from "@/components/shared";
 import { Button } from "@/components/ui/button";
@@ -39,6 +39,12 @@ import { OutboundInventory } from "./inventory";
 
 const memberPageSize = 60;
 
+type GroupControls = Pick<Workspace, "language" | "session" | "t"> & {
+  enabled: boolean;
+  canTestLatency: boolean;
+  testingManualLatencies?: ReadonlySet<string>;
+};
+
 function ProxyGroup({
   group,
   groupsByTag,
@@ -47,6 +53,11 @@ function ProxyGroup({
   view,
   expanded,
   enabled,
+  canTestLatency,
+  testingManualLatencies,
+  language,
+  session,
+  t,
   onOpenChange,
 }: {
   group: Group;
@@ -55,17 +66,11 @@ function ProxyGroup({
   type: string;
   view: string;
   expanded: boolean;
-  enabled: boolean;
   onOpenChange: (open: boolean) => void;
-}) {
-  const { session, snapshot, t } = useWorkspace();
+} & GroupControls) {
   const selection = useAction(),
     testing = useAction();
-  const testingDisabled =
-    !enabled ||
-    snapshot.capabilities.urlTest.status === "unsupported" ||
-    Boolean(snapshot.testingLatencies) ||
-    testing.pending;
+  const testingDisabled = !canTestLatency || testing.pending;
   const test = (tag: string) =>
     void testing.run(() =>
       session.testLatency(tag, latencyTestWaves(groupsByTag, tag)[0].windows),
@@ -157,7 +162,7 @@ function ProxyGroup({
                 size="icon"
                 title={t("Test group")}
                 aria-label={t("Test {name}", { name: group.tag })}
-                disabled={testingDisabled || snapshot.testingManualLatencies?.has(group.tag)}
+                disabled={testingDisabled || testingManualLatencies?.has(group.tag)}
                 onClick={() => test(group.tag)}
               >
                 {testing.pending ? <LoaderCircle className="spin" /> : <Zap />}
@@ -284,6 +289,9 @@ function ProxyGroup({
                           item={item}
                           referencedGroup={groupsByTag.get(item.tag)}
                           groupsByTag={groupsByTag}
+                          language={language}
+                          session={session}
+                          t={t}
                         />
                         <Button
                           variant="ghost"
@@ -293,7 +301,7 @@ function ProxyGroup({
                             name: item.tag,
                             group: group.tag,
                           })}
-                          disabled={testingDisabled || snapshot.testingManualLatencies?.has(item.tag)}
+                          disabled={testingDisabled || testingManualLatencies?.has(item.tag)}
                           onClick={() => test(item.tag)}
                         >
                           <Zap />
@@ -333,8 +341,11 @@ export default function Outbounds({
   onShowAll: () => void;
   onInventoryChange: (enabled: boolean) => void;
 } & GroupDisclosure) {
-  const { snapshot, t } = useWorkspace();
+  const { snapshot, language, session, t } = useWorkspace();
   const probe = snapshot.capabilities.urlTest;
+  const groupsEnabled = snapshot.serviceActionsReady && snapshot.groups !== undefined &&
+    !snapshot.streamErrors.groups;
+  const testing = Boolean(snapshot.testingLatencies);
   return (
     <>
       <PageHeading title="Outbounds" />
@@ -364,13 +375,43 @@ export default function Outbounds({
       )}
       {showInventory
         ? <OutboundInventory reportedTag={reportedTag} onShowAll={onShowAll} />
-        : <OutboundGroups openGroups={openGroups} setOpenGroups={setOpenGroups} />}
+        : <OutboundGroups
+          openGroups={openGroups}
+          setOpenGroups={setOpenGroups}
+          reportedGroups={snapshot.groups}
+          enabled={groupsEnabled}
+          canTestLatency={groupsEnabled && probe.status !== "unsupported" && !testing}
+          testing={testing}
+          testingGroups={snapshot.latencyTestSource === "groups"}
+          stoppingLatencyTests={snapshot.stoppingLatencyTests}
+          testingManualLatencies={snapshot.testingManualLatencies}
+          language={language}
+          session={session}
+          t={t}
+        />}
     </>
   );
 }
 
-function OutboundGroups({ openGroups, setOpenGroups }: GroupDisclosure) {
-  const { session, snapshot, t } = useWorkspace();
+const OutboundGroups = memo(function OutboundGroups({
+  openGroups,
+  setOpenGroups,
+  reportedGroups,
+  enabled,
+  canTestLatency,
+  testing,
+  testingGroups,
+  stoppingLatencyTests,
+  testingManualLatencies,
+  language,
+  session,
+  t,
+}: GroupDisclosure & GroupControls & {
+  reportedGroups?: Group[];
+  testing: boolean;
+  testingGroups: boolean;
+  stoppingLatencyTests?: boolean;
+}) {
   const [search, setSearch] = useState(""),
     [type, setType] = useState("all"),
     [view, setView] = useState("list"),
@@ -385,10 +426,7 @@ function OutboundGroups({ openGroups, setOpenGroups }: GroupDisclosure) {
     setFilteredDisclosure({ query, type, closedGroups: new Set() });
   }
   const filtering = query !== "" || type !== "all";
-  const groups = snapshot.groups ?? [];
-  const enabled =
-    snapshot.serviceActionsReady && snapshot.groups !== undefined &&
-    !snapshot.streamErrors.groups;
+  const groups = reportedGroups ?? [];
   const groupsByTag = new Map(groups.map((group) => [group.tag, group]));
   const types = [...new Set(groups.flatMap((g) => g.items.map((i) => i.type)))];
   const isExpanded = (tag: string) =>
@@ -399,8 +437,6 @@ function OutboundGroups({ openGroups, setOpenGroups }: GroupDisclosure) {
     allExpanded ? "Collapse all groups" : "Expand all groups",
   );
   const testAllLabel = t("Test all groups");
-  const testing = Boolean(snapshot.testingLatencies);
-  const testingGroups = snapshot.latencyTestSource === "groups";
 
   function setExpanded(tags: string[], open: boolean) {
     const update = (current: ReadonlySet<string>) => {
@@ -484,11 +520,9 @@ function OutboundGroups({ openGroups, setOpenGroups }: GroupDisclosure) {
             aria-busy={testingGroups}
             title={testAllLabel}
             disabled={
-              !enabled ||
-              snapshot.capabilities.urlTest.status === "unsupported" ||
+              !canTestLatency ||
               !groups.length ||
-              Boolean(snapshot.testingManualLatencies) ||
-              testing
+              Boolean(testingManualLatencies)
             }
             onClick={() =>
               void session
@@ -508,7 +542,7 @@ function OutboundGroups({ openGroups, setOpenGroups }: GroupDisclosure) {
               size="icon"
               aria-label={t("Stop queued tests")}
               title={t("Stop queued tests")}
-              disabled={snapshot.stoppingLatencyTests}
+              disabled={stoppingLatencyTests}
               onClick={session.cancelLatencyTests}
             >
               <X aria-hidden="true" />
@@ -535,7 +569,7 @@ function OutboundGroups({ openGroups, setOpenGroups }: GroupDisclosure) {
           </Button>
         </div>
       </div>
-      <ChannelState channel="groups" empty={snapshot.groups?.length === 0}>
+      <ChannelState channel="groups" empty={reportedGroups?.length === 0}>
         <div
           className={
             groupView === "cards" ? "proxy-group-grid" : "feature-stack"
@@ -551,6 +585,11 @@ function OutboundGroups({ openGroups, setOpenGroups }: GroupDisclosure) {
               view={view}
               expanded={isExpanded(group.tag)}
               enabled={enabled}
+              canTestLatency={canTestLatency}
+              testingManualLatencies={testingManualLatencies}
+              language={language}
+              session={session}
+              t={t}
               onOpenChange={(open) => setExpanded([group.tag], open)}
             />
           ))}
@@ -558,4 +597,4 @@ function OutboundGroups({ openGroups, setOpenGroups }: GroupDisclosure) {
       </ChannelState>
     </>
   );
-}
+});
