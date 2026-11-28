@@ -51,6 +51,7 @@ import {
 import { version } from "../../package.json";
 import { cn } from "@/lib/utils";
 import { useDesktopAlerts } from "@/features/notifications/desktop";
+import { authenticationErrorMessage } from "@/api/errors";
 import type { InstanceSession } from "@/api/session";
 import type { DefaultWorkspacePage } from "./default-workspace-page";
 
@@ -63,6 +64,7 @@ const Diagnostics = lazy(() => import("@/features/diagnostics/page"));
 const ConfigurationHealth = lazy(() => import("@/features/diagnostics/health"));
 const SettingsPage = lazy(() => import("@/features/settings/page"));
 const USBIPStatus = lazy(() => import("@/features/settings/usbip"));
+const VPNStatus = lazy(() => import("@/features/settings/vpn"));
 const Notifications = lazy(() => import("@/features/notifications/page"));
 const links = [
   {
@@ -104,6 +106,8 @@ const links = [
 ];
 const currentHash = () => location.hash.slice(1);
 const noOpenGroups: ReadonlySet<string> = new Set<string>();
+const vpnProtocolFor = (path: string) => path === "/settings/vpn/openconnect" ? "openconnect"
+  : path === "/settings/vpn/openvpn" ? "openvpn" : undefined;
 const subscribeToastVisibility = (listener: () => void) => {
   const portals = new MutationObserver(listener);
   portals.observe(document.body, { childList: true });
@@ -381,6 +385,22 @@ export default function App() {
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [path]);
+  const nativeWorkspace = nativeWorkspaceOpen ? session : undefined;
+  const [route, setRoute] = useState({ path, nativeWorkspace, restoreVpnFocus: false });
+  if (route.path !== path || route.nativeWorkspace !== nativeWorkspace) {
+    setRoute({
+      path,
+      nativeWorkspace,
+      restoreVpnFocus: path === "/settings" && nativeWorkspace !== undefined &&
+        route.nativeWorkspace === nativeWorkspace && vpnProtocolFor(route.path) !== undefined,
+    });
+  }
+  const vpnProtocol = vpnProtocolFor(path);
+  const vpnRuntimeDenied = nativeWorkspace && vpnProtocol && !snapshot.authenticationFailed &&
+    snapshot.error === authenticationErrorMessage && snapshot.streamErrors.status === authenticationErrorMessage;
+  const nativeStatus = nativeWorkspace
+    ? path === "/settings/usbip" ? "usbip" : vpnProtocol
+    : undefined;
   const canRetainGroupExpansion = workspaceOpen && !snapshot.authenticationFailed;
   const freshGroups = snapshot.streamErrors.groups ? undefined : snapshot.groups;
   const [groupExpansion, setGroupExpansion] = useState<{
@@ -425,9 +445,7 @@ export default function App() {
       ? "clashMode"
       : workspaceOpen && path === "/notifications"
         ? "notifications"
-        : workspaceOpen && path === "/settings/usbip" && profile.mode === "native"
-          ? "usbip"
-          : "connections";
+        : nativeStatus ?? "connections";
   useEffect(() => {
     session.setDetailChannel(detailChannel);
   }, [detailChannel, session]);
@@ -443,11 +461,9 @@ export default function App() {
           ? ConfigurationHealth
           : path === "/runtime-monitor"
             ? RuntimeMonitor
-            : path === "/settings"
-              ? SettingsPage
-              : path === "/settings/usbip"
-                ? USBIPStatus
-                : null;
+            : path === "/settings/usbip"
+              ? USBIPStatus
+              : null;
   const partial = Object.entries(snapshot.streamErrors).filter(
     ([channel, error]) => channel !== "status" && error,
   );
@@ -526,7 +542,7 @@ export default function App() {
           <WorkspaceControls connection />
         </header>
         <main id="main-content" tabIndex={-1}>
-          {snapshot.error && (
+          {snapshot.error && !vpnRuntimeDenied && (
             <Notice
               title={
                 snapshot.phase === "reconnecting"
@@ -590,6 +606,10 @@ export default function App() {
                 <Notifications key={pageKey} desktop={desktopAlerts} />
               ) : diagnosticTool ? (
                 <Diagnostics key={pageKey} routeKind={diagnosticTool} />
+              ) : vpnProtocol ? (
+                <VPNStatus key={pageKey} protocol={vpnProtocol} />
+              ) : path === "/settings" ? (
+                <SettingsPage key={pageKey} restoreVpnFocus={route.restoreVpnFocus} />
               ) : Page ? (
                 <Page key={pageKey} />
               ) : (

@@ -8,12 +8,14 @@ export class CloseAllUnavailable extends Error {
   }
 }
 
+export const authenticationErrorMessage = "Authentication failed. Disconnect and check the Bearer token on the entry page.";
+
 // Server text may echo secrets. Only fixed, actionable messages cross into the UI.
 export function describeError(error: unknown): string {
   if (error instanceof CloseAllUnavailable) return error.message;
   switch (ConnectError.from(error).code) {
     case Code.Unauthenticated:
-      return "Authentication failed. Disconnect and check the Bearer token on the entry page.";
+      return authenticationErrorMessage;
     case Code.PermissionDenied:
       return "This instance denied access. Check its access policy.";
     case Code.Unimplemented:

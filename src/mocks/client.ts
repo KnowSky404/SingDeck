@@ -405,6 +405,12 @@ export function createMockClient(control = new MockControl()): SingBoxClient {
       logGeneration++;
       return empty();
     },
+    subscribeOpenConnectStatus() {
+      throw new ConnectError("OpenConnect status requires a native instance", Code.Unimplemented);
+    },
+    subscribeOpenVPNStatus() {
+      throw new ConnectError("OpenVPN status requires a native instance", Code.Unimplemented);
+    },
     subscribeUSBIPServerStatus() {
       throw new ConnectError("USB/IP status requires a native instance", Code.Unimplemented);
     },

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { version } from "../../../package.json";
 import { describeError } from "@/api/errors";
@@ -77,8 +77,19 @@ function ClashMode() {
   );
 }
 
-export default function Settings() {
+export default function Settings({ restoreVpnFocus }: { restoreVpnFocus: boolean }) {
   const { profile, snapshot, t } = useWorkspace();
+  const vpnLink = useRef<HTMLAnchorElement>(null);
+  useEffect(() => {
+    const link = vpnLink.current;
+    if (!restoreVpnFocus || !link) return;
+    const frame = requestAnimationFrame(() => {
+      if (location.hash !== "#/settings" || !link.isConnected || document.activeElement !== document.body) return;
+      link.focus({ preventScroll: true });
+      link.scrollIntoView({ block: "center" });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [restoreVpnFocus]);
   return (
     <>
       <PageHeading title={t("Settings")} />
@@ -147,16 +158,19 @@ export default function Settings() {
         {snapshot.capabilities.clashMode.status === "supported" && <ClashMode />}
         {profile.mode === "native" && (
           <Panel title="Native services">
-            {snapshot.capabilities.usbip.status === "unavailable" ||
-            snapshot.capabilities.usbip.status === "unsupported" ? (
-              <p>{t("USB/IP status is unavailable on this instance.")}</p>
-            ) : (
-              <div className="button-row">
+            <div className="button-row">
+              {snapshot.capabilities.usbip.status === "unavailable" ||
+              snapshot.capabilities.usbip.status === "unsupported" ? (
+                <p>{t("USB/IP status is unavailable on this instance.")}</p>
+              ) : (
                 <Button variant="outline" asChild>
                   <a href="#/settings/usbip">{t("USB/IP server status")}</a>
                 </Button>
-              </div>
-            )}
+              )}
+              <Button variant="outline" asChild>
+                <a ref={vpnLink} href="#/settings/vpn/openconnect">{t("VPN endpoint status")}</a>
+              </Button>
+            </div>
           </Panel>
         )}
       </div>

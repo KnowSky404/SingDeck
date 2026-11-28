@@ -7,6 +7,7 @@ import { readFile, readdir, writeFile, mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { rootCertificates } from "node:tls";
 import {
   serveDiagnostics,
   stunBindingResponse,
@@ -1209,5 +1210,240 @@ test("browser uses the official native service through CORS and built-in dashboa
         })
         .catch(() => {});
     }
+  }
+});
+
+test("browser switches native VPN status and keeps remembered access after a VPN-only denial", async ({ page }) => {
+  const binary = process.env.SING_BOX_BINARY;
+  test.skip(!binary, "Requires official sing-box v1.14.0 with OpenConnect and OpenVPN support.");
+
+  const directory = await mkdtemp(`${tmpdir()}/singdeck-vpn-browser-`);
+  const config = `${directory}/config.json`;
+  const secret = randomBytes(24).toString("hex");
+  let core: ChildProcess | undefined;
+  let reservation: ChildProcess | undefined;
+  try {
+    // Hold a bound TCP port without listening so no peer can accept either VPN connection.
+    const bound = spawn("python3", ["-c", [
+      "import socket, sys",
+      "with socket.socket() as s:",
+      "    s.bind(('127.0.0.1', 0))",
+      "    print(s.getsockname()[1], flush=True)",
+      "    sys.stdin.buffer.read(1)",
+    ].join("\n")], { stdio: ["pipe", "pipe", "ignore"] });
+    reservation = bound;
+    const unusedPort = await new Promise<number>((resolvePort, reject) => {
+      bound.once("error", (error: NodeJS.ErrnoException) => reject(error.code === "ENOENT"
+        ? new Error("The native VPN browser fixture requires Python 3 (python3 on PATH).")
+        : error));
+      bound.once("exit", () => reject(new Error("VPN fixture port reservation exited")));
+      bound.stdout.once("data", (data: Buffer) => resolvePort(Number(data.toString("utf8").trim())));
+    });
+
+    // Both userspace clients keep normal TLS verification.
+    await writeFile(config, JSON.stringify({
+      services: [{
+        type: "api", tag: "vpn-fixture", listen: "127.0.0.1", listen_port: 0, secret,
+        dashboard: resolve("dist"),
+      }],
+      endpoints: [
+        {
+          type: "openconnect", tag: "fixture-openconnect", system: false, no_udp: true,
+          server: `https://127.0.0.1:${unusedPort}`,
+        },
+        {
+          type: "openvpn-client", tag: "fixture-openvpn", system: false,
+          mode: "tls", network: "tcp", server: "127.0.0.1", server_port: unusedPort,
+          tls: { certificate: [rootCertificates[0]], server_name: "127.0.0.1", remote_certificate_tls: "server" },
+        },
+      ],
+    }), { mode: 0o600 });
+    core = spawn(resolve(binary!), ["run", "-c", config], { stdio: ["ignore", "ignore", "pipe"], cwd: directory });
+    core.once("error", () => {});
+    let output = "";
+    core.stderr!.setEncoding("utf8").on("data", (chunk: string) => { output = (output + chunk).slice(-2048); });
+    const endpoint = () => /service\/api\[vpn-fixture\]: tcp server started at (127\.0\.0\.1:\d+)/.exec(output)?.[1];
+    await expect.poll(() => Boolean(endpoint()), { timeout: 5000 }).toBe(true);
+
+    await page.addInitScript(() => {
+      const browserFetch = window.fetch.bind(window);
+      const interruptions = new Map([
+        ["SubscribeStatus", new AbortController()],
+        ["SubscribeServiceStatus", new AbortController()],
+      ]);
+      for (const [method, interruption] of interruptions)
+        window.addEventListener(`singdeck-fixture-end-${method}`, () => interruption.abort(), { once: true });
+      window.fetch = (input, init) => {
+        const url = input instanceof Request ? input.url : String(input);
+        const method = url.slice(url.lastIndexOf("/") + 1);
+        const interruption = interruptions.get(method);
+        if (!interruption) return browserFetch(input, init);
+        interruptions.delete(method);
+        const signal = init?.signal ?? (input instanceof Request ? input.signal : undefined);
+        return browserFetch(input, { ...init, signal: signal
+          ? AbortSignal.any([signal, interruption.signal]) : interruption.signal });
+      };
+    });
+    const calls: string[] = [];
+    page.on("request", (request) => {
+      const method = /\/(SubscribeOpen(?:Connect|VPN)Status)$/.exec(request.url())?.[1];
+      if (method) calls.push(method);
+    });
+    const origin = `http://${endpoint()}`;
+    await page.goto(`${origin}/dashboard/#/settings`);
+    await expect(page.getByRole("textbox", { name: "API endpoint", exact: true })).toHaveValue(origin);
+    await page.getByRole("switch", { name: "Remember this device" }).click();
+    await page.getByLabel("Bearer token", { exact: true }).fill(secret);
+    await page.getByRole("button", { name: "Connect", exact: true }).click();
+    const entry = page.getByRole("link", { name: "VPN endpoint status", exact: true });
+    await expect(entry).toBeVisible();
+    await expect(entry).not.toBeFocused();
+    await page.getByRole("main").focus();
+    await page.keyboard.press("Tab");
+    await expect(page.getByRole("link", { name: "Download dashboard", exact: true })).toBeFocused();
+    expect(calls).toEqual([]);
+
+    await entry.press("Enter");
+    await expect(page.getByRole("heading", { name: "VPN endpoint status", level: 1 })).toBeFocused();
+    const openconnect = page.getByRole("listitem").filter({ hasText: "fixture-openconnect" });
+    await expect(openconnect.getByText("Connecting", { exact: true })).toBeVisible();
+    expect(calls).toEqual(["SubscribeOpenConnectStatus"]);
+
+    const openconnectCanceled = page.waitForEvent("requestfailed", (request) =>
+      request.url().endsWith("/SubscribeOpenConnectStatus"));
+    await page.getByRole("link", { name: "OpenVPN", exact: true }).click();
+    await openconnectCanceled;
+    const openvpn = page.getByRole("listitem").filter({ hasText: "fixture-openvpn" });
+    await expect(openvpn.getByText("Connecting", { exact: true })).toBeVisible();
+    await expect(openconnect).toHaveCount(0);
+    expect(calls).toEqual(["SubscribeOpenConnectStatus", "SubscribeOpenVPNStatus"]);
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+    const openvpnCanceled = page.waitForEvent("requestfailed", (request) =>
+      request.url().endsWith("/SubscribeOpenVPNStatus"));
+    await page.getByRole("link", { name: "Back to Settings", exact: true }).click();
+    await openvpnCanceled;
+    await expect(entry).toBeFocused();
+    await expect(entry).toBeInViewport({ ratio: 1 });
+
+    const rememberedMarker = () => page.evaluate(() => localStorage.getItem("singdeck.remembered-connection"));
+    await expect.poll(rememberedMarker).toMatch(/^\+/);
+    const savedMarker = await rememberedMarker();
+    const vpnDenial = page.getByText("VPN status access was denied. Check the VPN API access policy.", { exact: true });
+    for (const { method, open } of [
+      { method: "SubscribeOpenConnectStatus", open: entry },
+      { method: "SubscribeOpenVPNStatus", open: page.getByRole("link", { name: "OpenVPN", exact: true }) },
+    ]) {
+      const url = `${origin}/daemon.StartedService/${method}`;
+      await page.route(url, (route) => route.fulfill({ status: 401 }));
+      const denied = page.waitForResponse((response) => response.url() === url && response.status() === 401);
+      const confirmedVersion = page.waitForResponse((response) =>
+        response.url() === `${origin}/daemon.StartedService/GetVersion` && response.ok(),
+      );
+      await open.click();
+      await denied;
+      await expect(page.getByText("VPN endpoint status interrupted", { exact: true })).toBeVisible();
+      await expect(vpnDenial).toBeVisible();
+      await expect(page.getByText(/^Authentication failed/)).toHaveCount(0);
+      await expect(openconnect).toHaveCount(0);
+      await expect(openvpn).toHaveCount(0);
+      expect(await (await confirmedVersion).finished()).toBeNull();
+      expect(await rememberedMarker()).toBe(savedMarker);
+      await page.unroute(url);
+    }
+    expect(calls).toEqual([
+      "SubscribeOpenConnectStatus", "SubscribeOpenVPNStatus",
+      "SubscribeOpenConnectStatus", "SubscribeOpenVPNStatus",
+    ]);
+
+    const openvpnStatus = `${origin}/daemon.StartedService/SubscribeOpenVPNStatus`;
+    const chooseOpenConnect = page.getByRole("link", { name: "OpenConnect", exact: true });
+    const chooseOpenVPN = page.getByRole("link", { name: "OpenVPN", exact: true });
+    await chooseOpenConnect.click();
+    await expect(openconnect.getByText("Connecting", { exact: true })).toBeVisible();
+    let releaseOpenVPN!: () => void;
+    const openvpnPending = new Promise<void>((resolve) => { releaseOpenVPN = resolve; });
+    await page.route(openvpnStatus, async (route) => {
+      await openvpnPending;
+      await route.continue();
+    }, { times: 1 });
+    const reopenedOpenVPN = page.waitForRequest(openvpnStatus);
+    try {
+      await chooseOpenVPN.click();
+      await reopenedOpenVPN;
+      await expect(page.getByText("Waiting for VPN endpoint status…", { exact: true })).toBeVisible();
+      await expect(vpnDenial).toHaveCount(0);
+    } finally {
+      releaseOpenVPN();
+    }
+    await expect(openvpn.getByText("Connecting", { exact: true })).toBeVisible();
+
+    await page.reload();
+    await expect(openvpn.getByText("Connecting", { exact: true })).toBeVisible();
+    expect(await rememberedMarker()).toBe(savedMarker);
+
+    const runtimeStatus = `${origin}/daemon.StartedService/SubscribeStatus`;
+    let runtimeRetryRejected = false;
+    await page.route(runtimeStatus, (route) => {
+      runtimeRetryRejected = true;
+      return route.fulfill({ status: 401 });
+    });
+    const runtimeRejected = page.waitForResponse((response) => response.url() === runtimeStatus && response.status() === 401);
+    const runtimeVersion = page.waitForResponse((response) => runtimeRetryRejected &&
+      response.url() === `${origin}/daemon.StartedService/GetVersion` && response.ok());
+    await page.evaluate(() => window.dispatchEvent(new Event("singdeck-fixture-end-SubscribeStatus")));
+    await runtimeRejected;
+    expect(await (await runtimeVersion).finished()).toBeNull();
+    await expect(page.getByText("Runtime status access was denied. Check the runtime API access policy.", { exact: true })).toBeVisible();
+    await expect(page.getByText(/^Authentication failed/)).toHaveCount(0);
+    await expect(openvpn).toHaveCount(0);
+    expect(await rememberedMarker()).toBe(savedMarker);
+    await page.unroute(runtimeStatus);
+
+    await page.reload();
+    await expect(openvpn.getByText("Connecting", { exact: true })).toBeVisible();
+    const openconnectStatus = `${origin}/daemon.StartedService/SubscribeOpenConnectStatus`;
+    const vpnUnavailable = page.getByText("VPN endpoint status is unavailable on this instance.", { exact: true });
+    await page.route(openconnectStatus, (route) => route.fulfill({ status: 404 }), { times: 1 });
+    await chooseOpenConnect.click();
+    await expect(vpnUnavailable).toBeVisible();
+
+    const serviceStatus = `${origin}/daemon.StartedService/SubscribeServiceStatus`;
+    const priorVpnRequests = calls.length;
+    let serviceRetryRejected = false;
+    await page.route(serviceStatus, (route) => {
+      serviceRetryRejected = true;
+      return route.fulfill({ status: 401 });
+    }, { times: 1 });
+    const deniedService = page.waitForResponse((response) => response.url() === serviceStatus && response.status() === 401);
+    const serviceVersion = page.waitForResponse((response) => serviceRetryRejected &&
+      response.url() === `${origin}/daemon.StartedService/GetVersion` && response.ok());
+    await page.evaluate(() => window.dispatchEvent(new Event("singdeck-fixture-end-SubscribeServiceStatus")));
+    await deniedService;
+    expect(await (await serviceVersion).finished()).toBeNull();
+    const serviceDenial = page.getByText("Service status access was denied. Check the service API access policy.", { exact: true });
+    await expect(serviceDenial).toBeVisible();
+    await expect(vpnUnavailable).toHaveCount(0);
+    await chooseOpenVPN.click();
+    await expect(serviceDenial).toBeVisible();
+    await chooseOpenConnect.click();
+    await expect(serviceDenial).toBeVisible();
+    await expect(vpnUnavailable).toHaveCount(0);
+    await expect(vpnDenial).toHaveCount(0);
+    await expect(page.getByText(/^Authentication failed/)).toHaveCount(0);
+    expect(calls).toHaveLength(priorVpnRequests);
+    expect(await rememberedMarker()).toBe(savedMarker);
+  } finally {
+    if (core?.pid && core.exitCode === null && core.signalCode === null) {
+      const exited = once(core, "exit");
+      core.kill();
+      await exited;
+    }
+    if (reservation?.pid && reservation.exitCode === null && reservation.signalCode === null) {
+      const exited = once(reservation, "exit");
+      reservation.stdin!.end();
+      await exited;
+    }
+    await rm(directory, { recursive: true, force: true });
   }
 });

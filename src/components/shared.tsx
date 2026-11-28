@@ -187,6 +187,8 @@ export function ChannelState({
                 outbounds: "Outbounds",
                 clashMode: "Clash Mode",
                 usbip: "USB/IP server status",
+                openconnect: "OpenConnect",
+                openvpn: "OpenVPN",
                 logs: "Logs",
                 connections: "Connections",
                 notifications: "Notifications",

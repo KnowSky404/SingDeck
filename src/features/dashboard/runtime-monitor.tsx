@@ -10,7 +10,7 @@ import {
 } from "recharts";
 import { useWorkspace } from "@/app/context";
 import { notificationStreamState } from "@/api/runtime";
-import type { Channel, Snapshot } from "@/api/state";
+import { isNativeStatusChannel, type Channel, type Snapshot } from "@/api/state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Choice, EmptyState, Notice, Panel } from "@/components/shared";
@@ -29,6 +29,8 @@ const streamLabels: Record<Channel, string> = {
   outbounds: "Outbound inventory",
   clashMode: "Clash Mode",
   usbip: "USB/IP server status",
+  openconnect: "OpenConnect",
+  openvpn: "OpenVPN",
   notifications: "Notifications",
 };
 const serviceLabels = ["Idle", "Starting", "Running", "Stopping", "Fatal"];
@@ -85,7 +87,7 @@ function summarizeRates(samples: Sample[], key: "up" | "down") {
 function streamState(snapshot: Snapshot, channel: Channel, statusStale: boolean, streamsAborted: boolean): string {
   if (channel === "notifications") return notificationStreamState(snapshot, streamsAborted);
   if (snapshot.phase === "disconnected") return "Disconnected";
-  if (channel === "clashMode" || channel === "usbip") return "Inactive";
+  if (channel === "clashMode" || isNativeStatusChannel(channel)) return "Inactive";
   if (snapshot.streamErrors[channel]) return "Interrupted";
   if (channel === "outbounds") return "Inactive";
   if (streamsAborted) return "Unavailable";
@@ -227,7 +229,7 @@ export default function RuntimeMonitor() {
             </thead>
             <tbody>
               {(Object.keys(streamLabels) as Channel[]).map((channel) => {
-                if ((channel === "clashMode" || channel === "usbip") &&
+                if ((channel === "clashMode" || isNativeStatusChannel(channel)) &&
                   snapshot.capabilities[channel].status !== "supported")
                   return null;
                 const state = streamState(snapshot, channel, stale, streamsAborted);
