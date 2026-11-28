@@ -32,6 +32,7 @@ import {
   type RememberedSelection,
 } from "@/features/instances/remembered-connection";
 import { WorkspaceContext } from "./context";
+import { loadDefaultWorkspacePage, saveDefaultWorkspacePage, type DefaultWorkspacePage } from "./default-workspace-page";
 import {
   loadDisplayPreferences,
   loadSavedOverviewLayout,
@@ -145,6 +146,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     document.documentElement.lang = language === "zh" ? "zh-CN" : "en";
     document.title = t("SingDeck · Network workspace");
   }, [language, t]);
+  const [defaultWorkspacePage, setDefaultWorkspacePageState] = useState(loadDefaultWorkspacePage);
+  function setDefaultWorkspacePage(page: DefaultWorkspacePage) {
+    saveDefaultWorkspacePage(page);
+    setDefaultWorkspacePageState(page);
+  }
   const [mockControl] = useState(() => new MockControl());
   const profile =
     activeId === "demo"
@@ -522,6 +528,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         setOverviewLayout,
         refreshOverviewLayout,
         applyDisplayPreferences,
+        defaultWorkspacePage,
+        setDefaultWorkspacePage,
         t,
         saveProfile,
         selectProfile,

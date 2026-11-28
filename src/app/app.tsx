@@ -52,6 +52,7 @@ import { version } from "../../package.json";
 import { cn } from "@/lib/utils";
 import { useDesktopAlerts } from "@/features/notifications/desktop";
 import type { InstanceSession } from "@/api/session";
+import type { DefaultWorkspacePage } from "./default-workspace-page";
 
 const Overview = lazy(() => import("@/features/dashboard/page"));
 const RuntimeMonitor = lazy(() => import("@/features/dashboard/runtime-monitor"));
@@ -101,7 +102,7 @@ const links = [
     icon: Settings,
   },
 ];
-const currentPath = () => location.hash.slice(1) || "/";
+const currentHash = () => location.hash.slice(1);
 const noOpenGroups: ReadonlySet<string> = new Set<string>();
 const subscribeToastVisibility = (listener: () => void) => {
   const portals = new MutationObserver(listener);
@@ -314,6 +315,7 @@ export default function App() {
     remembering,
     disconnecting,
     storageError,
+    defaultWorkspacePage,
     t,
   } = useWorkspace();
   const desktopAlerts = useDesktopAlerts(session, snapshot.notifications, t);
@@ -323,24 +325,62 @@ export default function App() {
     topologyGeneration: number;
     tag: string;
   }>();
+  const [defaultPageEntry, setDefaultPageEntry] = useState<{
+    session: InstanceSession;
+    pendingPath?: DefaultWorkspacePage;
+  }>();
   const subscribeHash = useCallback((listener: () => void) => {
     const onHashChange = (event: HashChangeEvent) => {
+      const nextHash = new URL(event.newURL).hash;
       // A quick Back can restore the hash before React renders the route that was visited.
-      if (new URL(event.oldURL).hash === "#/proxies" && new URL(event.newURL).hash !== "#/proxies")
+      if (new URL(event.oldURL).hash === "#/proxies" && nextHash !== "#/proxies")
         setReportedOutbound(undefined);
+      if (nextHash && session.profile.mode === "native" && session.getSnapshot().loaded.status) {
+        setDefaultPageEntry((entry) => entry?.session === session && !entry.pendingPath ? entry : { session });
+      }
       listener();
     };
     addEventListener("hashchange", onHashChange);
     return () => removeEventListener("hashchange", onHashChange);
-  }, []);
-  const path = useSyncExternalStore(subscribeHash, currentPath);
+  }, [session]);
+  const hash = useSyncExternalStore(subscribeHash, currentHash);
+  const workspaceOpen = snapshot.loaded.status && !disconnecting;
+  const nativeWorkspaceOpen = workspaceOpen && profile.mode === "native";
+  const firstNativeEntry = nativeWorkspaceOpen && defaultPageEntry?.session !== session;
+  const canApplyDefaultPage = nativeWorkspaceOpen && snapshot.phase === "connected" && Boolean(snapshot.status) &&
+    !snapshot.streamErrors.status && !snapshot.authenticationFailed;
+  const firstVerifiedEntry = firstNativeEntry && canApplyDefaultPage;
+  const pendingDefault = canApplyDefaultPage && !hash && defaultPageEntry?.session === session
+    ? defaultPageEntry : undefined;
+  if (!nativeWorkspaceOpen) {
+    if (defaultPageEntry) setDefaultPageEntry(undefined);
+  } else if (hash && (firstNativeEntry || defaultPageEntry?.pendingPath)) {
+    // Back uses normal routing after the open shell has shown an explicit route.
+    setDefaultPageEntry({ session });
+  } else if (!hash && firstVerifiedEntry) {
+    setDefaultPageEntry({ session, pendingPath: defaultWorkspacePage });
+  }
+  // An initial status frame can open the shell before a page can be selected.
+  const waitingForDefaultPage = firstNativeEntry && !hash && !canApplyDefaultPage;
+  const path = hash || (firstVerifiedEntry ? defaultWorkspacePage : pendingDefault?.pendingPath) ||
+    (waitingForDefaultPage ? "" : "/");
+  useLayoutEffect(() => {
+    if (!pendingDefault?.pendingPath) return;
+    const url = new URL(location.href);
+    if (url.hash) return;
+    const oldURL = url.href;
+    url.hash = pendingDefault.pendingPath;
+    history.replaceState(history.state, "", url);
+    // Replacing the URL does not notify the hash store. The event also consumes the pending path.
+    window.dispatchEvent(new HashChangeEvent("hashchange", { oldURL, newURL: url.href }));
+  }, [pendingDefault]);
+
   const diagnosticTool = path === "/diagnostics/stun" ? "stun"
     : path === "/diagnostics" ? "networkQuality" : undefined;
   const pagePath = diagnosticTool ? "/diagnostics" : path;
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [path]);
-  const workspaceOpen = snapshot.loaded.status && !disconnecting;
   const canRetainGroupExpansion = workspaceOpen && !snapshot.authenticationFailed;
   const freshGroups = snapshot.streamErrors.groups ? undefined : snapshot.groups;
   const [groupExpansion, setGroupExpansion] = useState<{
@@ -527,7 +567,7 @@ export default function App() {
                 </div>
               }
             >
-              {path === "/proxies" ? (
+              {waitingForDefaultPage ? null : path === "/proxies" ? (
                 <Proxies
                   key={pageKey}
                   showInventory={showInventory}

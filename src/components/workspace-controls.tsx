@@ -11,6 +11,8 @@ import {
 import type { ReactNode } from "react";
 import { Popover, RadioGroup } from "radix-ui";
 import { useWorkspace } from "@/app/context";
+import { defaultWorkspacePages, parseDefaultWorkspacePage } from "@/app/default-workspace-page";
+import { Choice } from "@/components/shared";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -97,7 +99,7 @@ function DisplayOption({
 }
 
 function DisplaySettings() {
-  const { t, theme, setTheme, language, setLanguage } = useWorkspace();
+  const { t, theme, setTheme, language, setLanguage, defaultWorkspacePage, setDefaultWorkspacePage } = useWorkspace();
   const label = t("Display settings");
 
   return (
@@ -122,7 +124,7 @@ function DisplaySettings() {
           align="end"
           sideOffset={6}
           collisionPadding={8}
-          className="z-50 grid w-44 gap-2 rounded-xl border border-border bg-popover p-2.5 text-popover-foreground shadow-md"
+          className="z-50 grid max-h-(--radix-popover-content-available-height) w-44 gap-2 overflow-y-auto rounded-xl border border-border bg-popover p-2.5 text-popover-foreground shadow-md"
         >
           <div className="grid gap-1">
             <span
@@ -183,6 +185,17 @@ function DisplaySettings() {
                 </DisplayOption>
               ))}
             </RadioGroup.Root>
+          </div>
+          <div className="grid gap-1 border-t border-border pt-2">
+            <span aria-hidden="true" className="px-1 text-xs font-medium text-muted-foreground">
+              {t("Default workspace page")}
+            </span>
+            <Choice
+              label="Default workspace page"
+              value={defaultWorkspacePage}
+              onChange={(value) => setDefaultWorkspacePage(parseDefaultWorkspacePage(value))}
+              options={defaultWorkspacePages.map(({ value, label }) => ({ value, label: t(label) }))}
+            />
           </div>
         </Popover.Content>
       </Popover.Portal>

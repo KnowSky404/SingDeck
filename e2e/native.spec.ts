@@ -3,7 +3,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { createSocket } from "node:dgram";
 import { once } from "node:events";
-import { readFile, writeFile, mkdtemp, rm } from "node:fs/promises";
+import { readFile, readdir, writeFile, mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
@@ -116,6 +116,191 @@ const test = base.extend<{ core: { secret: string; httpPort: number; stunServer:
 
 test.use({ trace: "off" });
 test.describe.configure({ mode: "default" });
+
+test("browser waits for native status before applying a blank default workspace route", async ({
+  page,
+  core: { secret },
+}) => {
+  const origin = "http://127.0.0.1:19190";
+  const statusURL = `${origin}/daemon.StartedService/SubscribeStatus`;
+  const assets = resolve("dist/assets");
+  const files = await readdir(assets);
+  const overviewPages = await Promise.all(files.filter((name) => /^page-.+\.js$/.test(name)).map(async (name) => ({
+    name,
+    // All lazy page entries use the same filename prefix. Only Overview defines this chart gradient.
+    overview: (await readFile(resolve(assets, name), "utf8")).includes("download-fill"),
+  })));
+  const overviewFiles = overviewPages.filter(({ overview }) => overview).map(({ name }) => name);
+  const chartFiles = files.filter((name) => /^CartesianChart-.+\.js$/.test(name));
+  expect(overviewFiles).toHaveLength(1);
+  expect(chartFiles).toHaveLength(1);
+  const overviewAssets = new Set([...overviewFiles, ...chartFiles].map((name) => `${origin}/dashboard/assets/${name}`));
+  const requestedOverviewAssets = new Set<string>();
+  page.on("request", (request) => {
+    if (overviewAssets.has(request.url())) requestedOverviewAssets.add(request.url());
+  });
+
+  await page.addInitScript(() => {
+    const changesPreference = new URLSearchParams(location.search).get("route") === "short-lived-preference";
+    localStorage.setItem("singdeck.default-workspace-page", changesPreference ? "/" : "/logs");
+  });
+  const rememberedMarker = () => page.evaluate(() => localStorage.getItem("singdeck.remembered-connection")?.[0] ?? null);
+
+  for (const scenario of [
+    { query: "late", initialHash: "", lateHash: "#/connections", hash: "#/connections", heading: "Connections" },
+    { query: "short-lived", initialHash: "", lateHash: "", hash: "#/logs", heading: "Logs" },
+    { query: "short-lived-preference", initialHash: "", lateHash: "", hash: "#/logs", heading: "Logs" },
+    { query: "terminal", initialHash: "", lateHash: "", hash: "#/connections", heading: "Connections" },
+    { query: "default", initialHash: "", lateHash: "", hash: "#/logs", heading: "Logs" },
+    { query: "remembered", initialHash: "", lateHash: "", hash: "#/logs", heading: "Logs" },
+    { query: "short-lived-back", initialHash: "", lateHash: "", hash: "", heading: "Overview" },
+    { query: "explicit", initialHash: "#/", lateHash: "", hash: "#/", heading: "Overview" },
+  ]) {
+    const backDuringRetry = scenario.query === "short-lived-back";
+    const changePreference = scenario.query === "short-lived-preference";
+    const terminalStatus = scenario.query === "terminal";
+    const firstStatusEnds = scenario.query === "short-lived" || backDuringRetry || changePreference || terminalStatus;
+    requestedOverviewAssets.clear();
+    let statusRequests = 0;
+    let releaseInitialStatus!: () => void;
+    const holdInitialStatus = new Promise<void>((release) => { releaseInitialStatus = release; });
+    let releaseStatus!: () => void;
+    const holdStatus = new Promise<void>((release) => { releaseStatus = release; });
+    await page.route(statusURL, async (route) => {
+      if (++statusRequests === 1 && firstStatusEnds) {
+        await holdInitialStatus;
+        const trailer = Buffer.from(`grpc-status: ${terminalStatus ? 3 : 0}\r\n`);
+        // One empty protobuf Status message followed by EOF or non-retryable InvalidArgument.
+        const body = Buffer.concat([Buffer.alloc(5), Buffer.from([0x80, 0, 0, 0, trailer.length]), trailer]);
+        await route.fulfill({ contentType: "application/grpc-web+proto", body });
+        return;
+      }
+      await holdStatus;
+      await route.continue();
+    });
+
+    try {
+      const start = `${origin}/dashboard/?route=${scenario.query}`;
+      const statusRequest = page.waitForRequest(statusURL);
+      await page.goto(start + scenario.initialHash);
+      if (scenario.query !== "remembered") {
+        if (scenario.query === "default") {
+          await page.getByRole("switch", { name: "Remember this device" }).click();
+        }
+        await page.getByLabel("Bearer token", { exact: true }).fill(secret);
+        await page.getByRole("button", { name: "Connect", exact: true }).click();
+      }
+      await statusRequest;
+      await expect(page).toHaveURL(start + scenario.initialHash);
+      await expect(page.getByRole("navigation")).toHaveCount(0);
+      expect(requestedOverviewAssets.size).toBe(0);
+
+      if (scenario.lateHash) {
+        await page.evaluate((hash) => { location.hash = hash; }, scenario.lateHash);
+        await expect(page).toHaveURL(start + scenario.lateHash);
+      }
+      if (firstStatusEnds) {
+        const initialResponse = page.waitForResponse(statusURL);
+        releaseInitialStatus();
+        expect((await initialResponse).status()).toBe(200);
+        if (terminalStatus) {
+          const notice = page.getByRole("alert").filter({ hasText: "Connection failed" });
+          await expect(notice).toBeVisible();
+          await expect(notice).toContainText("The instance rejected this request. Check the selected resource.");
+        } else {
+          await expect(page.getByText("Reconnecting · data may be stale", { exact: true })).toBeVisible();
+          await expect.poll(() => statusRequests).toBe(2);
+        }
+        await expect(page).toHaveURL(start);
+        await expect(page.locator('nav a[aria-current="page"]')).toHaveCount(0);
+        await expect(page.getByRole("heading", { name: "Overview", exact: true })).toHaveCount(0);
+        expect(requestedOverviewAssets.size).toBe(0);
+
+        if (changePreference) {
+          const settings = page.getByRole("button", { name: "Display settings", exact: true });
+          const picker = page.getByRole("combobox", { name: "Default workspace page", exact: true });
+          await settings.click();
+          await expect(picker).toHaveText("Overview");
+          await picker.click();
+          await page.getByRole("option", { name: "Logs", exact: true }).click();
+          await expect(picker).toHaveText("Logs");
+          await settings.click();
+          await expect(page).toHaveURL(start);
+          await expect(page.locator('nav a[aria-current="page"]')).toHaveCount(0);
+          expect(requestedOverviewAssets.size).toBe(0);
+        }
+
+        if (terminalStatus) {
+          await page.getByRole("button", { name: "Current connection", exact: true }).click();
+          await expect(page.getByRole("menuitem", { name: "Retry", exact: true })).toBeVisible();
+          await expect(page.getByRole("menuitem", { name: "Disconnect", exact: true })).toBeVisible();
+          await page.keyboard.press("Escape");
+        }
+
+        if (backDuringRetry || terminalStatus) {
+          await page.getByRole("navigation", { name: "Main navigation", exact: true })
+            .getByRole("link", { name: "Connections", exact: true }).click();
+          await expect(page).toHaveURL(start + "#/connections");
+          await expect(page.getByRole("heading", { name: "Connections", exact: true })).toBeVisible();
+          expect(requestedOverviewAssets.size).toBe(0);
+          if (terminalStatus) {
+            expect(statusRequests).toBe(1);
+            continue;
+          }
+          await page.goBack();
+          await expect(page).toHaveURL(start);
+          await expect(page.getByRole("heading", { name: "Overview", exact: true })).toBeVisible();
+          expect(requestedOverviewAssets).toEqual(overviewAssets);
+        }
+      }
+
+      const statusResponse = page.waitForResponse(statusURL);
+      releaseStatus();
+      expect((await statusResponse).status()).toBe(200);
+      if (backDuringRetry) {
+        await expect(page.getByRole("status").filter({ hasText: /^Connected$/ })).toBeVisible();
+      }
+      await expect(page.getByRole("heading", { name: scenario.heading, exact: true })).toBeVisible();
+      await expect(page).toHaveURL(start + scenario.hash);
+      expect(requestedOverviewAssets).toEqual(scenario.heading === "Overview" ? overviewAssets : new Set());
+
+      if (scenario.query === "default") await expect.poll(rememberedMarker).toBe("+");
+      if (scenario.query === "remembered") {
+        await page.getByRole("button", { name: "Current connection", exact: true }).click();
+        await page.getByRole("menuitem", { name: "Disconnect", exact: true }).click();
+        await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeEnabled();
+        await expect.poll(rememberedMarker).toBeNull();
+      }
+    } finally {
+      releaseInitialStatus();
+      releaseStatus();
+      await page.unroute(statusURL);
+    }
+  }
+
+  const original = `${origin}/dashboard/?route=back`;
+  const overview = page.getByRole("heading", { name: "Overview", exact: true });
+  await page.goto(original);
+  await page.evaluate(() => history.replaceState({ entry: "blank" }, ""));
+  await page.getByRole("button", { name: "Explore demo", exact: true }).click();
+  await expect(overview).toBeVisible();
+  await expect(page).toHaveURL(original + "#/");
+  await page.getByRole("button", { name: "Current connection", exact: true }).click();
+  await page.getByRole("menuitem", { name: "Disconnect", exact: true }).click();
+
+  await page.getByLabel("Bearer token", { exact: true }).fill(secret);
+  await page.getByRole("button", { name: "Connect", exact: true }).click();
+  await expect(overview).toBeVisible();
+  await expect(page.getByText("Mock mode", { exact: true })).toHaveCount(0);
+  await expect(page).toHaveURL(original + "#/");
+  await page.goBack();
+  await page.evaluate(() => new Promise<void>((resolve) =>
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+  ));
+  await expect(page).toHaveURL(original);
+  await expect(overview).toBeVisible();
+  expect(await page.evaluate(() => history.state)).toEqual({ entry: "blank" });
+});
 
 test("browser completes local network quality and STUN diagnostics through the native service", async ({
   page,
