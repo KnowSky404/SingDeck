@@ -422,6 +422,7 @@ const zh: Record<string, string> = {
   "Dynamic USB/IP servers": "动态 USB/IP 服务",
   "Unnamed server": "未命名服务",
   "Shared devices": "共享设备",
+  "Reported attached devices": "已附加设备数（核心报告）",
   "Back to Settings": "返回设置",
   "Clash Mode": "Clash 模式",
   "Current mode": "当前模式",

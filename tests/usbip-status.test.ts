@@ -46,6 +46,20 @@ function renderStatus(snapshot: Snapshot) {
   }, createElement(USBIPStatus)));
 }
 
+it.each([false, true])("only shows the reported attached count when ready: %s", (serviceActionsReady) => {
+  const html = renderStatus({
+    ...initialSnapshot(),
+    phase: "connected",
+    service: create(ServiceStatusSchema, { status: ServiceStatus_Type.STARTED }),
+    serviceActionsReady,
+    usbipServers: [{ tag: "server", deviceCount: 2, attachedCount: 1 }],
+  });
+
+  expect(html).toContain("<dt>Shared devices</dt><dd>2</dd>");
+  expect(html.includes("Reported attached devices")).toBe(serviceActionsReady);
+  expect(html.includes("<dt>Reported attached devices</dt><dd>1</dd>")).toBe(serviceActionsReady);
+});
+
 it.each([
   [ServiceStatus_Type.IDLE, "The core service is stopped. Start it to view USB/IP status."],
   [ServiceStatus_Type.FATAL, "The service reported a fatal error. Inspect the instance locally."],

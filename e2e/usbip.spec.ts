@@ -63,12 +63,16 @@ test("reads USB/IP server status through the native detail stream", async ({ pag
     await page.getByRole("button", { name: "Connect", exact: true }).click();
     const entry = page.getByRole("link", { name: "USB/IP server status" });
     await expect(entry).toBeVisible();
+    await expect(page.getByText("Reported attached devices", { exact: true })).toHaveCount(0);
     expect(calls).toBe(0);
     await entry.press("Enter");
     await expect(page.getByRole("heading", { name: "USB/IP server status", level: 1 })).toBeFocused();
     const server = page.getByRole("listitem").filter({ hasText: "fixture-dynamic-usb" });
     await expect(server.getByRole("heading", { name: "fixture-dynamic-usb" })).toBeVisible();
-    await expect(server.getByText("0", { exact: true })).toBeVisible();
+    for (const label of ["Shared devices", "Reported attached devices"]) {
+      const value = server.getByText(label, { exact: true }).locator("..").locator("dd");
+      await expect(value).toHaveText("0");
+    }
     expect(calls).toBe(1);
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
@@ -76,6 +80,7 @@ test("reads USB/IP server status through the native detail stream", async ({ pag
     await page.getByRole("link", { name: "Back to Settings" }).click();
     await aborted;
     await expect(entry).toBeVisible();
+    await expect(page.getByText("Reported attached devices", { exact: true })).toHaveCount(0);
   } finally {
     if (core.pid && core.exitCode === null && core.signalCode === null) {
       const exited = once(core, "exit");

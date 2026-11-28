@@ -42,7 +42,7 @@ export default function USBIPStatus() {
   } else {
     content = (
       <ul className="divide-y">
-        {servers.map(({ tag, deviceCount }, index) => (
+        {servers.map(({ tag, deviceCount, attachedCount }, index) => (
           <li key={index} className="py-3">
             <h3 className="font-medium wrap-anywhere">{tag || t("Unnamed server")}</h3>
             <dl className="detail-list">
@@ -50,6 +50,12 @@ export default function USBIPStatus() {
                 <dt>{t("Shared devices")}</dt>
                 <dd>{deviceCount}</dd>
               </div>
+              {snapshot.serviceActionsReady && (
+                <div>
+                  <dt>{t("Reported attached devices")}</dt>
+                  <dd>{attachedCount}</dd>
+                </div>
+              )}
             </dl>
           </li>
         ))}
