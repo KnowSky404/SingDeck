@@ -29,6 +29,24 @@ function activate(button: Locator, isMobile: boolean) {
   return isMobile ? button.tap() : button.press("Enter");
 }
 
+async function expectLayoutReview(dialog: Locator, isMobile: boolean) {
+  await expect(dialog.getByText("Overview layout changed. Review it and continue editing.", { exact: true })).toBeVisible();
+  const continueEditing = dialog.getByRole("button", { name: "Continue editing", exact: true });
+  await expect(continueEditing).toBeEnabled();
+  await expect(continueEditing).toBeFocused();
+  await expect(dialog.getByRole("button", { name: /^(Move |Reset layout$)/, disabled: false })).toHaveCount(0);
+  if (isMobile) await expect(continueEditing).toBeInViewport({ ratio: 1 });
+  return continueEditing;
+}
+
+async function acknowledgeLayoutReview(continueEditing: Locator, action: Locator, isMobile: boolean) {
+  await activate(continueEditing, isMobile);
+  await expect(continueEditing).toBeHidden();
+  await expect(action).toBeEnabled();
+  await expect(action).toBeFocused();
+  if (isMobile) await expect(action).toBeInViewport({ ratio: 1 });
+}
+
 async function demo(page: Page, language: "en" | "zh") {
   const label = language === "zh" ? "体验演示" : "Explore demo";
   await page.getByRole("button", { name: label, exact: true }).click();
@@ -255,6 +273,281 @@ test("Overview restores another tab's panel order before saving a metric move", 
     overviewLayout: { metrics: ["download", "upload", "connections", "memory"], panels },
   });
   expect(await stored(page)).toBe(fixtureBaseline);
+});
+
+test("Overview keeps an imported layout when another tab acts on an older open dialog", async ({ context, page, isMobile }) => {
+  await context.addInitScript(({ key, initial }) => {
+    if (localStorage.getItem(key) === null) localStorage.setItem(key, initial);
+  }, { key: preferenceKey, initial: fixtureBaseline });
+  const other = await context.newPage();
+  if (isMobile) {
+    await page.setViewportSize({ width: 320, height: 210 });
+    await other.setViewportSize({ width: 320, height: 740 });
+  }
+
+  await page.goto("/");
+  await demo(page, "en");
+  await activate(page.getByRole("button", { name: "Customize Overview", exact: true }), isMobile);
+  const dialog = page.getByRole("dialog", { name: "Customize Overview", exact: true });
+  const metricRows = dialog.getByRole("list", { name: "Metric cards", exact: true }).getByRole("listitem");
+  const panelRows = dialog.getByRole("list", { name: "Detail panels", exact: true }).getByRole("listitem");
+  const uploadUp = dialog.getByRole("button", { name: "Move Upload up", exact: true });
+  await expect(metricRows).toHaveText(legacyMetrics);
+  await expect(panelRows).toHaveText(legacyPanels);
+
+  await other.goto("/");
+  await demo(other, "en");
+  await navigate(other, "Settings", isMobile);
+  await chooseFile(other, isMobile, imported);
+  await expect(other.getByText("已导入显示偏好。", { exact: true })).toBeVisible();
+  await expectDisplay(other, "zh", "dark");
+  const importedSnapshot = await stored(other);
+  expect(importedSnapshot).not.toBe(fixtureBaseline);
+  const { revision } = JSON.parse(importedSnapshot!);
+  const layoutOverride = () => page.evaluate(key => localStorage.getItem(key), `${preferenceKey}.${revision}.overviewLayout`);
+
+  await page.bringToFront();
+  await expect(metricRows).toHaveText(legacyMetrics);
+  await expect(panelRows).toHaveText(legacyPanels);
+  await activate(uploadUp, isMobile);
+  const continueEditing = await expectLayoutReview(dialog, isMobile);
+  await expect(metricRows).toHaveText(["Memory", "Upload", "Active connections", "Download"]);
+  const panelTitles = ["Recent logs", "Instance details", "Outbound groups", "Traffic activity"];
+  await expect(panelRows).toHaveText(panelTitles);
+  await expect(uploadUp).toBeDisabled();
+  expect(await stored(page)).toBe(importedSnapshot);
+  expect(await layoutOverride()).toBeNull();
+  expect(await effectiveStored(page)).toEqual(imported);
+
+  await acknowledgeLayoutReview(continueEditing, uploadUp, isMobile);
+  expect(await stored(page)).toBe(importedSnapshot);
+  expect(await layoutOverride()).toBeNull();
+  expect(await effectiveStored(page)).toEqual(imported);
+
+  await activate(uploadUp, isMobile);
+  await expect(dialog.getByRole("status")).toHaveText("Moved Upload to position 1 of 4.");
+  await expect(metricRows).toHaveText(["Upload", "Memory", "Active connections", "Download"]);
+  await expect(panelRows).toHaveText(panelTitles);
+  await expect.poll(() => effectiveStored(page)).toEqual({
+    ...imported,
+    overviewLayout: { ...imported.overviewLayout, metrics: ["upload", "memory", "connections", "download"] },
+  });
+  expect(await stored(page)).toBe(importedSnapshot);
+
+  await other.reload();
+  await expectDisplay(other, "zh", "dark");
+  await demo(other, "zh");
+  await expectOverview(other, ["上传", "内存", "活动连接", "下载"], importedPanels);
+});
+
+for (const input of ["keyboard", "pointer"] as const) {
+  test(`Overview requires acknowledgement before resetting after a stale ${input} action`, async ({ context, page, isMobile }) => {
+    test.skip(isMobile && input === "keyboard", "This case exercises native keyboard repeat.");
+    await context.addInitScript(({ key, initial }) => {
+      if (localStorage.getItem(key) === null) localStorage.setItem(key, initial);
+    }, { key: preferenceKey, initial: fixtureBaseline });
+    if (isMobile) await page.setViewportSize({ width: 320, height: 210 });
+    else if (input === "keyboard") await page.setViewportSize({ width: 1280, height: 480 });
+    await page.goto("/");
+    await demo(page, "en");
+    await activate(page.getByRole("button", { name: "Customize Overview", exact: true }), isMobile);
+    const dialog = page.getByRole("dialog", { name: "Customize Overview", exact: true });
+    const reset = dialog.getByRole("button", { name: "Reset layout", exact: true });
+    const metricRows = dialog.getByRole("list", { name: "Metric cards", exact: true }).getByRole("listitem");
+    await expect(metricRows).toHaveText(legacyMetrics);
+
+    const other = await context.newPage();
+    await other.goto("/");
+    await demo(other, "en");
+    await navigate(other, "Settings", isMobile);
+    await chooseFile(other, isMobile, imported);
+    await expect(other.getByText("已导入显示偏好。", { exact: true })).toBeVisible();
+    await expectDisplay(other, "zh", "dark");
+    const importedSnapshot = await stored(other);
+    const { revision } = JSON.parse(importedSnapshot!);
+    const layoutOverride = () => page.evaluate(key => localStorage.getItem(key), `${preferenceKey}.${revision}.overviewLayout`);
+    const expectImportPreserved = async () => {
+      expect(await stored(page)).toBe(importedSnapshot);
+      expect(await layoutOverride()).toBeNull();
+      expect(await effectiveStored(page)).toEqual(imported);
+    };
+
+    await page.bringToFront();
+    await expect(metricRows).toHaveText(legacyMetrics);
+    if (input === "keyboard") {
+      await reset.focus();
+      await page.keyboard.down("Enter");
+      try {
+        await expectLayoutReview(dialog, isMobile);
+        await expectImportPreserved();
+        await page.keyboard.down("Enter");
+        await expectLayoutReview(dialog, isMobile);
+        await expectImportPreserved();
+      } finally {
+        await page.keyboard.up("Enter");
+      }
+    } else if (isMobile) {
+      await reset.scrollIntoViewIfNeeded();
+      await expect(reset).toBeInViewport({ ratio: 1 });
+      const bounds = await reset.boundingBox();
+      expect(bounds).not.toBeNull();
+      const { x, y, width, height } = bounds!;
+      await page.touchscreen.tap(x + width / 2, y + height / 2);
+      await page.touchscreen.tap(x + width / 2, y + height / 2);
+    } else {
+      await reset.dblclick();
+    }
+    const continueEditing = await expectLayoutReview(dialog, isMobile);
+    await expect(reset).toBeDisabled();
+    await expectImportPreserved();
+
+    if (input === "keyboard") {
+      const order = dialog.getByRole("region", { name: "Overview card order", exact: true });
+      await page.keyboard.press("Shift+Tab");
+      await expect(order).toBeFocused();
+      await page.keyboard.press("PageDown");
+      await expect.poll(() => order.evaluate((container) => container.scrollTop)).toBeGreaterThan(0);
+      await page.keyboard.press("Tab");
+      await expect(continueEditing).toBeFocused();
+      await expectImportPreserved();
+    }
+
+    await acknowledgeLayoutReview(continueEditing, reset, isMobile);
+    await expectImportPreserved();
+
+    if (input === "keyboard") await page.keyboard.press("Enter");
+    else if (isMobile) await reset.tap();
+    else await reset.click();
+    await expect(dialog.getByRole("status")).toHaveText("Default layout restored.");
+    await expect(metricRows).toHaveText(["Download", "Upload", "Active connections", "Memory"]);
+    await expect.poll(() => effectiveStored(page)).toEqual({
+      ...imported,
+      overviewLayout: {
+        metrics: ["download", "upload", "connections", "memory"],
+        panels: ["traffic", "instance", "outbounds", "logs"],
+      },
+    });
+    expect(await stored(page)).toBe(importedSnapshot);
+  });
+}
+
+test("Overview rejects an unsaved move from before a same-order import", async ({ context, page, isMobile }) => {
+  await context.addInitScript(({ key, initial }) => {
+    if (localStorage.getItem(key) === null) localStorage.setItem(key, initial);
+  }, { key: preferenceKey, initial: fixtureBaseline });
+  await page.addInitScript(key => {
+    const write = Storage.prototype.setItem;
+    let writesDenied = true;
+    window.addEventListener("fixture-restore-layout-writes", () => { writesDenied = false; }, { once: true });
+    Storage.prototype.setItem = function (name, value) {
+      if (writesDenied && this === localStorage && name.startsWith(`${key}.`) && name.endsWith(".overviewLayout")) {
+        throw new DOMException("Fixture layout writes unavailable", "QuotaExceededError");
+      }
+      write.call(this, name, value);
+    };
+  }, preferenceKey);
+  await page.goto("/");
+  await demo(page, "en");
+  await activate(page.getByRole("button", { name: "Customize Overview", exact: true }), isMobile);
+  const dialog = page.getByRole("dialog", { name: "Customize Overview", exact: true });
+  const metricRows = dialog.getByRole("list", { name: "Metric cards", exact: true }).getByRole("listitem");
+  const panelRows = dialog.getByRole("list", { name: "Detail panels", exact: true }).getByRole("listitem");
+  const uploadUp = dialog.getByRole("button", { name: "Move Upload up", exact: true });
+
+  await activate(dialog.getByRole("button", { name: "Move Recent logs up", exact: true }), isMobile);
+  const unsavedPanels = ["Outbound groups", "Traffic activity", "Recent logs", "Instance details"];
+  await expect(panelRows).toHaveText(unsavedPanels);
+  expect(await effectiveStored(page)).toEqual(legacy);
+
+  const other = await context.newPage();
+  await other.goto("/");
+  await demo(other, "en");
+  await navigate(other, "Settings", isMobile);
+  const sameOrderImport = { ...legacy, theme: "dark" };
+  await chooseFile(other, isMobile, sameOrderImport);
+  await expect(other.getByText("Display preferences imported.", { exact: true })).toBeVisible();
+  const importedSnapshot = await stored(other);
+  const { revision } = JSON.parse(importedSnapshot!);
+  expect(revision).not.toBe(fixtureRevision);
+  const layoutOverride = () => page.evaluate(key => localStorage.getItem(key), `${preferenceKey}.${revision}.overviewLayout`);
+
+  await page.bringToFront();
+  await expect(panelRows).toHaveText(unsavedPanels);
+  await page.evaluate(() => window.dispatchEvent(new Event("fixture-restore-layout-writes")));
+  await activate(uploadUp, isMobile);
+  const continueEditing = await expectLayoutReview(dialog, isMobile);
+  await expect(uploadUp).toBeDisabled();
+  await expect(metricRows).toHaveText(legacyMetrics);
+  await expect(panelRows).toHaveText(legacyPanels);
+  expect(await stored(page)).toBe(importedSnapshot);
+  expect(await layoutOverride()).toBeNull();
+  expect(await effectiveStored(page)).toEqual(sameOrderImport);
+
+  await acknowledgeLayoutReview(continueEditing, uploadUp, isMobile);
+  expect(await stored(page)).toBe(importedSnapshot);
+  expect(await layoutOverride()).toBeNull();
+  expect(await effectiveStored(page)).toEqual(sameOrderImport);
+
+  await activate(uploadUp, isMobile);
+  await expect(dialog.getByRole("status")).toHaveText("Moved Upload to position 2 of 4.");
+  await expect(metricRows).toHaveText(["Download", "Upload", "Active connections", "Memory"]);
+  await expect(panelRows).toHaveText(legacyPanels);
+  await expect.poll(() => effectiveStored(page)).toEqual({
+    ...sameOrderImport,
+    overviewLayout: { ...legacy.overviewLayout, metrics: ["download", "upload", "connections", "memory"] },
+  });
+  expect(await stored(page)).toBe(importedSnapshot);
+});
+
+test("Overview keeps a temporary import editable after another tab imports preferences", async ({ context, page, isMobile }) => {
+  await page.addInitScript(({ key, initial }) => {
+    if (localStorage.getItem(key) === null) localStorage.setItem(key, initial);
+    const write = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (name, value) {
+      if (this === localStorage && name === key) throw new DOMException("Fixture import writes unavailable", "QuotaExceededError");
+      write.call(this, name, value);
+    };
+  }, { key: preferenceKey, initial: fixtureBaseline });
+  await page.goto("/");
+  await demo(page, "en");
+  await navigate(page, "Settings", isMobile);
+
+  const other = await context.newPage();
+  await other.goto("/");
+  await demo(other, "en");
+  await navigate(other, "Settings", isMobile);
+  await chooseFile(other, isMobile, imported);
+  await expect(other.getByText("已导入显示偏好。", { exact: true })).toBeVisible();
+  const importedSnapshot = await stored(other);
+  const { revision } = JSON.parse(importedSnapshot!);
+  const layoutOverride = () => page.evaluate(key => localStorage.getItem(key), `${preferenceKey}.${revision}.overviewLayout`);
+
+  await page.bringToFront();
+  const temporary = {
+    ...legacy,
+    overviewLayout: {
+      metrics: ["connections", "upload", "memory", "download"],
+      panels: ["instance", "logs", "traffic", "outbounds"],
+    },
+  };
+  await chooseFile(page, isMobile, temporary);
+  await expect(page.getByText("Display preferences applied for this visit. Browser storage is unavailable.", { exact: true }))
+    .toBeVisible();
+  await navigate(page, "Overview", isMobile);
+  const panelTitles = ["Instance details", "Recent logs", "Traffic activity", "Outbound groups"];
+  await expectOverview(page, ["Active connections", "Upload", "Memory", "Download"], panelTitles);
+
+  await activate(page.getByRole("button", { name: "Customize Overview", exact: true }), isMobile);
+  const dialog = page.getByRole("dialog", { name: "Customize Overview", exact: true });
+  await activate(dialog.getByRole("button", { name: "Move Upload up", exact: true }), isMobile);
+  await expect(dialog.getByRole("status")).toHaveText("Moved Upload to position 1 of 4.");
+  await expect(dialog.getByRole("list", { name: "Metric cards", exact: true }).getByRole("listitem"))
+    .toHaveText(["Upload", "Active connections", "Memory", "Download"]);
+  await expect(dialog.getByRole("list", { name: "Detail panels", exact: true }).getByRole("listitem")).toHaveText(panelTitles);
+  await expectDisplay(page, "en", "light");
+  expect(await stored(page)).toBe(importedSnapshot);
+  expect(await layoutOverride()).toBeNull();
+  expect(await effectiveStored(page)).toEqual(imported);
 });
 
 test("Concurrent display controls in two tabs persist independent changes to one import", async ({ context, page, isMobile }) => {

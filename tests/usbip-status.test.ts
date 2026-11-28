@@ -30,7 +30,7 @@ const workspace: Workspace = {
   t: translate("en"),
   setTheme: noop,
   setLanguage: noop,
-  setOverviewLayout: noop,
+  setOverviewLayout: () => true,
   refreshOverviewLayout: noop,
   applyDisplayPreferences: () => true,
   selectProfile: noop,
