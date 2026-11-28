@@ -18,6 +18,8 @@ import {
   NotificationEventSchema,
   USBDeviceState,
   USBIPServerStatusUpdateSchema,
+  OpenConnectStatusUpdateSchema,
+  OpenVPNStatusUpdateSchema,
   type Version,
 } from "@/proto/daemon/started_service_pb";
 import { CONNECTION_LIMIT } from "@/api/state";
@@ -277,6 +279,265 @@ describe("session lifecycle", () => {
     expect(s.getSnapshot().notifications).toHaveLength(0);
     expect(session().getSnapshot().notifications).toHaveLength(0);
   });
+  it("keeps only safe native VPN state and discards prior scopes on switch and stop", async () => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    const reflected = "fixture\tvpn-marker";
+    const sensitive = "synthetic-unsafe-vpn-detail";
+    const openconnect = vi.fn<typeof client.subscribeOpenConnectStatus>(async function* () {
+      yield create(OpenConnectStatusUpdateSchema, {
+        endpoints: [
+          {
+            endpointTag: reflected,
+            state: "connecting",
+            stateText: sensitive,
+            error: sensitive,
+            authChallenge: {
+              id: sensitive,
+              challenge: { case: "form", value: { fields: [{ name: "password", value: sensitive }] } },
+            },
+            tunnelInfo: { server: sensitive },
+          },
+          { endpointTag: "a".repeat(161), state: sensitive },
+          ...Array.from({ length: 100 }, () => ({ endpointTag: "fixture", state: "connected" })),
+        ],
+      });
+      await delay(1000, new AbortController().signal);
+      yield create(OpenConnectStatusUpdateSchema, { endpoints: [{ endpointTag: "late-openconnect" }] });
+    });
+    const openvpn = vi.fn<typeof client.subscribeOpenVPNStatus>(async function* (_, options) {
+      const signal = options!.signal!;
+      yield create(OpenVPNStatusUpdateSchema);
+      await delay(300, signal);
+      yield create(OpenVPNStatusUpdateSchema, {
+        endpoints: [{
+          endpointTag: encodeURIComponent(reflected),
+          state: "auth-pending",
+          stateText: sensitive,
+          error: sensitive,
+          challenge: { username: sensitive, message: sensitive, url: sensitive },
+          tunnelInfo: { server: sensitive },
+        }],
+      });
+      await delay(60_000, signal);
+    });
+    const s = new InstanceSession({
+      ...client,
+      subscribeOpenConnectStatus: openconnect,
+      subscribeOpenVPNStatus: openvpn,
+      async *subscribeServiceStatus(_, options) {
+        const signal = options!.signal!;
+        yield create(ServiceStatusSchema, { status: ServiceStatus_Type.STARTED });
+        await delay(2500, signal);
+        yield create(ServiceStatusSchema, { status: ServiceStatus_Type.STOPPING });
+        await delay(60_000, signal);
+      },
+    }, defaultProfile, reflected);
+    sessions.push(s);
+    s.connect();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(openconnect).not.toHaveBeenCalled();
+    expect(openvpn).not.toHaveBeenCalled();
+
+    s.setDetailChannel("openconnect");
+    await vi.advanceTimersByTimeAsync(200);
+    const status = s.getSnapshot().vpnStatus;
+    expect(status?.endpoints).toHaveLength(100);
+    expect(status?.truncated).toBe(true);
+    expect(status?.endpoints.slice(0, 2)).toEqual([
+      { tag: "[redacted]", state: "connecting" },
+      { tag: "a".repeat(160), state: "unknown" },
+    ]);
+    expect(openvpn).not.toHaveBeenCalled();
+
+    s.setDetailChannel("openvpn");
+    expect(s.getSnapshot().vpnStatus).toBeUndefined();
+    expect(openconnect.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+    await vi.advanceTimersByTimeAsync(150);
+    expect(s.getSnapshot().vpnStatus).toEqual({ endpoints: [], truncated: false });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(s.getSnapshot().vpnStatus).toEqual({
+      endpoints: [{ tag: "[redacted]", state: "auth-pending" }],
+      truncated: false,
+    });
+    expect(openconnect).toHaveBeenCalledTimes(1);
+    expect(openvpn).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(s.getSnapshot().vpnStatus).toBeUndefined();
+    expect(openvpn.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+  });
+
+  it("starts only the selected VPN stream after initial boot readiness", async () => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    let allowBoot!: () => void;
+    const bootReady = new Promise<void>((resolve) => { allowBoot = resolve; });
+    const getStartedAt = vi.fn<typeof client.getStartedAt>(async (...args) => {
+      await bootReady;
+      return client.getStartedAt(...args);
+    });
+    const openconnect = vi.fn(client.subscribeOpenConnectStatus);
+    const openvpn = vi.fn<typeof client.subscribeOpenVPNStatus>(async function* (_, options) {
+      yield create(OpenVPNStatusUpdateSchema);
+      await delay(60_000, options!.signal!);
+    });
+    const s = session(undefined, { ...client, getStartedAt,
+      subscribeOpenConnectStatus: openconnect, subscribeOpenVPNStatus: openvpn,
+    }, defaultProfile);
+    s.connect();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(getStartedAt).toHaveBeenCalledTimes(1);
+    s.setDetailChannel("openconnect");
+    s.setDetailChannel("openvpn");
+    await vi.advanceTimersByTimeAsync(200);
+    expect(openconnect).not.toHaveBeenCalled();
+    expect(openvpn).not.toHaveBeenCalled();
+
+    allowBoot();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(openconnect).not.toHaveBeenCalled();
+    expect(openvpn).toHaveBeenCalledTimes(1);
+    expect(s.getSnapshot().loaded.openvpn).toBe(true);
+  });
+
+  it.each([4, 5])("waits for primary recovery before dispatching VPN status on API %s", async (apiVersion) => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    let interrupt!: () => void;
+    const loseStatus = new Promise<void>((resolve) => { interrupt = resolve; });
+    let validate!: (version: Version) => void;
+    const validation = new Promise<Version>((resolve) => { validate = resolve; });
+    let publishStatus!: () => void;
+    const replacementStatus = new Promise<void>((resolve) => { publishStatus = resolve; });
+    let statusAttempts = 0;
+    const subscribeStatus = vi.fn<typeof client.subscribeStatus>(async function* (_, options) {
+      if (statusAttempts++ === 0) {
+        yield create(StatusSchema);
+        await loseStatus;
+        throw new ConnectError("controlled status interruption", Code.Unavailable);
+      }
+      await replacementStatus;
+      yield create(StatusSchema);
+      await delay(60_000, options!.signal!);
+    });
+    const getVersion = vi.fn(client.getVersion);
+    const openconnect = vi.fn<typeof client.subscribeOpenConnectStatus>(async function* (_, options) {
+      yield create(OpenConnectStatusUpdateSchema, { endpoints: [{ endpointTag: "fixture", state: "connecting" }] });
+      await delay(60_000, options!.signal!);
+    });
+    const openvpn = vi.fn<typeof client.subscribeOpenVPNStatus>(async function* (_, options) {
+      yield create(OpenVPNStatusUpdateSchema);
+      await delay(60_000, options!.signal!);
+    });
+    const s = session(undefined, { ...client, getVersion, subscribeStatus,
+      subscribeOpenConnectStatus: openconnect, subscribeOpenVPNStatus: openvpn,
+    }, defaultProfile);
+    s.connect();
+    await vi.advanceTimersByTimeAsync(500);
+    s.setDetailChannel("openconnect");
+    await vi.advanceTimersByTimeAsync(200);
+    expect(s.getSnapshot().vpnStatus?.endpoints).toEqual([{ tag: "fixture", state: "connecting" }]);
+
+    getVersion.mockClear().mockImplementationOnce(() => validation);
+    interrupt();
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(getVersion).toHaveBeenCalledTimes(1);
+    expect(openconnect.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+    expect(s.getSnapshot().vpnStatus).toBeUndefined();
+    s.setDetailChannel("openvpn");
+    expect(openvpn).not.toHaveBeenCalled();
+    validate(create(VersionSchema, { version: "1.14.0", apiVersion }));
+    await vi.advanceTimersByTimeAsync(200);
+    expect(openvpn).not.toHaveBeenCalled();
+    if (apiVersion === 5) {
+      expect(s.getSnapshot().phase).toBe("error");
+      return;
+    }
+    expect(subscribeStatus).toHaveBeenCalledTimes(2);
+    publishStatus();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(s.getSnapshot()).toMatchObject({ phase: "connected", loaded: { openvpn: true } });
+    expect(openconnect).toHaveBeenCalledTimes(1);
+    expect(openvpn).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears a VPN detail error while the same route waits for a fresh subscription", async () => {
+    vi.useFakeTimers();
+    const client = createMockClient();
+    const subscribeStatus = vi.fn(client.subscribeStatus).mockImplementationOnce(async function* (_, options) {
+      yield create(StatusSchema);
+      await delay(900, options!.signal!);
+      throw new ConnectError("controlled status interruption", Code.Unavailable);
+    });
+    const subscribeOpenConnectStatus = vi.fn<typeof client.subscribeOpenConnectStatus>(async function* (_, options) {
+      await delay(500, options!.signal!);
+      yield create(OpenConnectStatusUpdateSchema, { endpoints: [{ endpointTag: "fixture", state: "connecting" }] });
+      await delay(60_000, options!.signal!);
+    }).mockImplementationOnce(() => {
+      throw new ConnectError("controlled VPN absence", Code.NotFound);
+    });
+    const s = session(undefined, { ...client, subscribeStatus, subscribeOpenConnectStatus }, defaultProfile);
+    s.connect();
+    await vi.advanceTimersByTimeAsync(500);
+    s.setDetailChannel("openconnect");
+    await vi.advanceTimersByTimeAsync(200);
+    expect(s.getSnapshot().streamErrors.openconnect).toBeTruthy();
+    expect(s.getSnapshot().capabilities.openconnect.code).toBe(Code.NotFound);
+
+    await vi.advanceTimersByTimeAsync(250);
+    expect(s.getSnapshot().phase).toBe("reconnecting");
+    expect(s.getSnapshot().streamErrors.openconnect).toBeUndefined();
+    expect(subscribeOpenConnectStatus).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1150);
+    expect(subscribeOpenConnectStatus).toHaveBeenCalledTimes(2);
+    expect(s.getSnapshot().capabilities.openconnect.code).toBe(Code.NotFound);
+    expect(s.getSnapshot().streamErrors.openconnect).toBeUndefined();
+    expect(s.getSnapshot().vpnStatus).toBeUndefined();
+
+    await vi.advanceTimersByTimeAsync(500);
+    expect(s.getSnapshot().vpnStatus?.endpoints).toEqual([{ tag: "fixture", state: "connecting" }]);
+  });
+
+  it.each([
+    ["openconnect", false],
+    ["openconnect", true],
+    ["openvpn", false],
+    ["openvpn", true],
+  ] as const)("confirms a %s detail rejection before changing authentication (primary denied: %s)",
+    async (protocol, primaryDenied) => {
+      vi.useFakeTimers();
+      const client = createMockClient();
+      const method = protocol === "openconnect" ? "subscribeOpenConnectStatus" : "subscribeOpenVPNStatus";
+      const getVersion = vi.fn(client.getVersion);
+      const subscribeVpn = vi.fn(() => { throw new ConnectError("detail private text", Code.Unauthenticated); });
+      const s = session(undefined, { ...client, getVersion, [method]: subscribeVpn }, defaultProfile);
+      s.connect();
+      await vi.advanceTimersByTimeAsync(500);
+
+      let confirm!: () => void;
+      const confirmation = new Promise<Version>((resolve, reject) => {
+        confirm = () => {
+          if (primaryDenied) reject(new ConnectError("primary private text", Code.Unauthenticated));
+          else resolve(create(VersionSchema, { version: "1.14.0", apiVersion: 4 }));
+        };
+      });
+      getVersion.mockClear().mockImplementationOnce(() => confirmation);
+      s.setDetailChannel(protocol);
+      await vi.advanceTimersByTimeAsync(200);
+      expect(s.getSnapshot().streamErrors[protocol]).toBeTruthy();
+      expect(s.getSnapshot().streamErrors[protocol]).not.toContain("detail private text");
+      expect(s.getSnapshot().authenticationFailed).toBeFalsy();
+      expect(getVersion).toHaveBeenCalledTimes(1);
+      confirm();
+      await vi.advanceTimersByTimeAsync(300);
+      expect(Boolean(s.getSnapshot().authenticationFailed)).toBe(primaryDenied);
+      expect(subscribeVpn).toHaveBeenCalledTimes(1);
+      expect(getVersion).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it("limits USB/IP snapshots to the open detail scope and distinguishes absence from an unsupported stream", async () => {
     vi.useFakeTimers();
     const client = createMockClient();

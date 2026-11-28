@@ -50,6 +50,8 @@ Authorization and session redaction use the same effective Bearer token. Trailin
 | SetClashMode | mode (field 3) | Empty; the core may acknowledge an unknown name without changing mode |
 | GetStartedAt | Empty | startedAt Unix **milliseconds**, used for uptime |
 | SubscribeUSBIPServerStatus | Empty | stream USBIPServerStatusUpdate with configured dynamic USB/IP servers and their shared devices |
+| SubscribeOpenConnectStatus | Empty | stream OpenConnectStatusUpdate for configured OpenConnect endpoints |
+| SubscribeOpenVPNStatus | Empty | stream OpenVPNStatusUpdate for configured OpenVPN client endpoints |
 
 Status rates divide the native byte deltas by the requested interval in seconds. The initial sample, gaps, and counter resets leave the rate unavailable. Status frames carry no timestamps. Runtime Monitor uses browser receipt time for its observed history. Inbound counts and cumulative traffic require the core's traffic manager. The outbound count comes from the separate connection manager and is available on a running service even when traffic tracking is disabled. Memory is the process measurement exposed by the core's platform implementation. Zero memory is shown as unavailable. `GetStartedAt` measures service start time and can change after a reload in the same process. [Pinned status implementation](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/started_service.go#L463-L511) · [Core attachment](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/attached_service.go)
 
@@ -76,6 +78,10 @@ The v1.14.0 log stream carries only level and text. Its optional rendered contex
 Settings shows Clash Mode when the native service reports a mode manager. The core supplies selectable names. SingDeck confirms changes only from the live subscription, which also reports changes made by other clients. On a `with_clash_api` core, configure `experimental.clash_api` and omit `external_controller` to use native mode control without opening a Clash REST listener.
 
 The USB/IP status view opens from Settings and shares the fifth streaming slot while open. The pinned core only lists configured dynamic USB/IP servers. An empty list means the core reported no dynamic servers. A named server can report zero shared devices. The build stub returns NotFound, which the dashboard presents as unavailable. The dashboard keeps only bounded and redacted service labels and the reported device counts. [Pinned status implementation](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/started_service_usbip.go) · [Build stub](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/started_service_usbip_stub.go)
+
+The native VPN endpoint status view shares the detail stream slot and opens the selected protocol when the core service is ready. A protocol or route change cancels the previous subscription. During recovery the view waits for current service status. An authentication rejection on a VPN subscription stays scoped to the view unless a primary `GetVersion` also rejects the credential.
+
+The view displays up to 100 endpoint tags, each redacted and limited to 160 characters. It recognizes the native values `connecting`, `auth-pending`, `connected` and `error`. Other values display as unknown. SingDeck discards raw errors, state text, authentication challenges and tunnel metadata before publishing the workspace snapshot. An empty update reports no matching endpoints. The protocol build stubs reject configuration of those endpoint types, so an empty update cannot establish build support. [Pinned status subscriptions](https://github.com/SagerNet/sing-box/blob/v1.14.0/daemon/started_service.go#L1785-L1935)
 
 ## Native diagnostic semantics
 

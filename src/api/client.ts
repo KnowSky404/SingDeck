@@ -18,6 +18,8 @@ export type SingBoxClient = Pick<
   | "clearLogs"
   | "subscribeNotifications"
   | "subscribeUSBIPServerStatus"
+  | "subscribeOpenConnectStatus"
+  | "subscribeOpenVPNStatus"
   | "getDefaultLogLevel"
   | "subscribeConnections"
   | "closeConnection"

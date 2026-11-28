@@ -33,11 +33,13 @@ import {
   hasCurrentConnections,
   hasCurrentLogs,
   initialSnapshot,
+  isNativeStatusChannel,
   type Channel,
   type DetailChannel,
   type Snapshot,
 } from "./state";
 import type { Profile } from "@/features/instances/profiles";
+import { isVpnProtocol, projectVpnStatus } from "./vpn-status";
 import {
   dismissNotification,
   receiveLocalNotification,
@@ -123,10 +125,15 @@ const streamCapabilities: Partial<Record<Channel, CapabilityName>> = {
   status: "runtimeMonitoring",
   notifications: "notifications",
   usbip: "usbip",
+  openconnect: "openconnect",
+  openvpn: "openvpn",
 };
 
+const unloadedNativeStatus = { usbip: false, openconnect: false, openvpn: false };
+const clearedNativeStatusErrors = { usbip: undefined, openconnect: undefined, openvpn: undefined };
+
 function usesServiceDetailScope(channel: DetailChannel) {
-  return channel === "outbounds" || channel === "clashMode" || channel === "usbip";
+  return channel === "outbounds" || channel === "clashMode" || isNativeStatusChannel(channel);
 }
 
 function sameInventory(before: GroupItem[], after: GroupItem[]) {
@@ -241,6 +248,16 @@ export class InstanceSession {
       this.pending.usbipServers = undefined;
       this.pending.loaded = { ...this.pending.loaded, usbip: false };
     }
+    if (isVpnProtocol(this.detailChannel) && !this.canReadVpnStatus()) {
+      this.detailScope?.abort();
+      this.pending.vpnStatus = undefined;
+      if (this.pending.loaded[this.detailChannel]) {
+        this.pending.loaded = { ...this.pending.loaded, [this.detailChannel]: false };
+      }
+      if (this.pending.streamErrors[this.detailChannel]) {
+        this.pending.streamErrors = { ...this.pending.streamErrors, [this.detailChannel]: undefined };
+      }
+    }
     if ((patch.error && patch.error !== previous.error) || (patch.authenticationFailed && !previous.authenticationFailed))
       this.appendLocalNotification("apiConnection");
     if (patch.service?.status === ServiceStatus_Type.FATAL && previous.service?.status !== ServiceStatus_Type.FATAL)
@@ -348,6 +365,9 @@ export class InstanceSession {
       !this.revalidation && this.serviceRecoveryGeneration === undefined && !this.checkingBoot
     );
   }
+  private canReadVpnStatus() {
+    return this.profile.mode === "native" && !this.pending.authenticationFailed && this.canRunServiceAction();
+  }
   private interruptDiagnostic() {
     this.diagnosticScope?.abort(new ConnectError("Service interrupted", Code.Unavailable));
   }
@@ -370,6 +390,7 @@ export class InstanceSession {
       clashModeOptions: undefined,
       currentClashMode: undefined,
       usbipServers: undefined,
+      vpnStatus: undefined,
       ...(!keepWarnings && { warnings: undefined }),
       ...(!keepWarningRead && { checkingWarnings: undefined }),
       capabilities: {
@@ -377,13 +398,13 @@ export class InstanceSession {
         notifications: this.pending.capabilities.notifications,
         ...(keepWarnings && { deprecatedWarnings: this.pending.capabilities.deprecatedWarnings }),
       },
-      loaded: { ...this.pending.loaded, connections: false, groups: false, outbounds: false, clashMode: false, usbip: false },
+      loaded: { ...this.pending.loaded, connections: false, groups: false, outbounds: false, clashMode: false, ...unloadedNativeStatus },
       streamErrors: {
         ...this.pending.streamErrors,
         groups: undefined,
         outbounds: undefined,
         clashMode: undefined,
-        usbip: undefined,
+        ...clearedNativeStatusErrors,
       },
     });
     if (this.detailChannel === "connections") this.startDetailStream();
@@ -411,14 +432,15 @@ export class InstanceSession {
     this.update({
       outbounds: undefined,
       usbipServers: undefined,
-      loaded: { ...this.pending.loaded, connections: false, outbounds: false, clashMode: false, notifications: false, usbip: false },
+      vpnStatus: undefined,
+      loaded: { ...this.pending.loaded, connections: false, outbounds: false, clashMode: false, notifications: false, ...unloadedNativeStatus },
       streamErrors: {
         ...this.pending.streamErrors,
         connections: undefined,
         outbounds: undefined,
         clashMode: undefined,
         notifications: undefined,
-        usbip: undefined,
+        ...clearedNativeStatusErrors,
       },
     }, true);
     this.startDetailStream();
@@ -428,6 +450,7 @@ export class InstanceSession {
     if (!parent || parent.aborted || !this.streamsStarted) return;
     const channel = this.detailChannel;
     if (channel === "usbip" && this.pending.phase === "error") return;
+    if (isVpnProtocol(channel) && !this.canReadVpnStatus()) return;
     const service = usesServiceDetailScope(channel) ? this.serviceReadsScope?.signal : parent;
     if (!service || service.aborted) return;
     // Keep a request slot free on native HTTP/1.1 origins with a six-socket limit.
@@ -806,7 +829,11 @@ export class InstanceSession {
     }
     if (this.warningsScope) this.retryWarningsAfterCurrent = true;
     if (!this.serviceReadsScope) void this.refreshServiceReads(parent);
-    else if (!this.warningsScope && this.warningReadNeedsRetry()) void this.refreshWarnings();
+    else {
+      if (isVpnProtocol(this.detailChannel) && this.detailScope?.signal.aborted !== false)
+        this.startDetailStream();
+      if (!this.warningsScope && this.warningReadNeedsRetry()) void this.refreshWarnings();
+    }
     this.update({});
   }
   private requireFreshTopology() {
@@ -821,13 +848,16 @@ export class InstanceSession {
       clashModeOptions: undefined,
       currentClashMode: undefined,
       usbipServers: undefined,
+      vpnStatus: undefined,
       capabilities: {
         ...this.pending.capabilities,
         clashMode: { status: "unknown" },
         usbip: { status: "unknown" },
+        openconnect: { status: "unknown" },
+        openvpn: { status: "unknown" },
       },
-      loaded: { ...this.pending.loaded, groups: false, outbounds: false, connections: false, clashMode: false, usbip: false },
-      streamErrors: { ...this.pending.streamErrors, usbip: undefined },
+      loaded: { ...this.pending.loaded, groups: false, outbounds: false, connections: false, clashMode: false, ...unloadedNativeStatus },
+      streamErrors: { ...this.pending.streamErrors, ...clearedNativeStatusErrors },
     });
     if (this.detailChannel === "connections") this.startDetailStream();
   }
@@ -1072,6 +1102,16 @@ export class InstanceSession {
               })),
             });
           }
+        } else if (isVpnProtocol(channel)) {
+          if (!this.canReadVpnStatus()) return;
+          const updates = channel === "openconnect"
+            ? this.client.subscribeOpenConnectStatus({}, options)
+            : this.client.subscribeOpenVPNStatus({}, options);
+          for await (const { endpoints } of updates) {
+            if (parentSignal.aborted || !this.canReadVpnStatus()) return;
+            received();
+            this.update({ vpnStatus: projectVpnStatus(endpoints, (value) => this.redactText(value)) });
+          }
         } else if (channel === "logs") {
           for await (const log of this.client.subscribeLog({}, options)) {
             if (parentSignal.aborted) return;
@@ -1179,9 +1219,10 @@ export class InstanceSession {
             ...(channel === "status" && !this.pending.streamErrors.status && {
               runtime: recordRuntimeEvent(this.pending.runtime, { time: Date.now(), kind: "status-lost" }),
             }),
-            ...((channel === "usbip" || channel === "service") && {
+            ...((isNativeStatusChannel(channel) || channel === "service") && {
               usbipServers: undefined,
-              loaded: { ...this.pending.loaded, usbip: false },
+              vpnStatus: undefined,
+              loaded: { ...this.pending.loaded, ...unloadedNativeStatus },
             }),
             streamErrors: { ...this.pending.streamErrors, [channel]: message },
             ...(channel === "status"

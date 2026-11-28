@@ -18,6 +18,7 @@ import {
   type DeprecatedWarning,
 } from "@/proto/daemon/started_service_pb";
 import type { RuntimeObservation } from "./runtime";
+import { isVpnProtocol, type VpnProtocol, type VpnStatus } from "./vpn-status";
 
 export const LOG_LIMIT = 2000;
 export const CONNECTION_LIMIT = 10000;
@@ -28,8 +29,13 @@ export interface LogEntry {
   message: string;
   text: string;
 }
-export type DetailChannel = "connections" | "outbounds" | "clashMode" | "notifications" | "usbip";
+export type DetailChannel = "connections" | "outbounds" | "clashMode" | "notifications" | "usbip" | VpnProtocol;
 export type Channel = "service" | "status" | "groups" | "logs" | DetailChannel;
+
+export function isNativeStatusChannel(channel: Channel): channel is "usbip" | VpnProtocol {
+  return channel === "usbip" || isVpnProtocol(channel);
+}
+
 export interface Snapshot {
   phase: "disconnected" | "connecting" | "connected" | "reconnecting" | "error";
   error?: string;
@@ -48,6 +54,7 @@ export interface Snapshot {
   currentClashMode?: string;
   changingClashMode?: boolean;
   usbipServers?: { tag: string; deviceCount: number; attachedCount: number }[];
+  vpnStatus?: VpnStatus;
   capabilities: Capabilities;
   warnings?: DeprecatedWarning[];
   checkingWarnings?: boolean;
