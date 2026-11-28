@@ -310,6 +310,7 @@ const zh: Record<string, string> = {
   "Previous page": "上一页",
   "Next page": "下一页",
   "Page {page} / {pages}": "第 {page} / {pages} 页",
+  "Member pages for {name}": "{name} 的成员分页",
   "Close all active connections?": "关闭全部活动连接？",
   "Close matching active connections?": "关闭匹配的活动连接？",
   "This interrupts traffic on {count} active connections matching the current filters across all pages. Only this fixed set will be requested.":

@@ -1,4 +1,4 @@
-import { useState, useDeferredValue, useId } from "react";
+import { useCallback, useDeferredValue, useId, useRef, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -37,6 +37,8 @@ import { latency, latencyTestWaves, latencyTone } from "./latency";
 import { OutboundDetails } from "./outbound-details";
 import { OutboundInventory } from "./inventory";
 
+const memberPageSize = 60;
+
 function ProxyGroup({
   group,
   groupsByTag,
@@ -69,7 +71,19 @@ function ProxyGroup({
       session.testLatency(tag, latencyTestWaves(groupsByTag, tag)[0].windows),
     );
   const [target, setTarget] = useState("");
+  const [pagination, setPagination] = useState(() => ({ search, type, page: 0 }));
   const currentDescription = useId();
+  const groupTrigger = useRef<HTMLButtonElement>(null);
+  const paginationRef = useCallback((element: HTMLDivElement | null) => {
+    if (!element) return;
+    return () => {
+      if (!element.contains(document.activeElement)) return;
+      requestAnimationFrame(() => {
+        if (document.activeElement === document.body)
+          groupTrigger.current?.focus({ preventScroll: true });
+      });
+    };
+  }, []);
   const items = expanded
     ? group.items.filter(
         (item) =>
@@ -77,6 +91,15 @@ function ProxyGroup({
           (type === "all" || item.type === type),
       )
     : undefined;
+  const totalPages = Math.ceil((items?.length ?? 0) / memberPageSize);
+  const filtersChanged = pagination.search !== search || pagination.type !== type;
+  const requestedPage = filtersChanged ? 0 : pagination.page;
+  // A collapsed group has no filtered results to clamp against.
+  const page = items ? Math.min(requestedPage, Math.max(0, totalPages - 1)) : requestedPage;
+  if (filtersChanged || page !== pagination.page) setPagination({ search, type, page });
+  const visibleItems = items && (totalPages > 1
+    ? items.slice(page * memberPageSize, (page + 1) * memberPageSize)
+    : items);
   const current = group.items.find((item) => item.tag === group.selected);
   const currentLatency =
     current && latencyTone(current) !== "unknown" ? latency(current) : null;
@@ -89,6 +112,7 @@ function ProxyGroup({
           <CardTitle className="min-w-0 flex-1">
             <CollapsibleTrigger asChild>
               <Button
+                ref={groupTrigger}
                 variant="ghost"
                 className="group-title-trigger"
                 aria-label={t(expanded ? "Collapse {name}" : "Expand {name}", {
@@ -154,9 +178,45 @@ function ProxyGroup({
           </CardContent>
         )}
         <CollapsibleContent className="proxy-group-body">
-          {items && <CardContent>
+          {visibleItems && <CardContent>
+            {totalPages > 1 && (
+              <div
+                ref={paginationRef}
+                className="button-row mb-3"
+                role="group"
+                aria-label={t("Member pages for {name}", { name: group.tag })}
+              >
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="aria-disabled:opacity-50"
+                  aria-disabled={page === 0}
+                  onClick={() => {
+                    if (page > 0) setPagination({ search, type, page: page - 1 });
+                  }}
+                >
+                  {t("Previous page")}
+                </Button>
+                <span className="text-sm text-muted-foreground" role="status">
+                  {t("Page {page} / {pages}", { page: page + 1, pages: totalPages })}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="aria-disabled:opacity-50"
+                  aria-disabled={page + 1 >= totalPages}
+                  onClick={() => {
+                    if (page + 1 < totalPages) setPagination({ search, type, page: page + 1 });
+                  }}
+                >
+                  {t("Next page")}
+                </Button>
+              </div>
+            )}
             <div className={cards ? "proxy-items proxy-cards" : "proxy-items"}>
-              {items.map((item) => {
+              {visibleItems.map((item) => {
                 const active = item.tag === group.selected;
                 const confirming = selection.pending && target === item.tag;
                 const tone = latencyTone(item);
@@ -244,7 +304,7 @@ function ProxyGroup({
                 );
               })}
             </div>
-            {!items.length && (
+            {!visibleItems.length && (
               <p className="quiet-empty">
                 {t("No outbounds match your filters.")}
               </p>
