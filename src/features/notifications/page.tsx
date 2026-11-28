@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Bell } from "lucide-react";
 import { useWorkspace } from "@/app/context";
 import { localNotifications } from "@/api/notifications";
@@ -16,6 +16,21 @@ export default function Notifications({ desktop }: { desktop: ReturnType<typeof 
   const [source, setSource] = useState("all");
   const [level, setLevel] = useState("all");
   const historyHeading = useRef<HTMLHeadingElement>(null);
+  const readActionRef = useCallback((button: HTMLButtonElement | null) => {
+    if (!button) return;
+    const scope = session.signal;
+    const hash = location.hash;
+    return () => {
+      if (document.activeElement !== button) return;
+      const dismiss = button.closest("li")?.querySelector<HTMLButtonElement>("[data-notification-dismiss]");
+      // Wait for removal to clear focus before checking that no other control received it.
+      requestAnimationFrame(() => {
+        if (!button.isConnected && dismiss?.isConnected && scope && !scope.aborted &&
+          session.signal === scope && location.hash === hash && document.activeElement === document.body)
+          dismiss.focus();
+      });
+    };
+  }, [session]);
   const history = snapshot.notifications;
   const hasUnread = history.some((entry) => !entry.read);
   const format = useMemo(() => new Intl.DateTimeFormat(language, { dateStyle: "short", timeStyle: "short" }), [language]);
@@ -108,7 +123,12 @@ export default function Notifications({ desktop }: { desktop: ReturnType<typeof 
                       </Button>
                     )}
                     {!canceled && (
-                      <Button variant="ghost" size="sm" onClick={() => session.markNotificationRead(!entry.read, entry.id)}>
+                      <Button
+                        ref={readActionRef}
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => session.markNotificationRead(!entry.read, entry.id)}
+                      >
                         {t(entry.read ? "Mark as unread" : "Mark as read")}
                       </Button>
                     )}
