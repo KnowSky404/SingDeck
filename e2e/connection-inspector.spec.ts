@@ -112,6 +112,86 @@ test("connection details show the reported route and retained closed state", asy
   await expect(fact("Download in reported interval")).toHaveText("Unavailable");
 });
 
+test("restores focus when a live connection moves the focused row off-page", async ({ page, isMobile }) => {
+  if (isMobile) await page.setViewportSize({ width: 320, height: 740 });
+  const mockPath = "/src/mocks/client.ts";
+  const original = "row-focus-original";
+  const newRowEvent = "test-new-connection";
+  await page.route(
+    (url) => url.pathname === mockPath && !url.searchParams.has(original),
+    (route) => route.fulfill({
+      contentType: "application/javascript",
+      body: `
+        import { createMockClient as original, MockControl } from "${mockPath}?${original}";
+        export { MockControl };
+        export function createMockClient(control) {
+          const client = original(control);
+          const pending = [];
+          window.addEventListener("${newRowEvent}", ({ detail }) => pending.push(detail));
+          return {
+            ...client,
+            async *subscribeConnections(request, options) {
+              let template;
+              for await (const frame of client.subscribeConnections(request, options)) {
+                if (frame.reset) template = frame.events.find(({ connection }) => connection?.closedAt === 0n);
+                const row = (id, offset) => ({
+                  ...template,
+                  id,
+                  connection: { ...template.connection, id, createdAt: template.connection.createdAt + BigInt(offset) },
+                });
+                if (frame.reset) {
+                  yield { ...frame, events: Array.from({ length: 51 }, (_, i) => row("focus-" + (i + 1), -i)) };
+                } else if (pending.length) {
+                  yield { ...frame, events: pending.splice(0).map(number => row("new-" + number, number)) };
+                }
+              }
+            },
+          };
+        }
+      `,
+    }),
+  );
+  await page.goto("/");
+  await page.getByRole("button", { name: "Explore demo", exact: true }).click();
+  await page.getByRole("link", { name: "Connections", exact: true }).first().click();
+  const rows = page.locator(".connection-table tbody tr");
+  const details = (id: string) => page.locator(`.connection-table button[aria-label="Details for ${id}"]`);
+  const search = page.getByRole("textbox", { name: "Search connections", exact: true });
+  const nextPage = page.getByRole("button", { name: "Next page", exact: true });
+  const publish = async (number: number) => {
+    await page.evaluate(({ event, detail }) => window.dispatchEvent(new CustomEvent(event, { detail })), {
+      event: newRowEvent, detail: number,
+    });
+    await expect(details(`new-${number}`)).toHaveCount(1);
+    await expect(rows).toHaveCount(50);
+    await expect(page.getByText("Page 1 / 2", { exact: true })).toBeVisible();
+  };
+
+  await expect(rows).toHaveCount(50);
+  await page.getByRole("button", { name: "Close focus-50", exact: true }).focus();
+  await page.keyboard.press("Shift+Tab");
+  await expect(details("focus-50")).toBeFocused();
+  await publish(1);
+  await expect(details("focus-50")).toHaveCount(0);
+  await expect(search).toBeFocused();
+  await expect(search).toBeInViewport();
+
+  await nextPage.focus();
+  await publish(2);
+  await expect(details("focus-49")).toHaveCount(0);
+  await expect(nextPage).toBeFocused();
+
+  await details("focus-48").press("Enter");
+  const dialog = page.getByRole("dialog", { name: "Connection details", exact: true });
+  const heading = dialog.getByRole("heading", { name: "Connection details", exact: true });
+  await expect(heading).toBeFocused();
+  await publish(3);
+  await expect(details("focus-48")).toHaveCount(0);
+  await expect(heading).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(search).toBeFocused();
+});
+
 test("connection filters compose with search and reset to all active rows", async ({
   page,
   isMobile,
