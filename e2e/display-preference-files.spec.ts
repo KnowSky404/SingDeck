@@ -349,6 +349,9 @@ for (const input of ["keyboard", "pointer"] as const) {
     if (isMobile) await page.setViewportSize({ width: 320, height: 210 });
     else if (input === "keyboard") await page.setViewportSize({ width: 1280, height: 480 });
     await page.goto("/");
+    if (isMobile) {
+      await page.addStyleTag({ content: '[data-slot="dialog-content"] button { font-size: 24px !important; }' });
+    }
     await demo(page, "en");
     await activate(page.getByRole("button", { name: "Customize Overview", exact: true }), isMobile);
     const dialog = page.getByRole("dialog", { name: "Customize Overview", exact: true });

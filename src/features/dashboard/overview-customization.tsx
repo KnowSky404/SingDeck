@@ -159,15 +159,21 @@ export function OverviewCustomization({ layout, onChange }: {
             onMove={(panels, label, position, button) => move({ ...layout, panels }, label, position, panels.length, button)}
           />
         </div>
-        <div className="flex shrink-0 justify-end gap-2">
+        <div className="grid shrink-0 grid-cols-2 gap-2">
           {showStaleNotice && (
-            <Button ref={continueButton} type="button" className="mr-auto" onClick={() => setAnnouncement("")}>
+            <Button
+              ref={continueButton}
+              type="button"
+              className="h-auto min-h-8 max-w-full justify-self-start whitespace-normal wrap-anywhere"
+              onClick={() => setAnnouncement("")}
+            >
               {t("Continue editing")}
             </Button>
           )}
           <Button
             type="button"
             variant="outline"
+            className="col-start-2 h-auto min-h-8 max-w-full justify-self-end whitespace-normal wrap-anywhere"
             disabled={showStaleNotice}
             onClick={(event) => change(defaultOverviewLayout, t("Default layout restored."), event.currentTarget)}
           >
