@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Bell } from "lucide-react";
 import { useWorkspace } from "@/app/context";
 import { localNotifications } from "@/api/notifications";
@@ -15,7 +15,9 @@ export default function Notifications({ desktop }: { desktop: ReturnType<typeof 
   const { snapshot, session, t, language } = useWorkspace();
   const [source, setSource] = useState("all");
   const [level, setLevel] = useState("all");
+  const historyHeading = useRef<HTMLHeadingElement>(null);
   const history = snapshot.notifications;
+  const hasUnread = history.some((entry) => !entry.read);
   const format = useMemo(() => new Intl.DateTimeFormat(language, { dateStyle: "short", timeStyle: "short" }), [language]);
   const entries = history.filter((entry) => (source === "all" || entry.source === source) &&
     (level === "all" || (entry.source === "local" ? localNotifications[entry.kind].level : "info") === level));
@@ -23,10 +25,24 @@ export default function Notifications({ desktop }: { desktop: ReturnType<typeof 
     ? "Native notifications received during this visit."
     : "Waiting for a native notification…");
 
+  function dismiss(id: string, button: HTMLButtonElement) {
+    if (document.activeElement === button) {
+      const row = button.closest("li");
+      const neighbor = row?.nextElementSibling ?? row?.previousElementSibling;
+      const nextFocus = neighbor?.querySelector<HTMLButtonElement>("[data-notification-dismiss]") ??
+        historyHeading.current;
+      nextFocus?.focus();
+    }
+    session.dismissNotification(id);
+  }
+
   return (
     <>
       <PageHeading title="Notifications" />
-      <Panel title="Notification history" description="Native capture runs while this page is open. The core has no history replay.">
+      <Panel
+        title={<h2 ref={historyHeading} tabIndex={-1} className="w-fit rounded-sm">{t("Notification history")}</h2>}
+        description="Native capture runs while this page is open. The core has no history replay."
+      >
         <p role="status" className="footnote mb-3">{t(nativeStatus)}</p>
         <div className="button-row mb-3">
           <Choice
@@ -41,7 +57,14 @@ export default function Notifications({ desktop }: { desktop: ReturnType<typeof 
             onChange={setLevel}
             options={Object.entries(levels).map(([value, label]) => ({ value, label: t(label) }))}
           />
-          <Button variant="outline" disabled={history.every((entry) => entry.read)} onClick={() => session.markNotificationRead(true)}>
+          <Button
+            variant="outline"
+            aria-disabled={!hasUnread}
+            className="aria-disabled:opacity-50"
+            onClick={() => {
+              if (hasUnread) session.markNotificationRead(true);
+            }}
+          >
             {t("Mark all as read")}
           </Button>
         </div>
@@ -89,7 +112,14 @@ export default function Notifications({ desktop }: { desktop: ReturnType<typeof 
                         {t(entry.read ? "Mark as unread" : "Mark as read")}
                       </Button>
                     )}
-                    <Button variant="ghost" size="sm" onClick={() => session.dismissNotification(entry.id)}>{t("Dismiss")}</Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      data-notification-dismiss=""
+                      onClick={(event) => dismiss(entry.id, event.currentTarget)}
+                    >
+                      {t("Dismiss")}
+                    </Button>
                   </div>
                 </li>
               );
